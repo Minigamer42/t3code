@@ -171,6 +171,8 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  isLocalDispatchRelevantToThread,
+  resolveLocalDispatchRouteChangeAction,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -363,6 +365,39 @@ interface TerminalLaunchContext {
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
 
+const targetedLocalDispatchByThreadId = new Map<string, LocalDispatchSnapshot>();
+
+function readTargetedLocalDispatch(threadId: ThreadId | null): LocalDispatchSnapshot | null {
+  if (threadId === null) {
+    return null;
+  }
+  return targetedLocalDispatchByThreadId.get(threadId) ?? null;
+}
+
+function rememberTargetedLocalDispatch(localDispatch: LocalDispatchSnapshot): void {
+  if (localDispatch.targetThreadId === null) {
+    return;
+  }
+  targetedLocalDispatchByThreadId.set(localDispatch.targetThreadId, localDispatch);
+}
+
+function forgetTargetedLocalDispatch(localDispatch: LocalDispatchSnapshot | null): void {
+  if (localDispatch?.targetThreadId === null || localDispatch === null) {
+    return;
+  }
+  const current = targetedLocalDispatchByThreadId.get(localDispatch.targetThreadId);
+  if (current?.startedAt === localDispatch.startedAt) {
+    targetedLocalDispatchByThreadId.delete(localDispatch.targetThreadId);
+  }
+}
+
+export function __resetTargetedLocalDispatchForTests(): void {
+  if (import.meta.env.PROD) {
+    return;
+  }
+  targetedLocalDispatchByThreadId.clear();
+}
+
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
   activeLatestTurn: Thread["latestTurn"] | null;
@@ -371,31 +406,64 @@ function useLocalDispatchState(input: {
   activePendingUserInput: ApprovalRequestId | null;
   threadError: string | null | undefined;
 }) {
-  const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
+  const activeThreadId = input.activeThread?.id ?? null;
+  const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(() =>
+    readTargetedLocalDispatch(activeThreadId),
+  );
+  const localDispatchRef = useRef(localDispatch);
+  useEffect(() => {
+    localDispatchRef.current = localDispatch;
+  }, [localDispatch]);
 
   const beginLocalDispatch = useCallback(
-    (options?: { preparingWorktree?: boolean }) => {
+    (options?: { preparingWorktree?: boolean; targetThreadId?: ThreadId | null }) => {
       const preparingWorktree = Boolean(options?.preparingWorktree);
+      const targetThreadId = options?.targetThreadId ?? null;
       setLocalDispatch((current) => {
         if (current) {
-          return current.preparingWorktree === preparingWorktree
-            ? current
-            : { ...current, preparingWorktree };
+          if (
+            current.preparingWorktree === preparingWorktree &&
+            current.targetThreadId === targetThreadId
+          ) {
+            return current;
+          }
+          forgetTargetedLocalDispatch(current);
+          const next = { ...current, preparingWorktree, targetThreadId };
+          rememberTargetedLocalDispatch(next);
+          return next;
         }
-        return createLocalDispatchSnapshot(input.activeThread, options);
+        const next = createLocalDispatchSnapshot(input.activeThread, options);
+        rememberTargetedLocalDispatch(next);
+        return next;
       });
     },
     [input.activeThread],
   );
 
   const resetLocalDispatch = useCallback(() => {
+    forgetTargetedLocalDispatch(localDispatchRef.current);
     setLocalDispatch(null);
   }, []);
+
+  const clearLocalDispatchView = useCallback(() => {
+    setLocalDispatch(null);
+  }, []);
+
+  useEffect(() => {
+    if (localDispatch !== null) {
+      return;
+    }
+    const carriedDispatch = readTargetedLocalDispatch(activeThreadId);
+    if (carriedDispatch !== null) {
+      setLocalDispatch(carriedDispatch);
+    }
+  }, [activeThreadId, localDispatch]);
 
   const serverAcknowledgedLocalDispatch = useMemo(
     () =>
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId: activeThreadId,
         phase: input.phase,
         latestTurn: input.activeLatestTurn,
         session: input.activeThread?.session ?? null,
@@ -408,6 +476,7 @@ function useLocalDispatchState(input: {
       input.activePendingApproval,
       input.activePendingUserInput,
       input.activeThread?.session,
+      activeThreadId,
       input.phase,
       input.threadError,
       localDispatch,
@@ -421,12 +490,22 @@ function useLocalDispatchState(input: {
     resetLocalDispatch();
   }, [resetLocalDispatch, serverAcknowledgedLocalDispatch]);
 
+  const localDispatchVisibleOnActiveThread =
+    localDispatch !== null &&
+    isLocalDispatchRelevantToThread({
+      localDispatchTargetThreadId: localDispatch.targetThreadId,
+      activeThreadId,
+    });
+  const visibleLocalDispatch = localDispatchVisibleOnActiveThread ? localDispatch : null;
+
   return {
     beginLocalDispatch,
+    clearLocalDispatchView,
     resetLocalDispatch,
-    localDispatchStartedAt: localDispatch?.startedAt ?? null,
-    isPreparingWorktree: localDispatch?.preparingWorktree ?? false,
-    isSendBusy: localDispatch !== null && !serverAcknowledgedLocalDispatch,
+    localDispatchTargetThreadId: localDispatch?.targetThreadId ?? null,
+    localDispatchStartedAt: visibleLocalDispatch?.startedAt ?? null,
+    isPreparingWorktree: visibleLocalDispatch?.preparingWorktree ?? false,
+    isSendBusy: visibleLocalDispatch !== null && !serverAcknowledgedLocalDispatch,
   };
 }
 
@@ -1549,7 +1628,9 @@ export default function ChatView(props: ChatViewProps) {
   const activePendingApproval = pendingApprovals[0] ?? null;
   const {
     beginLocalDispatch,
+    clearLocalDispatchView,
     resetLocalDispatch,
+    localDispatchTargetThreadId,
     localDispatchStartedAt,
     isPreparingWorktree,
     isSendBusy,
@@ -1561,7 +1642,33 @@ export default function ChatView(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
+  const localDispatchTargetThreadIdRef = useRef(localDispatchTargetThreadId);
+  useEffect(() => {
+    localDispatchTargetThreadIdRef.current = localDispatchTargetThreadId;
+  }, [localDispatchTargetThreadId]);
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const workingFallbackLabel = isRevertingCheckpoint
+    ? "Reverting checkpoint"
+    : isPreparingWorktree
+      ? "Preparing worktree"
+      : isConnecting
+        ? "Connecting"
+        : isSendBusy
+          ? "Sending"
+          : "Thinking";
+  const workingFallbackPhaseRef = useRef<{ label: string | null; startedAt: string | null }>({
+    label: null,
+    startedAt: null,
+  });
+  if (!isWorking) {
+    workingFallbackPhaseRef.current = { label: null, startedAt: null };
+  } else if (workingFallbackPhaseRef.current.label !== workingFallbackLabel) {
+    workingFallbackPhaseRef.current = {
+      label: workingFallbackLabel,
+      startedAt: new Date().toISOString(),
+    };
+  }
+  const workingFallbackStartedAt = workingFallbackPhaseRef.current.startedAt;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2572,9 +2679,17 @@ export default function ChatView(props: ChatViewProps) {
       }
       return [];
     });
-    resetLocalDispatch();
+    const localDispatchAction = resolveLocalDispatchRouteChangeAction({
+      localDispatchTargetThreadId: localDispatchTargetThreadIdRef.current,
+      routeThreadId: threadId,
+    });
+    if (localDispatchAction === "reset") {
+      resetLocalDispatch();
+    } else if (localDispatchAction === "clear-view") {
+      clearLocalDispatchView();
+    }
     setExpandedImage(null);
-  }, [draftId, resetLocalDispatch, threadId]);
+  }, [clearLocalDispatchView, draftId, resetLocalDispatch, threadId]);
 
   const closeExpandedImage = useCallback(() => {
     setExpandedImage(null);
@@ -2918,6 +3033,7 @@ export default function ChatView(props: ChatViewProps) {
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
         ? activeThreadBranch
         : null;
+    const localDispatchTargetThreadId = isFirstMessage ? threadIdForSend : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
@@ -2929,7 +3045,10 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+    beginLocalDispatch({
+      preparingWorktree: Boolean(baseBranchForWorktree),
+      targetThreadId: localDispatchTargetThreadId,
+    });
 
     const composerImagesSnapshot = [...composerImages];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
@@ -3077,7 +3196,7 @@ export default function ChatView(props: ChatViewProps) {
                 : {}),
             }
           : undefined;
-      beginLocalDispatch({ preparingWorktree: false });
+      beginLocalDispatch({ preparingWorktree: false, targetThreadId: localDispatchTargetThreadId });
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
@@ -3497,14 +3616,16 @@ export default function ChatView(props: ChatViewProps) {
     const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection;
 
     sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: false });
-    const finish = () => {
+    beginLocalDispatch({ preparingWorktree: false, targetThreadId: nextThreadId });
+    const finish = (options?: { resetDispatch?: boolean }) => {
       sendInFlightRef.current = false;
-      resetLocalDispatch();
+      if (options?.resetDispatch ?? true) {
+        resetLocalDispatch();
+      }
     };
 
-    await api.orchestration
-      .dispatchCommand({
+    try {
+      await api.orchestration.dispatchCommand({
         type: "thread.create",
         commandId: newCommandId(),
         threadId: nextThreadId,
@@ -3516,63 +3637,56 @@ export default function ChatView(props: ChatViewProps) {
         branch: activeThreadBranch,
         worktreePath: activeThread.worktreePath,
         createdAt,
-      })
-      .then(() => {
-        return api.orchestration.dispatchCommand({
-          type: "thread.turn.start",
+      });
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.start",
+        commandId: newCommandId(),
+        threadId: nextThreadId,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text: outgoingImplementationPrompt,
+          attachments: [],
+        },
+        modelSelection: ctxSelectedModelSelection,
+        titleSeed: nextThreadTitle,
+        runtimeMode,
+        interactionMode: "default",
+        sourceProposedPlan: {
+          threadId: activeThread.id,
+          planId: activeProposedPlan.id,
+        },
+        createdAt,
+      });
+      await waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId));
+      // Signal that the plan sidebar should open on the new thread when enabled.
+      planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar;
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: activeThread.environmentId,
+          threadId: nextThreadId,
+        },
+      });
+      finish({ resetDispatch: false });
+    } catch (err: unknown) {
+      await api.orchestration
+        .dispatchCommand({
+          type: "thread.delete",
           commandId: newCommandId(),
           threadId: nextThreadId,
-          message: {
-            messageId: newMessageId(),
-            role: "user",
-            text: outgoingImplementationPrompt,
-            attachments: [],
-          },
-          modelSelection: ctxSelectedModelSelection,
-          titleSeed: nextThreadTitle,
-          runtimeMode,
-          interactionMode: "default",
-          sourceProposedPlan: {
-            threadId: activeThread.id,
-            planId: activeProposedPlan.id,
-          },
-          createdAt,
-        });
-      })
-      .then(() => {
-        return waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId));
-      })
-      .then(() => {
-        // Signal that the plan sidebar should open on the new thread when enabled.
-        planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar;
-        return navigate({
-          to: "/$environmentId/$threadId",
-          params: {
-            environmentId: activeThread.environmentId,
-            threadId: nextThreadId,
-          },
-        });
-      })
-      .catch(async (err: unknown) => {
-        await api.orchestration
-          .dispatchCommand({
-            type: "thread.delete",
-            commandId: newCommandId(),
-            threadId: nextThreadId,
-          })
-          .catch(() => undefined);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not start implementation thread",
-            description:
-              err instanceof Error
-                ? err.message
-                : "An error occurred while creating the new thread.",
-          }),
-        );
-      })
-      .then(finish, finish);
+        })
+        .catch(() => undefined);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not start implementation thread",
+          description:
+            err instanceof Error ? err.message : "An error occurred while creating the new thread.",
+        }),
+      );
+      finish();
+    }
   }, [
     activeProject,
     activeProposedPlan,
@@ -3783,6 +3897,8 @@ export default function ChatView(props: ChatViewProps) {
               activeTurnInProgress={isWorking || !latestTurnSettled}
               activeTurnId={activeLatestTurn?.turnId ?? null}
               activeTurnStartedAt={activeWorkStartedAt}
+              workingFallbackLabel={workingFallbackLabel}
+              workingFallbackStartedAt={workingFallbackStartedAt}
               listRef={legendListRef}
               timelineEntries={timelineEntries}
               completionDividerBeforeEntryId={completionDividerBeforeEntryId}

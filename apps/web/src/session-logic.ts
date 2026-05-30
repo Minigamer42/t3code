@@ -50,6 +50,8 @@ export const PROVIDER_OPTIONS: Array<{
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
+  updatedAt?: string;
+  turnId?: TurnId | null;
   label: string;
   detail?: string;
   command?: string;
@@ -544,6 +546,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
+    updatedAt: activity.createdAt,
+    turnId: activity.turnId,
     label: taskLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
@@ -665,22 +669,14 @@ function shouldCollapseToolLifecycleEntries(
   if (previous.activityKind === "tool.completed") {
     return false;
   }
-  if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
-    return true;
-  }
-  if (previous.itemType !== next.itemType) {
-    return false;
-  }
-  if (
-    normalizeToolLifecycleLabelForCollapse(previous.toolTitle ?? previous.label) !==
-    normalizeToolLifecycleLabelForCollapse(next.toolTitle ?? next.label)
-  ) {
-    return false;
-  }
-  if (previous.toolCallId !== undefined) {
-    return next.toolCallId === undefined;
-  }
-  return next.itemId === undefined && next.toolCallId === undefined;
+  return haveSameToolLifecycleCollapseKey(previous, next);
+}
+
+function haveSameToolLifecycleCollapseKey(
+  previous: DerivedWorkLogEntry,
+  next: DerivedWorkLogEntry,
+): boolean {
+  return previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey;
 }
 
 function mergeDerivedWorkLogEntries(
@@ -697,11 +693,13 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
+  const updatedAt = next.updatedAt ?? previous.updatedAt;
   return {
     ...previous,
     ...next,
     id: previous.id,
     createdAt: previous.createdAt,
+    ...(updatedAt ? { updatedAt } : {}),
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),

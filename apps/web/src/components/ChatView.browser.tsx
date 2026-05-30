@@ -60,6 +60,7 @@ import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store"
 import { terminalSessionManager } from "../terminalSessionState";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useUiStateStore } from "../uiStateStore";
+import { __resetTargetedLocalDispatchForTests } from "./ChatView";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 
@@ -1731,6 +1732,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       },
     });
     await __resetLocalApiForTests();
+    __resetTargetedLocalDispatchForTests();
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";

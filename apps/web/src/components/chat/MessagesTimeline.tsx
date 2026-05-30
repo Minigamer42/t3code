@@ -119,6 +119,8 @@ interface MessagesTimelineProps {
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
+  workingFallbackLabel?: string | null;
+  workingFallbackStartedAt?: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
@@ -148,6 +150,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnInProgress,
   activeTurnId,
   activeTurnStartedAt,
+  workingFallbackLabel,
+  workingFallbackStartedAt,
   listRef,
   timelineEntries,
   completionDividerBeforeEntryId,
@@ -177,6 +181,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnInProgress,
         activeTurnId: activeTurnId ?? null,
         activeTurnStartedAt,
+        workingFallbackLabel: workingFallbackLabel ?? null,
+        workingFallbackStartedAt: workingFallbackStartedAt ?? null,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
       }),
@@ -188,6 +194,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeTurnInProgress,
       activeTurnId,
       activeTurnStartedAt,
+      workingFallbackLabel,
+      workingFallbackStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
     ],
@@ -526,12 +534,16 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
           <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
         </span>
         <span>
-          {row.createdAt ? (
+          {row.phaseStartedAt || row.totalStartedAt ? (
             <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
+              <WorkingTimer
+                phaseLabel={row.phaseLabel}
+                phaseStartedAt={row.phaseStartedAt}
+                totalStartedAt={row.totalStartedAt}
+              />
             </>
           ) : (
-            "Working..."
+            `${row.phaseLabel}...`
           )}
         </span>
       </div>
@@ -544,21 +556,33 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
-/** Live "Working for Xs" label. */
-function WorkingTimer({ createdAt }: { createdAt: string }) {
+/** Live current-phase + total elapsed label. */
+function WorkingTimer({
+  phaseLabel,
+  phaseStartedAt,
+  totalStartedAt,
+}: {
+  phaseLabel: string;
+  phaseStartedAt: string | null;
+  totalStartedAt: string | null;
+}) {
   const textRef = useRef<HTMLSpanElement>(null);
-  const initialText = formatWorkingTimerNow(createdAt);
+  const initialText = formatWorkingStatusNow({ phaseLabel, phaseStartedAt, totalStartedAt });
 
   useEffect(() => {
     const updateText = () => {
       if (textRef.current) {
-        textRef.current.textContent = formatWorkingTimerNow(createdAt);
+        textRef.current.textContent = formatWorkingStatusNow({
+          phaseLabel,
+          phaseStartedAt,
+          totalStartedAt,
+        });
       }
     };
     updateText();
     const id = setInterval(updateText, 1000);
     return () => clearInterval(id);
-  }, [createdAt]);
+  }, [phaseLabel, phaseStartedAt, totalStartedAt]);
 
   return <span ref={textRef}>{initialText}</span>;
 }
@@ -1054,6 +1078,25 @@ function formatWorkingTimerNow(startIso: string): string {
   return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
 }
 
+function formatWorkingStatusNow(input: {
+  phaseLabel: string;
+  phaseStartedAt: string | null;
+  totalStartedAt: string | null;
+}): string {
+  const phaseDuration = input.phaseStartedAt ? formatWorkingTimerNow(input.phaseStartedAt) : null;
+  const totalDuration = input.totalStartedAt ? formatWorkingTimerNow(input.totalStartedAt) : null;
+  if (phaseDuration && totalDuration) {
+    return `${input.phaseLabel} for ${phaseDuration} • total ${totalDuration}`;
+  }
+  if (phaseDuration) {
+    return `${input.phaseLabel} for ${phaseDuration}`;
+  }
+  if (totalDuration) {
+    return `${input.phaseLabel} • total ${totalDuration}`;
+  }
+  return `${input.phaseLabel}...`;
+}
+
 function formatLiveMessageMetaNow(
   createdAt: string,
   durationStart: string | null | undefined,
@@ -1120,6 +1163,35 @@ function workEntryPreview(
   return workEntry.changedFiles!.length === 1
     ? displayPath
     : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
+}
+
+function normalizeChangedFilePreviewLabel(value: string): string {
+  return value.trim().replaceAll("\\", "/").toLowerCase();
+}
+
+function isDuplicateChangedFilesPreview(
+  preview: string | null,
+  changedFiles: readonly string[] | undefined,
+  workspaceRoot: string | undefined,
+): boolean {
+  if (!preview || !changedFiles?.length) return false;
+  const normalizedPreview = normalizeChangedFilePreviewLabel(preview);
+  const duplicateLabels = new Set<string>();
+  for (const filePath of changedFiles) {
+    duplicateLabels.add(normalizeChangedFilePreviewLabel(filePath));
+    duplicateLabels.add(
+      normalizeChangedFilePreviewLabel(formatWorkspaceRelativePath(filePath, workspaceRoot)),
+    );
+  }
+  const [firstPath] = changedFiles;
+  if (firstPath && changedFiles.length > 1) {
+    duplicateLabels.add(
+      normalizeChangedFilePreviewLabel(
+        `${formatWorkspaceRelativePath(firstPath, workspaceRoot)} +${changedFiles.length - 1} more`,
+      ),
+    );
+  }
+  return duplicateLabels.has(normalizedPreview);
 }
 
 function workEntryRawCommand(
@@ -1307,7 +1379,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const rawPreview = workEntryPreview(workEntry, workspaceRoot);
   const preview =
-    hasChangedFiles && !workEntry.command && !workEntry.detail
+    hasChangedFiles &&
+    !workEntry.command &&
+    isDuplicateChangedFilesPreview(rawPreview, workEntry.changedFiles, workspaceRoot)
       ? null
       : rawPreview &&
           normalizeCompactToolLabel(rawPreview).toLowerCase() ===

@@ -340,6 +340,37 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("Changed files -");
   });
 
+  it("keeps changed file detail when it is not the displayed file path", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "File change",
+              tone: "tool",
+              itemType: "file_change",
+              detail: "Updated exports and route wiring",
+              changedFiles: ["D:/Programme/t3code/apps/web/src/session-logic.ts"],
+              toolStatus: "completed",
+            },
+          },
+        ]}
+        workspaceRoot="D:/Programme/t3code"
+      />,
+    );
+
+    expect(markup).toContain("Changed files -");
+    expect(markup).toContain("Updated exports and route wiring");
+    expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
+  });
+
   it("renders review comment contexts as structured cards instead of raw tags", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

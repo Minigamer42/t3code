@@ -1329,7 +1329,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBeUndefined();
   });
 
-  it("collapses legacy completed tool rows that are missing tool metadata", () => {
+  it("does not collapse legacy completed tool rows that are missing lifecycle identity", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "legacy-read-update",
@@ -1361,14 +1361,60 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities, undefined);
-    expect(entries).toHaveLength(1);
+    expect(entries).toHaveLength(2);
     expect(entries[0]).toMatchObject({
       id: "legacy-read-update",
+      toolTitle: "Read File",
+      itemType: "dynamic_tool_call",
+      toolStatus: "inProgress",
+    });
+    expect(entries[1]).toMatchObject({
+      id: "legacy-read-complete",
       toolTitle: "Read File",
       itemType: "dynamic_tool_call",
       toolStatus: "completed",
     });
     expect(entries[0]?.detail).toBeUndefined();
+  });
+
+  it("does not collapse adjacent id-less tool calls with different derived keys", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "first-command-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Running command",
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          detail: "bun lint",
+        },
+      }),
+      makeActivity({
+        id: "second-command-start",
+        createdAt: "2026-02-23T00:00:11.000Z",
+        kind: "tool.started",
+        summary: "Running command",
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          detail: "bun typecheck",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      id: "first-command-start",
+      createdAt: "2026-02-23T00:00:01.000Z",
+      detail: "bun lint",
+    });
+    expect(entries[1]).toMatchObject({
+      id: "second-command-start",
+      createdAt: "2026-02-23T00:00:11.000Z",
+      detail: "bun typecheck",
+    });
   });
 
   it("collapses repeated lifecycle updates for the same tool call into one entry", () => {
@@ -1382,6 +1428,9 @@ describe("deriveWorkLogEntries", () => {
           itemType: "dynamic_tool_call",
           title: "Tool call",
           detail: 'Read: {"file_path":"/tmp/app.ts"}',
+          data: {
+            toolCallId: "tool-read-1",
+          },
         },
       }),
       makeActivity({
@@ -1394,6 +1443,7 @@ describe("deriveWorkLogEntries", () => {
           title: "Tool call",
           detail: 'Read: {"file_path":"/tmp/app.ts"}',
           data: {
+            toolCallId: "tool-read-1",
             item: {
               command: ["sed", "-n", "1,40p", "/tmp/app.ts"],
             },
@@ -1409,6 +1459,9 @@ describe("deriveWorkLogEntries", () => {
           itemType: "dynamic_tool_call",
           title: "Tool call",
           detail: 'Read: {"file_path":"/tmp/app.ts"}',
+          data: {
+            toolCallId: "tool-read-1",
+          },
         },
       }),
     ];

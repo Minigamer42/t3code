@@ -72,6 +72,28 @@ export function shouldWriteThreadErrorToCurrentServerThread(input: {
   );
 }
 
+export type LocalDispatchRouteChangeAction = "none" | "clear-view" | "reset";
+
+export function resolveLocalDispatchRouteChangeAction(input: {
+  localDispatchTargetThreadId: ThreadId | null;
+  routeThreadId: ThreadId;
+}): LocalDispatchRouteChangeAction {
+  if (input.localDispatchTargetThreadId === null) {
+    return "reset";
+  }
+  return input.localDispatchTargetThreadId === input.routeThreadId ? "none" : "clear-view";
+}
+
+export function isLocalDispatchRelevantToThread(input: {
+  localDispatchTargetThreadId: ThreadId | null;
+  activeThreadId: ThreadId | null;
+}): boolean {
+  return (
+    input.localDispatchTargetThreadId === null ||
+    input.localDispatchTargetThreadId === input.activeThreadId
+  );
+}
+
 export function reconcileMountedTerminalThreadIds(input: {
   currentThreadIds: ReadonlyArray<string>;
   openThreadIds: ReadonlyArray<string>;
@@ -309,6 +331,7 @@ export async function waitForStartedServerThread(
 export interface LocalDispatchSnapshot {
   startedAt: string;
   preparingWorktree: boolean;
+  targetThreadId: ThreadId | null;
   latestTurnTurnId: TurnId | null;
   latestTurnRequestedAt: string | null;
   latestTurnStartedAt: string | null;
@@ -319,13 +342,14 @@ export interface LocalDispatchSnapshot {
 
 export function createLocalDispatchSnapshot(
   activeThread: Thread | undefined,
-  options?: { preparingWorktree?: boolean },
+  options?: { preparingWorktree?: boolean; targetThreadId?: ThreadId | null },
 ): LocalDispatchSnapshot {
   const latestTurn = activeThread?.latestTurn ?? null;
   const session = activeThread?.session ?? null;
   return {
     startedAt: new Date().toISOString(),
     preparingWorktree: Boolean(options?.preparingWorktree),
+    targetThreadId: options?.targetThreadId ?? null,
     latestTurnTurnId: latestTurn?.turnId ?? null,
     latestTurnRequestedAt: latestTurn?.requestedAt ?? null,
     latestTurnStartedAt: latestTurn?.startedAt ?? null,
@@ -337,6 +361,7 @@ export function createLocalDispatchSnapshot(
 
 export function hasServerAcknowledgedLocalDispatch(input: {
   localDispatch: LocalDispatchSnapshot | null;
+  threadId: ThreadId | null;
   phase: SessionPhase;
   latestTurn: Thread["latestTurn"] | null;
   session: Thread["session"] | null;
@@ -345,6 +370,12 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   threadError: string | null | undefined;
 }): boolean {
   if (!input.localDispatch) {
+    return false;
+  }
+  if (
+    input.localDispatch.targetThreadId !== null &&
+    input.threadId !== input.localDispatch.targetThreadId
+  ) {
     return false;
   }
   if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
@@ -374,6 +405,13 @@ export function hasServerAcknowledgedLocalDispatch(input: {
       return false;
     }
     return true;
+  }
+
+  if (input.localDispatch.targetThreadId !== null) {
+    if (latestTurnChanged && latestTurn?.startedAt && latestTurn.completedAt) {
+      return true;
+    }
+    return false;
   }
 
   return (

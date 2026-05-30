@@ -17,7 +17,9 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
+  isLocalDispatchRelevantToThread,
   reconcileMountedTerminalThreadIds,
+  resolveLocalDispatchRouteChangeAction,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
   waitForStartedServerThread,
@@ -87,6 +89,64 @@ describe("buildExpiredTerminalContextToastCopy", () => {
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
     });
+  });
+});
+
+describe("resolveLocalDispatchRouteChangeAction", () => {
+  it("resets non-targeted local dispatch state on route changes", () => {
+    expect(
+      resolveLocalDispatchRouteChangeAction({
+        localDispatchTargetThreadId: null,
+        routeThreadId: ThreadId.make("thread-2"),
+      }),
+    ).toBe("reset");
+  });
+
+  it("keeps targeted dispatch visible when landing on the target thread", () => {
+    const targetThreadId = ThreadId.make("thread-2");
+
+    expect(
+      resolveLocalDispatchRouteChangeAction({
+        localDispatchTargetThreadId: targetThreadId,
+        routeThreadId: targetThreadId,
+      }),
+    ).toBe("none");
+  });
+
+  it("clears only view state for a targeted dispatch that belongs to another route", () => {
+    expect(
+      resolveLocalDispatchRouteChangeAction({
+        localDispatchTargetThreadId: ThreadId.make("thread-2"),
+        routeThreadId: ThreadId.make("thread-3"),
+      }),
+    ).toBe("clear-view");
+  });
+});
+
+describe("isLocalDispatchRelevantToThread", () => {
+  it("treats non-targeted dispatch as relevant to the current thread", () => {
+    expect(
+      isLocalDispatchRelevantToThread({
+        localDispatchTargetThreadId: null,
+        activeThreadId: ThreadId.make("thread-1"),
+      }),
+    ).toBe(true);
+  });
+
+  it("treats targeted dispatch as relevant only on the target thread", () => {
+    expect(
+      isLocalDispatchRelevantToThread({
+        localDispatchTargetThreadId: ThreadId.make("thread-2"),
+        activeThreadId: ThreadId.make("thread-2"),
+      }),
+    ).toBe(true);
+
+    expect(
+      isLocalDispatchRelevantToThread({
+        localDispatchTargetThreadId: ThreadId.make("thread-2"),
+        activeThreadId: ThreadId.make("thread-3"),
+      }),
+    ).toBe(false);
   });
 });
 
@@ -449,6 +509,7 @@ describe("waitForStartedServerThread", () => {
 
 describe("hasServerAcknowledgedLocalDispatch", () => {
   const projectId = ProjectId.make("project-1");
+  const threadId = ThreadId.make("thread-1");
   const previousLatestTurn = {
     turnId: TurnId.make("turn-1"),
     state: "completed" as const,
@@ -493,9 +554,79 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId,
         phase: "ready",
         latestTurn: previousLatestTurn,
         session: previousSession,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not clear a targeted dispatch before navigating to the target thread", () => {
+    const targetThreadId = ThreadId.make("thread-2");
+    const localDispatch = createLocalDispatchSnapshot(
+      {
+        id: threadId,
+        environmentId: localEnvironmentId,
+        codexThreadId: null,
+        projectId,
+        title: "Thread",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        session: previousSession,
+        messages: [],
+        proposedPlans: [],
+        error: null,
+        createdAt: "2026-03-29T00:00:00.000Z",
+        archivedAt: null,
+        updatedAt: "2026-03-29T00:00:10.000Z",
+        latestTurn: previousLatestTurn,
+        branch: null,
+        worktreePath: null,
+        turnDiffSummaries: [],
+        activities: [],
+      },
+      { targetThreadId },
+    );
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        threadId,
+        phase: "ready",
+        latestTurn: {
+          ...previousLatestTurn,
+          turnId: TurnId.make("turn-2"),
+        },
+        session: {
+          ...previousSession,
+          updatedAt: "2026-03-29T00:00:11.000Z",
+        },
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not clear a targeted dispatch from target thread metadata updates", () => {
+    const targetThreadId = ThreadId.make("thread-2");
+    const localDispatch = createLocalDispatchSnapshot(undefined, { targetThreadId });
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        threadId: targetThreadId,
+        phase: "ready",
+        latestTurn: null,
+        session: {
+          ...previousSession,
+          updatedAt: "2026-03-29T00:00:11.000Z",
+        },
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
@@ -530,6 +661,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId,
         phase: "ready",
         latestTurn: {
           ...previousLatestTurn,
@@ -576,6 +708,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId,
         phase: "running",
         latestTurn: previousLatestTurn,
         session: {
@@ -619,6 +752,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId,
         phase: "running",
         latestTurn: previousLatestTurn,
         session: {
@@ -662,6 +796,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId,
         phase: "running",
         latestTurn: {
           ...previousLatestTurn,
@@ -677,6 +812,70 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           orchestrationStatus: "running",
           activeTurnId: TurnId.make("turn-2"),
           updatedAt: "2026-03-29T00:01:01.000Z",
+        },
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("clears a targeted dispatch once the target thread starts running", () => {
+    const targetThreadId = ThreadId.make("thread-2");
+    const turnId = TurnId.make("turn-2");
+    const localDispatch = createLocalDispatchSnapshot(undefined, { targetThreadId });
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        threadId: targetThreadId,
+        phase: "running",
+        latestTurn: {
+          ...previousLatestTurn,
+          turnId,
+          state: "running",
+          requestedAt: "2026-03-29T00:01:00.000Z",
+          startedAt: "2026-03-29T00:01:01.000Z",
+          completedAt: null,
+        },
+        session: {
+          ...previousSession,
+          status: "running",
+          orchestrationStatus: "running",
+          activeTurnId: turnId,
+          updatedAt: "2026-03-29T00:01:01.000Z",
+        },
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("clears a targeted dispatch when the target turn is already settled before running is observed", () => {
+    const targetThreadId = ThreadId.make("thread-2");
+    const turnId = TurnId.make("turn-2");
+    const localDispatch = createLocalDispatchSnapshot(undefined, { targetThreadId });
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        threadId: targetThreadId,
+        phase: "ready",
+        latestTurn: {
+          ...previousLatestTurn,
+          turnId,
+          state: "completed",
+          requestedAt: "2026-03-29T00:01:00.000Z",
+          startedAt: "2026-03-29T00:01:01.000Z",
+          completedAt: "2026-03-29T00:01:30.000Z",
+        },
+        session: {
+          ...previousSession,
+          status: "ready",
+          orchestrationStatus: "idle",
+          activeTurnId: undefined,
+          updatedAt: "2026-03-29T00:01:30.000Z",
         },
         hasPendingApproval: false,
         hasPendingUserInput: false,
@@ -712,6 +911,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
+        threadId,
         phase: "ready",
         latestTurn: previousLatestTurn,
         session: {
