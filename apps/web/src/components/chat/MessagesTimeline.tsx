@@ -3116,9 +3116,11 @@ function buildToolCallExpandedBody(
     addBlock(raw ?? command);
   }
   const detail = workEntry.detail?.trim();
-  if (detail !== viewedImagePath?.trim()) {
+  const output = workEntry.output?.trim();
+  if (detail !== viewedImagePath?.trim() && detail !== output) {
     addBlock(detail);
   }
+  addBlock(output);
   const viewedImagePaths = new Set(
     viewedImagePath
       ? [viewedImagePath.trim(), formatWorkspaceRelativePath(viewedImagePath, workspaceRoot)]
@@ -3327,6 +3329,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       workEntryRawCommand(workEntry) ||
       workEntry.command?.trim() ||
       workEntry.detail?.trim() ||
+      workEntry.output?.trim() ||
       workEntry.changedFiles?.length ||
       viewedImage,
     );

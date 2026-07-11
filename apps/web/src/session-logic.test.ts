@@ -477,7 +477,7 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
-  it("omits tool started entries and keeps completed entries", () => {
+  it("keeps tool started and completed entries separate", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "tool-complete",
@@ -494,7 +494,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-start", "tool-complete"]);
   });
 
   it("omits routine setup updates before work starts and after later turn activity", () => {
