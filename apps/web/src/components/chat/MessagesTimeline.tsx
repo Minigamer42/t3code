@@ -22,6 +22,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -153,6 +154,8 @@ interface TimelineRowActivityState {
   latestTurnId: TurnId | null;
   /** Current plan step label for the working row, when the turn has a plan. */
   workingStepLabel: string | null;
+  activeTurnId: TurnId | null;
+  expandedTurnIds: ReadonlySet<TurnId>;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -362,8 +365,41 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [suspendEndScrollMaintenanceForDisclosure],
   );
 
-  // An in-session interrupt leaves its turn expanded so the user keeps their
-  // place; the next turn (or a reload, since this is local state) folds it.
+  // A turn that was visible while running stays expanded when it settles so
+  // completed tool rows do not disappear behind the fold immediately.
+  const activeTurnId =
+    runningTurnId ?? (latestTurn && latestTurn.state === "running" ? latestTurn.turnId : null);
+  const previousActiveTurnIdRef = useRef<TurnId | null>(activeTurnId);
+  const previousActiveTurnId = previousActiveTurnIdRef.current;
+  const justFinishedActiveTurnId =
+    previousActiveTurnId !== null && activeTurnId !== previousActiveTurnId
+      ? previousActiveTurnId
+      : null;
+  // Keep a just-finished turn expanded in the first settled render. Waiting
+  // for the effect below briefly collapses and then re-inserts the same rows,
+  // which can leave LegendList with duplicate cells for one message key.
+  const effectiveExpandedTurnIds = useMemo(() => {
+    if (justFinishedActiveTurnId === null || expandedTurnIds.has(justFinishedActiveTurnId)) {
+      return expandedTurnIds;
+    }
+    const next = new Set(expandedTurnIds);
+    next.add(justFinishedActiveTurnId);
+    return next;
+  }, [expandedTurnIds, justFinishedActiveTurnId]);
+  useEffect(() => {
+    previousActiveTurnIdRef.current = activeTurnId;
+    if (previousActiveTurnId !== null && activeTurnId !== previousActiveTurnId) {
+      setExpandedTurnIds((existing) => {
+        if (existing.has(previousActiveTurnId)) {
+          return existing;
+        }
+        const next = new Set(existing);
+        next.add(previousActiveTurnId);
+        return next;
+      });
+    }
+  }, [activeTurnId, previousActiveTurnId]);
+
   const previousLatestTurnRef = useRef(latestTurn);
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
@@ -371,24 +407,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (!latestTurn || previous?.turnId === undefined) {
       return;
     }
-    if (latestTurn.turnId === previous.turnId) {
-      if (previous.state === "running" && latestTurn.state === "interrupted") {
-        setExpandedTurnIds((existing) => {
-          const next = new Set(existing);
-          next.add(latestTurn.turnId);
-          return next;
-        });
-      }
+    if (latestTurn.turnId !== previous.turnId) {
       return;
     }
-    setExpandedTurnIds((existing) => {
-      if (!existing.has(previous.turnId)) {
-        return existing;
-      }
-      const next = new Set(existing);
-      next.delete(previous.turnId);
-      return next;
-    });
+    if (previous.state === "running" && latestTurn.state !== "running") {
+      setExpandedTurnIds((existing) => {
+        if (existing.has(latestTurn.turnId)) {
+          return existing;
+        }
+        const next = new Set(existing);
+        next.add(latestTurn.turnId);
+        return next;
+      });
+    }
   }, [latestTurn]);
 
   const rawRows = useMemo(
@@ -397,7 +428,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         timelineEntries,
         latestTurn,
         runningTurnId,
-        expandedTurnIds,
+        expandedTurnIds: effectiveExpandedTurnIds,
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
@@ -408,7 +439,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       timelineEntries,
       latestTurn,
       runningTurnId,
-      expandedTurnIds,
+      effectiveExpandedTurnIds,
       expandedWorkGroupIds,
       isWorking,
       activeTurnStartedAt,
@@ -539,8 +570,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isRevertingCheckpoint,
       latestTurnId: latestTurn?.turnId ?? null,
       workingStepLabel,
+      activeTurnId,
+      expandedTurnIds: effectiveExpandedTurnIds,
     }),
-    [isRevertingCheckpoint, isWorking, latestTurn?.turnId, workingStepLabel],
+    [
+      activeTurnId,
+      effectiveExpandedTurnIds,
+      isRevertingCheckpoint,
+      isWorking,
+      latestTurn?.turnId,
+      workingStepLabel,
+    ],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -2413,22 +2453,52 @@ function liveWorkEntryLabel(
   return workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
 }
 
-function buildToolCallExpandedBody(
+function appendUniqueExpandedBlock(blocks: string[], value: string | undefined): void {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return;
+  }
+  if (blocks.some((block) => block.trim() === trimmed)) {
+    return;
+  }
+  blocks.push(trimmed);
+}
+
+function normalizeExpandedCommandComparison(value: string): string {
+  return value.trim().replace(/\r\n?/g, "\n");
+}
+
+function rawCommandDiffersFromExpandedBlocks(rawCommand: string | null, blocks: string[]): boolean {
+  if (!rawCommand) {
+    return false;
+  }
+  const normalizedRawCommand = normalizeExpandedCommandComparison(rawCommand);
+  return !blocks.some(
+    (block) => normalizeExpandedCommandComparison(block) === normalizedRawCommand,
+  );
+}
+
+interface ToolCallExpandedContent {
+  body: string;
+  rawCommand: string | null;
+}
+
+function buildToolCallExpandedContent(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
-): string | null {
+): ToolCallExpandedContent | null {
   const blocks: string[] = [];
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
     blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
   }
   const raw = workEntryRawCommand(workEntry);
-  if (raw?.trim()) {
-    blocks.push(raw.trim());
-  } else if (workEntry.command?.trim()) {
-    blocks.push(workEntry.command.trim());
+  if (workEntry.command?.trim()) {
+    appendUniqueExpandedBlock(blocks, workEntry.command);
+  } else if (raw) {
+    appendUniqueExpandedBlock(blocks, raw);
   }
-  if (workEntry.detail?.trim()) {
-    blocks.push(workEntry.detail.trim());
+  if (workEntry.detail?.trim() !== raw?.trim()) {
+    appendUniqueExpandedBlock(blocks, workEntry.detail);
   }
   const changedFiles = workEntry.changedFiles ?? [];
   if (changedFiles.length > 0) {
@@ -2438,7 +2508,13 @@ function buildToolCallExpandedBody(
         .join("\n"),
     );
   }
-  return blocks.length > 0 ? blocks.join("\n\n") : null;
+  if (blocks.length === 0) {
+    return null;
+  }
+  return {
+    body: blocks.join("\n\n"),
+    rawCommand: rawCommandDiffersFromExpandedBlocks(raw, blocks) ? raw : null,
+  };
 }
 
 const toolCallExpandedBodyClassName =
@@ -2607,15 +2683,44 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
-  const [expanded, setExpanded] = useState(false);
+  const activity = use(TimelineRowActivityCtx);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
   const entryIconName =
     showWarningIndicator || showFailedIndicator ? "x" : workEntryIconName(workEntry);
   const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
-  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
+  const expandedContent = buildToolCallExpandedContent(workEntry, workspaceRoot);
+  const canExpand = expandedContent !== null;
+  const canAutoExpandFromHeaderOverflow =
+    canExpand &&
+    workEntry.turnId !== undefined &&
+    workEntry.turnId !== null &&
+    (workEntry.turnId === activity.activeTurnId ||
+      activity.expandedTurnIds.has(workEntry.turnId)) &&
+    workLogEntryIsToolLike(workEntry) &&
+    workEntry.command !== undefined &&
+    workEntry.command.trim().length > 0;
+  const headerOverflowRef = useRef<HTMLSpanElement | null>(null);
+  const measuredHeaderDisplayTextRef = useRef<string | null>(null);
+  const [headerOverflowDefaultExpanded, setHeaderOverflowDefaultExpanded] = useState(false);
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
+  const [rawCommandExpanded, setRawCommandExpanded] = useState(false);
+  useLayoutEffect(() => {
+    if (!canAutoExpandFromHeaderOverflow) {
+      measuredHeaderDisplayTextRef.current = displayText;
+      setHeaderOverflowDefaultExpanded(false);
+      return;
+    }
+    if (measuredHeaderDisplayTextRef.current === displayText) {
+      return;
+    }
+    measuredHeaderDisplayTextRef.current = displayText;
+    const element = headerOverflowRef.current;
+    setHeaderOverflowDefaultExpanded(element !== null && element.scrollWidth > element.clientWidth);
+  }, [canAutoExpandFromHeaderOverflow, displayText]);
+  const defaultExpanded = canAutoExpandFromHeaderOverflow && headerOverflowDefaultExpanded;
+  const expanded = expandedOverride ?? defaultExpanded;
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
@@ -2646,11 +2751,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         tabIndex: 0 as const,
         "aria-label": accessibleDisplayText,
         "aria-expanded": expanded,
-        onClick: () => setExpanded((v) => !v),
+        onClick: () => setExpandedOverride(!expanded),
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setExpanded((v) => !v);
+            setExpandedOverride(!expanded);
           }
         },
       }
@@ -2681,7 +2786,12 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
-              <span className={cn("min-w-0 flex-1 truncate", headingClass)}>{displayText}</span>
+              <span
+                ref={workEntry.command ? headerOverflowRef : undefined}
+                className={cn("min-w-0 flex-1 truncate", headingClass)}
+              >
+                {displayText}
+              </span>
             </p>
           </div>
           <span
@@ -2700,13 +2810,37 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           </span>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand && expandedContent ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          <pre className={toolCallExpandedBodyClassName}>{expandedContent.body}</pre>
+          {expandedContent.rawCommand ? (
+            <div className="mt-1.5">
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent/20 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+                aria-expanded={rawCommandExpanded}
+                onClick={() => setRawCommandExpanded((value) => !value)}
+              >
+                <ChevronDownIcon
+                  className={cn(
+                    "size-3 shrink-0 opacity-70 transition-transform duration-200",
+                    rawCommandExpanded && "rotate-180",
+                  )}
+                  aria-hidden
+                />
+                Wrapped command
+              </button>
+              {rawCommandExpanded ? (
+                <pre className={cn("mt-1", toolCallExpandedBodyClassName)}>
+                  {expandedContent.rawCommand}
+                </pre>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
