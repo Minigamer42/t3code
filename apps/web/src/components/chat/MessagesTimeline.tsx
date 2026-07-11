@@ -505,34 +505,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [expandedWorkGroupIds, suspendEndScrollMaintenanceForDisclosure],
   );
 
-  // An in-session interrupt leaves its turn expanded so the user keeps their
-  // place; the next turn (or a reload, since this is local state) folds it.
-  const previousLatestTurnRef = useRef(latestTurn);
+  // A turn that was visible while running stays expanded when it settles so
+  // its completed tool rows do not disappear behind the fold immediately.
+  const activeTurnId =
+    runningTurnId ?? (latestTurn?.state === "running" ? latestTurn.turnId : null);
+  const previousActiveTurnIdRef = useRef<TurnId | null>(activeTurnId);
+  const previousActiveTurnId = previousActiveTurnIdRef.current;
+  const justFinishedActiveTurnId =
+    previousActiveTurnId !== null && activeTurnId !== previousActiveTurnId
+      ? previousActiveTurnId
+      : null;
+  // Include the finished turn in this render. Waiting for the effect would
+  // briefly collapse and reinsert its rows, destabilizing the virtual list.
+  const effectiveExpandedTurnIds = useMemo(() => {
+    if (justFinishedActiveTurnId === null || expandedTurnIds.has(justFinishedActiveTurnId)) {
+      return expandedTurnIds;
+    }
+    const next = new Set(expandedTurnIds);
+    next.add(justFinishedActiveTurnId);
+    return next;
+  }, [expandedTurnIds, justFinishedActiveTurnId]);
   useEffect(() => {
-    const previous = previousLatestTurnRef.current;
-    previousLatestTurnRef.current = latestTurn;
-    if (!latestTurn || previous?.turnId === undefined) {
-      return;
-    }
-    if (latestTurn.turnId === previous.turnId) {
-      if (previous.state === "running" && latestTurn.state === "interrupted") {
-        setExpandedTurnIds((existing) => {
-          const next = new Set(existing);
-          next.add(latestTurn.turnId);
-          return next;
-        });
-      }
-      return;
-    }
+    previousActiveTurnIdRef.current = activeTurnId;
+    if (previousActiveTurnId === null || activeTurnId === previousActiveTurnId) return;
     setExpandedTurnIds((existing) => {
-      if (!existing.has(previous.turnId)) {
-        return existing;
-      }
+      if (existing.has(previousActiveTurnId)) return existing;
       const next = new Set(existing);
-      next.delete(previous.turnId);
+      next.add(previousActiveTurnId);
       return next;
     });
-  }, [latestTurn]);
+  }, [activeTurnId, previousActiveTurnId]);
 
   const rowsProjectionRef = useRef<{
     threadKey: string;
@@ -546,7 +548,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         timelineEntries,
         latestTurn,
         runningTurnId,
-        expandedTurnIds,
+        expandedTurnIds: effectiveExpandedTurnIds,
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
@@ -566,7 +568,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     timelineEntries,
     latestTurn,
     runningTurnId,
-    expandedTurnIds,
+    effectiveExpandedTurnIds,
     expandedWorkGroupIds,
     isWorking,
     activeTurnStartedAt,
