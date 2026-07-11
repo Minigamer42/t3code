@@ -16,7 +16,9 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
   RuntimeRequestId,
+  type ToolLifecycleItemType,
 } from "@t3tools/contracts";
+import { deriveToolActivityPresentation } from "@t3tools/shared/toolActivity";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -165,6 +167,29 @@ function maxCheckpointTurnCount(
 
 function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function toolLifecyclePresentation(
+  event: Extract<
+    ProviderRuntimeEvent,
+    { type: "item.started" | "item.updated" | "item.completed" }
+  >,
+  fallbackSummary: string,
+) {
+  return deriveToolActivityPresentation({
+    itemType: event.payload.itemType as ToolLifecycleItemType,
+    status: event.payload.status,
+    lifecycle:
+      event.type === "item.started"
+        ? "started"
+        : event.type === "item.updated"
+          ? "updated"
+          : "completed",
+    title: event.payload.title,
+    detail: event.payload.detail,
+    data: event.payload.data,
+    fallbackSummary,
+  });
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
@@ -798,19 +823,23 @@ export function runtimeEventToActivities(
       // needs it: ws.ts and http.ts apply `projectActivityPayload` before any
       // payload reaches a client. Persist the projected form for non-terminal
       // updates; `item.completed` below still persists the full payload.
+      const presentation = toolLifecyclePresentation(event, "Tool updated");
       return [
         projectActivityPayload({
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
           kind: "tool.updated",
-          summary: event.payload.title ?? "Tool updated",
+          summary: presentation.summary,
           payload: {
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             itemType: event.payload.itemType,
             ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.title ? { title: event.payload.title } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...((presentation.detail ?? event.payload.detail)
+              ? { detail: presentation.detail ?? truncateDetail(event.payload.detail ?? "") }
+              : {}),
             ...(event.payload.toolSurface ? { toolSurface: event.payload.toolSurface } : {}),
             ...(event.payload.toolIcon ? { toolIcon: event.payload.toolIcon } : {}),
             ...(event.payload.toolSource ? { toolSource: event.payload.toolSource } : {}),
@@ -830,19 +859,23 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const presentation = toolLifecyclePresentation(event, "Tool");
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
           kind: "tool.completed",
-          summary: event.payload.title ?? "Tool",
+          summary: presentation.summary,
           payload: {
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             itemType: event.payload.itemType,
             ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.title ? { title: event.payload.title } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...((presentation.detail ?? event.payload.detail)
+              ? { detail: presentation.detail ?? truncateDetail(event.payload.detail ?? "") }
+              : {}),
             ...(event.payload.toolSurface ? { toolSurface: event.payload.toolSurface } : {}),
             ...(event.payload.toolIcon ? { toolIcon: event.payload.toolIcon } : {}),
             ...(event.payload.toolSource ? { toolSource: event.payload.toolSource } : {}),
@@ -862,19 +895,23 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const presentation = toolLifecyclePresentation(event, "Tool started");
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
           kind: "tool.started",
-          summary: `${event.payload.title ?? "Tool"} started`,
+          summary: presentation.summary,
           payload: {
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             itemType: event.payload.itemType,
             ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.title ? { title: event.payload.title } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...((presentation.detail ?? event.payload.detail)
+              ? { detail: presentation.detail ?? truncateDetail(event.payload.detail ?? "") }
+              : {}),
             ...(event.payload.toolSurface ? { toolSurface: event.payload.toolSurface } : {}),
             ...(event.payload.toolIcon ? { toolIcon: event.payload.toolIcon } : {}),
             ...(event.payload.toolSource ? { toolSource: event.payload.toolSource } : {}),
