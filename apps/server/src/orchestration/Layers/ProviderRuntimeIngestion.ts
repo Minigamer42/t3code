@@ -108,6 +108,8 @@ type TurnStartRequestedDomainEvent = Extract<
   { type: "thread.turn-start-requested" }
 >;
 
+type RuntimeTurnCompletedEvent = Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
+
 type RuntimeIngestionInput =
   | {
       source: "runtime";
@@ -927,6 +929,11 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  // Provider runtimes can report turn completion while an asynchronously
+  // yielded tool process is still running. Keep the projected turn alive until
+  // every tool item that belongs to it has reached a terminal lifecycle event.
+  const openToolItemIdsByTurnKey = new Map<string, Set<string>>();
+  const deferredTurnCompletionByTurnKey = new Map<string, RuntimeTurnCompletedEvent>();
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1446,6 +1453,16 @@ const make = Effect.gen(function* () {
           key.startsWith(prefix) ? Cache.invalidate(taskDescriptionByTaskKey, key) : Effect.void,
         { concurrency: 1 },
       ).pipe(Effect.asVoid);
+      for (const key of openToolItemIdsByTurnKey.keys()) {
+        if (key.startsWith(prefix)) {
+          openToolItemIdsByTurnKey.delete(key);
+        }
+      }
+      for (const key of deferredTurnCompletionByTurnKey.keys()) {
+        if (key.startsWith(prefix)) {
+          deferredTurnCompletionByTurnKey.delete(key);
+        }
+      }
     });
 
   const getSourceProposedPlanReferenceForPendingTurnStart = Effect.fn(
@@ -1547,6 +1564,38 @@ const make = Effect.gen(function* () {
       });
       const hasPendingTurnStart =
         Option.isSome(pendingTurnStart) && thread.session?.status === "starting";
+      const toolLifecycleEvent =
+        (event.type === "item.started" ||
+          event.type === "item.updated" ||
+          event.type === "item.completed") &&
+        isToolLifecycleItemType(event.payload.itemType)
+          ? event
+          : undefined;
+      const toolLifecycleTurnId = toolLifecycleEvent ? eventTurnId : undefined;
+      const toolLifecycleItemId = toolLifecycleEvent?.itemId;
+      let closedLastOpenToolForTurn = false;
+
+      if (toolLifecycleTurnId && toolLifecycleItemId) {
+        const key = providerTurnKey(thread.id, toolLifecycleTurnId);
+        const openItemIds = openToolItemIdsByTurnKey.get(key) ?? new Set<string>();
+        const toolReachedTerminalState =
+          toolLifecycleEvent.type === "item.completed" ||
+          toolLifecycleEvent.payload.status === "completed" ||
+          toolLifecycleEvent.payload.status === "failed" ||
+          toolLifecycleEvent.payload.status === "declined";
+        if (toolReachedTerminalState) {
+          openItemIds.delete(toolLifecycleItemId);
+          if (openItemIds.size === 0) {
+            openToolItemIdsByTurnKey.delete(key);
+            closedLastOpenToolForTurn = true;
+          } else {
+            openToolItemIdsByTurnKey.set(key, openItemIds);
+          }
+        } else {
+          openItemIds.add(toolLifecycleItemId);
+          openToolItemIdsByTurnKey.set(key, openItemIds);
+        }
+      }
 
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -1596,6 +1645,22 @@ const make = Effect.gen(function* () {
             return true;
         }
       })();
+      const turnCompletionKey =
+        event.type === "turn.completed" && eventTurnId
+          ? providerTurnKey(thread.id, eventTurnId)
+          : undefined;
+      const shouldDeferTurnCompletion =
+        event.type === "turn.completed" &&
+        shouldApplyThreadLifecycle &&
+        normalizeRuntimeTurnState(event.payload.state) === "completed" &&
+        turnCompletionKey !== undefined &&
+        (openToolItemIdsByTurnKey.get(turnCompletionKey)?.size ?? 0) > 0;
+      if (shouldDeferTurnCompletion && turnCompletionKey !== undefined) {
+        deferredTurnCompletionByTurnKey.set(turnCompletionKey, event);
+      } else if (event.type === "turn.completed" && turnCompletionKey !== undefined) {
+        openToolItemIdsByTurnKey.delete(turnCompletionKey);
+        deferredTurnCompletionByTurnKey.delete(turnCompletionKey);
+      }
       const acceptedTurnStartedSourcePlan =
         event.type === "turn.started" && shouldApplyThreadLifecycle
           ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
@@ -1651,7 +1716,7 @@ const make = Effect.gen(function* () {
                 ? null
                 : (thread.session?.lastError ?? null);
 
-        if (shouldApplyThreadLifecycle) {
+        if (shouldApplyThreadLifecycle && !shouldDeferTurnCompletion) {
           if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
             yield* markSourceProposedPlanImplemented(
               acceptedTurnStartedSourcePlan.sourceThreadId,
@@ -1697,8 +1762,76 @@ const make = Effect.gen(function* () {
         event.type === "content.delta" && event.payload.streamKind === "assistant_text"
           ? event.payload.delta
           : undefined;
+      const toolOutputDelta =
+        event.type === "content.delta" &&
+        (event.payload.streamKind === "command_output" ||
+          event.payload.streamKind === "file_change_output")
+          ? event.payload
+          : undefined;
       const proposedPlanDelta =
         event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
+
+      if (toolOutputDelta && toolOutputDelta.delta.length > 0 && event.itemId) {
+        const itemType =
+          toolOutputDelta.streamKind === "command_output" ? "command_execution" : "file_change";
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: yield* providerCommandId(event, "tool-output-delta"),
+          threadId: thread.id,
+          activity: {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "tool",
+            kind: "tool.updated",
+            summary: itemType === "command_execution" ? "Command output" : "File change output",
+            payload: {
+              ...(event.itemId ? { itemId: event.itemId } : {}),
+              itemType,
+              status: "inProgress",
+              data: {
+                rawOutput:
+                  itemType === "command_execution"
+                    ? { stdout: toolOutputDelta.delta }
+                    : { content: toolOutputDelta.delta },
+              },
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+          },
+          createdAt: now,
+        });
+      }
+
+      if (toolLifecycleTurnId && event.type === "item.started") {
+        const detailedThread = yield* getLoadedThreadDetail();
+        const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
+          serverSettingsService.getSettings,
+          (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
+        );
+        const flushedMessageIds =
+          assistantDeliveryMode === "buffered"
+            ? yield* flushBufferedAssistantMessagesForTurn({
+                event,
+                threadId: thread.id,
+                turnId: toolLifecycleTurnId,
+                createdAt: now,
+                commandTag: "assistant-delta-flush-before-tool",
+              })
+            : new Set<MessageId>();
+        yield* finalizeActiveAssistantSegmentForTurn({
+          event,
+          threadId: thread.id,
+          turnId: toolLifecycleTurnId,
+          createdAt: now,
+          commandTag: "assistant-complete-before-tool",
+          finalDeltaCommandTag: "assistant-delta-finalize-before-tool",
+          hasProjectedMessage:
+            detailedThread !== null &&
+            hasAssistantMessageForTurn(detailedThread.messages, toolLifecycleTurnId, {
+              streamingOnly: true,
+            }),
+          flushedMessageIds,
+        });
+      }
 
       if (assistantDelta && assistantDelta.length > 0) {
         const turnId = toTurnId(event.turnId);
@@ -2072,6 +2205,38 @@ const make = Effect.gen(function* () {
           ),
         ),
       ).pipe(Effect.asVoid);
+
+      if (closedLastOpenToolForTurn && toolLifecycleTurnId) {
+        const key = providerTurnKey(thread.id, toolLifecycleTurnId);
+        const deferredCompletion = deferredTurnCompletionByTurnKey.get(key);
+        if (deferredCompletion) {
+          deferredTurnCompletionByTurnKey.delete(key);
+          const refreshedThread = yield* resolveThreadShell(thread.id);
+          if (
+            refreshedThread?.session?.status === "running" &&
+            sameId(refreshedThread.session.activeTurnId, toolLifecycleTurnId)
+          ) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.session.set",
+              commandId: yield* providerCommandId(event, "thread-session-set-after-tools"),
+              threadId: thread.id,
+              session: {
+                threadId: thread.id,
+                status: "ready",
+                providerName: deferredCompletion.provider,
+                ...(deferredCompletion.providerInstanceId !== undefined
+                  ? { providerInstanceId: deferredCompletion.providerInstanceId }
+                  : {}),
+                runtimeMode: refreshedThread.session.runtimeMode,
+                activeTurnId: null,
+                lastError: null,
+                updatedAt: now,
+              },
+              createdAt: now,
+            });
+          }
+        }
+      }
     });
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;

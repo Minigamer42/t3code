@@ -293,6 +293,22 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   );
 }
 
+function stampThreadActivityEventSequence(event: OrchestrationEvent): OrchestrationEvent {
+  if (event.type !== "thread.activity-appended" || event.payload.activity.sequence !== undefined) {
+    return event;
+  }
+  return {
+    ...event,
+    payload: {
+      ...event.payload,
+      activity: {
+        ...event.payload.activity,
+        sequence: event.sequence,
+      },
+    },
+  };
+}
+
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // When a resuming client's cursor is more than this many events behind the
@@ -1319,6 +1335,7 @@ const makeWsRpcLayer = (
 
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(isThisThreadDetailEvent),
+                Stream.map(stampThreadActivityEventSequence),
                 Stream.map((event) => ({
                   kind: "event" as const,
                   event: projectActivityEvent(event),
@@ -1364,6 +1381,7 @@ const makeWsRpcLayer = (
                     .readEvents(afterSequence, replayGap)
                     .pipe(
                       Stream.filter(isThisThreadDetailEvent),
+                      Stream.map(stampThreadActivityEventSequence),
                       Stream.map((event) => ({
                         kind: "event" as const,
                         event: projectActivityEvent(event),

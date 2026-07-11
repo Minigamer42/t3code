@@ -22,7 +22,6 @@ import {
   use,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -2243,11 +2242,12 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles" | "output">,
   workspaceRoot: string | undefined,
 ) {
   if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
+  if (workEntry.output) return "Output";
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
   if (!firstPath) return null;
@@ -2464,23 +2464,8 @@ function appendUniqueExpandedBlock(blocks: string[], value: string | undefined):
   blocks.push(trimmed);
 }
 
-function normalizeExpandedCommandComparison(value: string): string {
-  return value.trim().replace(/\r\n?/g, "\n");
-}
-
-function rawCommandDiffersFromExpandedBlocks(rawCommand: string | null, blocks: string[]): boolean {
-  if (!rawCommand) {
-    return false;
-  }
-  const normalizedRawCommand = normalizeExpandedCommandComparison(rawCommand);
-  return !blocks.some(
-    (block) => normalizeExpandedCommandComparison(block) === normalizedRawCommand,
-  );
-}
-
 interface ToolCallExpandedContent {
   body: string;
-  rawCommand: string | null;
 }
 
 function buildToolCallExpandedContent(
@@ -2500,6 +2485,9 @@ function buildToolCallExpandedContent(
   if (workEntry.detail?.trim() !== raw?.trim()) {
     appendUniqueExpandedBlock(blocks, workEntry.detail);
   }
+  if (workEntry.output?.trim()) {
+    appendUniqueExpandedBlock(blocks, `Output\n${workEntry.output}`);
+  }
   const changedFiles = workEntry.changedFiles ?? [];
   if (changedFiles.length > 0) {
     blocks.push(
@@ -2513,7 +2501,6 @@ function buildToolCallExpandedContent(
   }
   return {
     body: blocks.join("\n\n"),
-    rawCommand: rawCommandDiffersFromExpandedBlocks(raw, blocks) ? raw : null,
   };
 }
 
@@ -2692,34 +2679,19 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
   const expandedContent = buildToolCallExpandedContent(workEntry, workspaceRoot);
   const canExpand = expandedContent !== null;
-  const canAutoExpandFromHeaderOverflow =
+  const defaultExpanded =
     canExpand &&
     workEntry.turnId !== undefined &&
     workEntry.turnId !== null &&
     (workEntry.turnId === activity.activeTurnId ||
       activity.expandedTurnIds.has(workEntry.turnId)) &&
     workLogEntryIsToolLike(workEntry) &&
-    workEntry.command !== undefined &&
-    workEntry.command.trim().length > 0;
-  const headerOverflowRef = useRef<HTMLSpanElement | null>(null);
-  const measuredHeaderDisplayTextRef = useRef<string | null>(null);
-  const [headerOverflowDefaultExpanded, setHeaderOverflowDefaultExpanded] = useState(false);
+    (workEntry.command !== undefined ||
+      workEntry.output !== undefined ||
+      workEntry.detail !== undefined ||
+      (workEntry.changedFiles?.length ?? 0) > 0 ||
+      workEntry.toolData !== undefined);
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
-  const [rawCommandExpanded, setRawCommandExpanded] = useState(false);
-  useLayoutEffect(() => {
-    if (!canAutoExpandFromHeaderOverflow) {
-      measuredHeaderDisplayTextRef.current = displayText;
-      setHeaderOverflowDefaultExpanded(false);
-      return;
-    }
-    if (measuredHeaderDisplayTextRef.current === displayText) {
-      return;
-    }
-    measuredHeaderDisplayTextRef.current = displayText;
-    const element = headerOverflowRef.current;
-    setHeaderOverflowDefaultExpanded(element !== null && element.scrollWidth > element.clientWidth);
-  }, [canAutoExpandFromHeaderOverflow, displayText]);
-  const defaultExpanded = canAutoExpandFromHeaderOverflow && headerOverflowDefaultExpanded;
   const expanded = expandedOverride ?? defaultExpanded;
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2786,12 +2758,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
-              <span
-                ref={workEntry.command ? headerOverflowRef : undefined}
-                className={cn("min-w-0 flex-1 truncate", headingClass)}
-              >
-                {displayText}
-              </span>
+              <span className={cn("min-w-0 flex-1 truncate", headingClass)}>{displayText}</span>
             </p>
           </div>
           <span
@@ -2817,30 +2784,6 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           onPointerDown={stopRowToggle}
         >
           <pre className={toolCallExpandedBodyClassName}>{expandedContent.body}</pre>
-          {expandedContent.rawCommand ? (
-            <div className="mt-1.5">
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent/20 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-                aria-expanded={rawCommandExpanded}
-                onClick={() => setRawCommandExpanded((value) => !value)}
-              >
-                <ChevronDownIcon
-                  className={cn(
-                    "size-3 shrink-0 opacity-70 transition-transform duration-200",
-                    rawCommandExpanded && "rotate-180",
-                  )}
-                  aria-hidden
-                />
-                Wrapped command
-              </button>
-              {rawCommandExpanded ? (
-                <pre className={cn("mt-1", toolCallExpandedBodyClassName)}>
-                  {expandedContent.rawCommand}
-                </pre>
-              ) : null}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>

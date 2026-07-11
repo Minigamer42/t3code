@@ -71,6 +71,7 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   rawCommand?: string;
+  output?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -901,6 +902,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? (activity.payload as Record<string, unknown>)
       : null;
   const commandPreview = extractToolCommand(payload);
+  const output = extractToolOutput(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const isTaskActivity =
@@ -952,6 +954,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
+  }
+  if (output) {
+    entry.output = output;
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
@@ -1171,6 +1176,10 @@ function mergeDerivedWorkLogEntries(
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const output =
+    previous.output && next.output
+      ? `${previous.output}${next.output}`
+      : (next.output ?? previous.output);
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const itemId = next.itemId ?? previous.itemId;
@@ -1185,6 +1194,7 @@ function mergeDerivedWorkLogEntries(
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(output ? { output } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
@@ -1760,10 +1770,11 @@ function extractToolOutput(payload: Record<string, unknown> | null): string | nu
   const outputStreams: string[] = [];
   const stdout = asTrimmedString(rawOutput?.stdout);
   const stderr = asTrimmedString(rawOutput?.stderr);
-  if (stdout) {
+  if (stdout && stderr) {
+    outputStreams.push(`stdout\n${stdout}`, `stderr\n${stderr}`);
+  } else if (stdout) {
     outputStreams.push(stdout);
-  }
-  if (stderr) {
+  } else if (stderr) {
     outputStreams.push(stderr);
   }
 
