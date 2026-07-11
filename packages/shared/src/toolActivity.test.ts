@@ -43,7 +43,8 @@ describe("toolActivity", () => {
         fallbackSummary: "Read File",
       }),
     ).toEqual({
-      summary: "Read /tmp/app.ts",
+      summary: "Read file",
+      detail: "/tmp/app.ts",
     });
   });
 
@@ -62,6 +63,41 @@ describe("toolActivity", () => {
     ).toEqual({
       summary: "Read file",
     });
+  });
+
+  it("retains read paths through progress and failure states", () => {
+    for (const [status, summary] of [
+      ["inProgress", "Reading file"],
+      ["completed", "Read file"],
+      ["failed", "Read failed"],
+      ["declined", "Read declined"],
+    ] as const) {
+      expect(
+        deriveToolActivityPresentation({
+          status,
+          title: "Read",
+          data: { toolName: "Read", rawInput: { file_path: "README" } },
+        }),
+      ).toEqual({ summary, detail: "README" });
+    }
+  });
+
+  it("keeps search details while distinguishing file and web lifecycles", () => {
+    expect(
+      deriveToolActivityPresentation({
+        lifecycle: "started",
+        data: { toolName: "Grep", input: { pattern: "TODO", path: "apps/web" } },
+      }),
+    ).toEqual({ summary: "Searching files", detail: "TODO in web" });
+    expect(
+      deriveToolActivityPresentation({
+        itemType: "web_search",
+        status: "failed",
+        data: {
+          item: { action: { type: "findInPage", pattern: "API", url: "https://example.com" } },
+        },
+      }),
+    ).toEqual({ summary: "Web search failed", detail: "API in https://example.com" });
   });
 
   it("classifies from kind and toolName without sniffing titles", () => {
