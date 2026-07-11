@@ -2486,7 +2486,7 @@ function buildToolCallExpandedContent(
     appendUniqueExpandedBlock(blocks, workEntry.detail);
   }
   if (workEntry.output?.trim()) {
-    appendUniqueExpandedBlock(blocks, `Output\n${workEntry.output}`);
+    appendUniqueExpandedBlock(blocks, workEntry.output);
   }
   const changedFiles = workEntry.changedFiles ?? [];
   if (changedFiles.length > 0) {
