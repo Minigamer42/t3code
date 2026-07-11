@@ -507,7 +507,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? (activity.payload as Record<string, unknown>)
       : null;
   const commandPreview = extractToolCommand(payload);
-  const output = extractToolOutput(payload);
+  const itemType = extractWorkLogItemType(payload);
+  const output = extractToolOutput(payload, itemType);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const toolPresentation = extractToolActivityPresentation(payload);
@@ -553,7 +554,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     const answer = decodeQuestionAttachmentAnswer(payload);
     if (Option.isSome(answer)) entry.questionAnswer = answer.value;
   }
-  const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   const viewedImagePath = asTrimmedString(asRecord(payload?.data)?.imagePath);
   if (detail) {
@@ -817,7 +817,7 @@ function mergeDerivedWorkLogEntries(
   const rawCommand = next.rawCommand ?? previous.rawCommand;
   const output =
     previous.output && next.output
-      ? next.output.startsWith(previous.output)
+      ? next.sourceActivityKind === "tool.completed" && next.output.startsWith(previous.output)
         ? next.output
         : `${previous.output}${next.output}`
       : (next.output ?? previous.output);
@@ -1183,9 +1183,132 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
   return null;
 }
 
-function extractToolOutput(payload: Record<string, unknown> | null): string | null {
-  const output = extractCommandOutputText(payload?.data);
-  return output ? stripTrailingExitCode(output).output : null;
+const TOOL_OUTPUT_PREVIEW_MAX_LINES = 8;
+const TOOL_OUTPUT_PREVIEW_MAX_CHARS = 1_200;
+
+function stripHtmlForToolPreview(value: string): string {
+  return value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, " ")
+    .replace(/<[^>]+>/gu, " ")
+    .replace(/&nbsp;/giu, " ")
+    .replace(/&amp;/giu, "&")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;/giu, "'");
+}
+
+function normalizeMultilineToolPreview(value: string): string {
+  const lines: Array<string> = [];
+  for (const rawLine of stripHtmlForToolPreview(value).split(/\r?\n/u)) {
+    const line = normalizeInlinePreview(rawLine);
+    if (line.length > 0) lines.push(line);
+    if (lines.length >= TOOL_OUTPUT_PREVIEW_MAX_LINES) break;
+  }
+  const normalized = lines.join("\n");
+  if (normalized.length <= TOOL_OUTPUT_PREVIEW_MAX_CHARS) return normalized;
+  return `${normalized.slice(0, TOOL_OUTPUT_PREVIEW_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function asPreviewString(value: unknown): string | null {
+  const direct = asTrimmedString(value);
+  return direct ? normalizeMultilineToolPreview(direct) : null;
+}
+
+function searchResultPreviewFromRecord(record: Record<string, unknown>): string | null {
+  const title =
+    asTrimmedString(record.title) ??
+    asTrimmedString(record.name) ??
+    asTrimmedString(record.heading) ??
+    asTrimmedString(record.url);
+  const url = asTrimmedString(record.url) ?? asTrimmedString(record.link);
+  const snippet =
+    asPreviewString(record.snippet) ??
+    asPreviewString(record.summary) ??
+    asPreviewString(record.description) ??
+    asPreviewString(record.text);
+  if (!title && !snippet) return null;
+  const suffix = snippet ? ` - ${snippet}` : "";
+  const source = url && title !== url ? ` (${url})` : "";
+  return `${title ?? "Result"}${source}${suffix}`;
+}
+
+function mcpContentPreview(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const lines: Array<string> = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const preview = record ? asPreviewString(record.text) : asPreviewString(entry);
+    if (preview) lines.push(preview);
+    if (lines.length >= TOOL_OUTPUT_PREVIEW_MAX_LINES) break;
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function previewList(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const lines: Array<string> = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const preview = record ? searchResultPreviewFromRecord(record) : asPreviewString(entry);
+    if (preview) lines.push(`${lines.length + 1}. ${preview}`);
+    if (lines.length >= 5) break;
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function extractToolResultPreview(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const rawOutput = asRecord(data?.rawOutput);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const result = asRecord(data?.result);
+  const output = asRecord(data?.output);
+  const sources = [rawOutput, itemResult, result, output, data].filter(
+    (source): source is Record<string, unknown> => source !== null,
+  );
+
+  for (const source of sources) {
+    const listPreview =
+      mcpContentPreview(source.content) ??
+      previewList(source.results) ??
+      previewList(source.items) ??
+      previewList(source.matches) ??
+      previewList(source.documents) ??
+      previewList(source.pages);
+    if (listPreview) return listPreview;
+  }
+
+  for (const source of sources) {
+    const direct =
+      asPreviewString(source.summary) ??
+      asPreviewString(source.snippet) ??
+      asPreviewString(source.content) ??
+      asPreviewString(source.text) ??
+      asPreviewString(source.output) ??
+      asPreviewString(source.stdout);
+    if (direct) return direct;
+  }
+
+  const directRawOutput = asPreviewString(data?.rawOutput);
+  if (directRawOutput) return directRawOutput;
+  const changedFiles = extractChangedFiles(payload);
+  return changedFiles.length > 0 ? changedFiles.slice(0, 8).join("\n") : null;
+}
+
+function extractToolOutput(
+  payload: Record<string, unknown> | null,
+  itemType: WorkLogEntry["itemType"] | undefined,
+): string | null {
+  const commandOutput = extractCommandOutputText(payload?.data);
+  if (itemType === "command_execution" || itemType === undefined) {
+    return commandOutput ? stripTrailingExitCode(commandOutput).output : null;
+  }
+  return (
+    extractToolResultPreview(payload) ??
+    (commandOutput ? normalizeMultilineToolPreview(commandOutput) : null)
+  );
 }
 
 function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean {
@@ -1215,7 +1338,7 @@ function extractToolDetail(
   const command = commandPreview.command;
 
   if (commandTool && command) {
-    const output = extractToolOutput(payload);
+    const output = extractToolOutput(payload, "command_execution");
     if (output) return output;
   }
 
