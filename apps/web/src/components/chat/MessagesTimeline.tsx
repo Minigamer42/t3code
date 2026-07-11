@@ -656,7 +656,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const listIdentityRef = useRef(listIdentityKey);
-  const previousLatestRunRef = useRef(latestRun);
+  const activeRunId = runningRunId ?? (latestRun?.status === "running" ? latestRun.runId : null);
+  const previousActiveRunIdRef = useRef<RunId | null>(activeRunId);
   // The list stays mounted across thread switches. Its first end pins on the
   // new thread must snap, not glide, even if that thread is mid-turn.
   const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(listIdentityKey);
@@ -666,7 +667,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   if (listIdentityRef.current !== listIdentityKey) {
     listIdentityRef.current = listIdentityKey;
     setPositionedThreadKey(null);
-    previousLatestRunRef.current = latestRun;
+    previousActiveRunIdRef.current = activeRunId;
     setSettlingListIdentity(listIdentityKey);
     paintedExpandedRunIds = rememberedPosition?.disclosures?.runs ?? new Set();
     paintedExpandedWorkGroupIds = rememberedPosition?.disclosures?.workGroups ?? new Set();
@@ -826,34 +827,33 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [suspendEndScrollMaintenanceForDisclosure],
   );
 
-  // An in-session interrupt leaves its turn expanded so the user keeps their
-  // place; the next turn (or a reload, since this is local state) folds it.
-
+  // A turn that was visible while running stays expanded when it settles so
+  // its completed tool rows do not disappear behind the fold immediately.
+  const previousActiveRunId = previousActiveRunIdRef.current;
+  const justFinishedActiveRunId =
+    previousActiveRunId !== null && activeRunId !== previousActiveRunId
+      ? previousActiveRunId
+      : null;
+  // Include the finished turn in this render. Waiting for the effect would
+  // briefly collapse and reinsert its rows, destabilizing the virtual list.
+  const effectiveExpandedRunIds = useMemo(() => {
+    if (justFinishedActiveRunId === null || paintedExpandedRunIds.has(justFinishedActiveRunId)) {
+      return paintedExpandedRunIds;
+    }
+    const next = new Set(paintedExpandedRunIds);
+    next.add(justFinishedActiveRunId);
+    return next;
+  }, [paintedExpandedRunIds, justFinishedActiveRunId]);
   useEffect(() => {
-    const previous = previousLatestRunRef.current;
-    previousLatestRunRef.current = latestRun;
-    if (!latestRun || previous?.runId === undefined) {
-      return;
-    }
-    if (latestRun.runId === previous.runId) {
-      if (previous.status === "running" && latestRun.status === "interrupted") {
-        setExpandedRunIds((existing) => {
-          const next = new Set(existing);
-          next.add(latestRun.runId);
-          return next;
-        });
-      }
-      return;
-    }
+    previousActiveRunIdRef.current = activeRunId;
+    if (previousActiveRunId === null || activeRunId === previousActiveRunId) return;
     setExpandedRunIds((existing) => {
-      if (!existing.has(previous.runId)) {
-        return existing;
-      }
+      if (existing.has(previousActiveRunId)) return existing;
       const next = new Set(existing);
-      next.delete(previous.runId);
+      next.add(previousActiveRunId);
       return next;
     });
-  }, [latestRun]);
+  }, [activeRunId, previousActiveRunId]);
 
   // Find the fold that hides the match: imported turns have no run id but still
   // fold under a synthetic key, so the match's own run id cannot open them.
@@ -880,11 +880,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
     );
   }, [activeFindRunId]);
   const visibleExpandedRunIds = useMemo(() => {
-    if (!activeFindRunId || paintedExpandedRunIds.has(activeFindRunId)) {
-      return paintedExpandedRunIds;
+    if (!activeFindRunId || effectiveExpandedRunIds.has(activeFindRunId)) {
+      return effectiveExpandedRunIds;
     }
-    return new Set(paintedExpandedRunIds).add(activeFindRunId);
-  }, [activeFindRunId, paintedExpandedRunIds]);
+    return new Set(effectiveExpandedRunIds).add(activeFindRunId);
+  }, [activeFindRunId, effectiveExpandedRunIds]);
 
   const activeFindAttemptId = activeFindMatch
     ? timelineEntries.find((entry) => entry.id === activeFindMatch.entryId)?.attempt?.id
