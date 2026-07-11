@@ -28,6 +28,7 @@ import type { McpAppReference } from "@t3tools/shared/mcpApp";
 import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
+  turnItemToolActivityPresentation,
   workEntryIndicatesToolFailure,
 } from "@t3tools/client-runtime/work-log/presentation";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
@@ -427,7 +428,7 @@ export function providerErrorPresentation(
   };
 }
 
-function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry {
+function projectedWorkEntryBase(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry {
   const { item } = row;
   const title = item.title?.trim() || null;
   const common = {
@@ -565,6 +566,18 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         toolData: item,
       };
   }
+}
+
+function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry {
+  const entry = projectedWorkEntryBase(row);
+  const presentation = turnItemToolActivityPresentation(row.item);
+  return presentation === undefined
+    ? entry
+    : {
+        ...entry,
+        label: presentation.summary,
+        ...(presentation.detail ? { detail: presentation.detail } : {}),
+      };
 }
 
 /**
