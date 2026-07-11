@@ -902,7 +902,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? (activity.payload as Record<string, unknown>)
       : null;
   const commandPreview = extractToolCommand(payload);
-  const output = extractToolOutput(payload);
+  const itemType = extractWorkLogItemType(payload);
+  const output = extractToolOutput(payload, itemType);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const isTaskActivity =
@@ -943,7 +944,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           : activity.tone,
     activityKind: activity.kind,
   };
-  const itemType = extractWorkLogItemType(payload);
   const itemId = extractWorkLogItemId(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (detail) {
@@ -1178,7 +1178,9 @@ function mergeDerivedWorkLogEntries(
   const rawCommand = next.rawCommand ?? previous.rawCommand;
   const output =
     previous.output && next.output
-      ? `${previous.output}${next.output}`
+      ? next.activityKind === "tool.completed" && next.output.startsWith(previous.output)
+        ? next.output
+        : `${previous.output}${next.output}`
       : (next.output ?? previous.output);
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
@@ -1761,45 +1763,211 @@ function extractAcpTextContent(value: unknown): string | null {
   return chunks.length > 0 ? chunks.join("\n") : null;
 }
 
-function extractToolOutput(payload: Record<string, unknown> | null): string | null {
-  const data = asRecord(payload?.data);
-  const item = asRecord(data?.item);
-  const itemResult = asRecord(item?.result);
-  const rawOutput = asRecord(data?.rawOutput);
+function asNonEmptyRawString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
 
-  const outputStreams: string[] = [];
-  const stdout = asTrimmedString(rawOutput?.stdout);
-  const stderr = asTrimmedString(rawOutput?.stderr);
-  if (stdout && stderr) {
-    outputStreams.push(`stdout\n${stdout}`, `stderr\n${stderr}`);
-  } else if (stdout) {
-    outputStreams.push(stdout);
-  } else if (stderr) {
-    outputStreams.push(stderr);
+const TOOL_OUTPUT_PREVIEW_MAX_LINES = 8;
+const TOOL_OUTPUT_PREVIEW_MAX_CHARS = 1_200;
+
+function stripHtmlForToolPreview(value: string): string {
+  return value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, " ")
+    .replace(/<[^>]+>/gu, " ")
+    .replace(/&nbsp;/giu, " ")
+    .replace(/&amp;/giu, "&")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;/giu, "'");
+}
+
+function normalizeMultilineToolPreview(value: string): string {
+  const lines: string[] = [];
+  for (const rawLine of stripHtmlForToolPreview(value).split(/\r?\n/u)) {
+    const line = normalizeInlinePreview(rawLine);
+    if (line.length > 0) {
+      lines.push(line);
+    }
+    if (lines.length >= TOOL_OUTPUT_PREVIEW_MAX_LINES) {
+      break;
+    }
+  }
+  const normalized = lines.join("\n");
+  if (normalized.length <= TOOL_OUTPUT_PREVIEW_MAX_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, TOOL_OUTPUT_PREVIEW_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function asPreviewString(value: unknown): string | null {
+  const direct = asTrimmedString(value);
+  return direct ? normalizeMultilineToolPreview(direct) : null;
+}
+
+function searchResultPreviewFromRecord(record: Record<string, unknown>): string | null {
+  const title =
+    asTrimmedString(record.title) ??
+    asTrimmedString(record.name) ??
+    asTrimmedString(record.heading) ??
+    asTrimmedString(record.url);
+  const url = asTrimmedString(record.url) ?? asTrimmedString(record.link);
+  const snippet =
+    asPreviewString(record.snippet) ??
+    asPreviewString(record.summary) ??
+    asPreviewString(record.description) ??
+    asPreviewString(record.text);
+
+  if (!title && !snippet) {
+    return null;
+  }
+  const suffix = snippet ? ` - ${snippet}` : "";
+  const source = url && title !== url ? ` (${url})` : "";
+  return `${title ?? "Result"}${source}${suffix}`;
+}
+
+function mcpContentPreview(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const lines: string[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const text = record ? asPreviewString(record.text) : asPreviewString(entry);
+    if (text) {
+      lines.push(text);
+    }
+    if (lines.length >= TOOL_OUTPUT_PREVIEW_MAX_LINES) {
+      break;
+    }
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function previewList(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const lines: string[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const preview = record ? searchResultPreviewFromRecord(record) : asPreviewString(entry);
+    if (preview) {
+      lines.push(`${lines.length + 1}. ${preview}`);
+    }
+    if (lines.length >= 5) {
+      break;
+    }
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function extractToolResultPreview(
+  payload: Record<string, unknown> | null,
+  itemType: WorkLogEntry["itemType"] | undefined,
+): string | null {
+  if (itemType === "command_execution") {
+    return null;
   }
 
-  const candidates: unknown[] = [
-    item?.aggregatedOutput,
-    itemResult?.content,
-    data?.rawOutput,
-    rawOutput?.content,
-    outputStreams.length > 0 ? outputStreams.join("\n") : null,
-    rawOutput?.output,
-    extractAcpTextContent(data?.content),
-  ];
+  const data = asRecord(payload?.data);
+  const rawOutput = asRecord(data?.rawOutput);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const result = asRecord(data?.result);
+  const output = asRecord(data?.output);
+  const sources = [rawOutput, itemResult, result, output, data].filter(
+    (source): source is Record<string, unknown> => source !== null,
+  );
 
-  for (const candidate of candidates) {
-    const text = asTrimmedString(candidate);
-    if (!text) {
-      continue;
+  for (const source of sources) {
+    const listPreview =
+      mcpContentPreview(source.content) ??
+      previewList(source.results) ??
+      previewList(source.items) ??
+      previewList(source.matches) ??
+      previewList(source.documents) ??
+      previewList(source.pages);
+    if (listPreview) {
+      return listPreview;
     }
-    const output = stripTrailingExitCode(text).output;
-    if (output) {
-      return output;
+  }
+
+  for (const source of sources) {
+    const direct =
+      asPreviewString(source.summary) ??
+      asPreviewString(source.snippet) ??
+      asPreviewString(source.content) ??
+      asPreviewString(source.text) ??
+      asPreviewString(source.output) ??
+      asPreviewString(source.stdout);
+    if (direct) {
+      return direct;
     }
+  }
+
+  const changedFiles = extractChangedFiles(payload);
+  if (changedFiles.length > 0) {
+    return changedFiles.slice(0, 8).join("\n");
   }
 
   return null;
+}
+
+function extractToolOutput(
+  payload: Record<string, unknown> | null,
+  itemType: WorkLogEntry["itemType"] | undefined,
+): string | null {
+  const data = asRecord(payload?.data);
+  const isCommandOutput = itemType === "command_execution";
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const aggregatedCommandOutput = isCommandOutput
+    ? (asNonEmptyRawString(item?.aggregatedOutput) ??
+      asNonEmptyRawString(itemResult?.content) ??
+      asNonEmptyRawString(extractAcpTextContent(data?.content)))
+    : null;
+  const rawOutput = asRecord(data?.rawOutput);
+  if (!rawOutput) {
+    const directRawOutput = isCommandOutput
+      ? asNonEmptyRawString(data?.rawOutput)
+      : asPreviewString(data?.rawOutput);
+    return (
+      directRawOutput ?? aggregatedCommandOutput ?? extractToolResultPreview(payload, itemType)
+    );
+  }
+
+  const content = isCommandOutput
+    ? asNonEmptyRawString(rawOutput.content)
+    : asTrimmedString(rawOutput.content);
+  if (content) {
+    return isCommandOutput ? content : normalizeMultilineToolPreview(content);
+  }
+
+  const output = isCommandOutput
+    ? asNonEmptyRawString(rawOutput.output)
+    : asTrimmedString(rawOutput.output);
+  if (output) {
+    return isCommandOutput ? output : normalizeMultilineToolPreview(output);
+  }
+
+  const stdout = isCommandOutput
+    ? asNonEmptyRawString(rawOutput.stdout)
+    : asTrimmedString(rawOutput.stdout);
+  const stderr = isCommandOutput
+    ? asNonEmptyRawString(rawOutput.stderr)
+    : asTrimmedString(rawOutput.stderr);
+  if (stdout && stderr) {
+    return isCommandOutput
+      ? `stdout\n${stdout}\n\nstderr\n${stderr}`
+      : normalizeMultilineToolPreview(`stdout\n${stdout}\n\nstderr\n${stderr}`);
+  }
+  const direct = stdout ?? stderr;
+  if (direct) {
+    return isCommandOutput ? direct : normalizeMultilineToolPreview(direct);
+  }
+  return aggregatedCommandOutput ?? extractToolResultPreview(payload, itemType);
 }
 
 function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean {
