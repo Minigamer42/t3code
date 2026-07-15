@@ -15,6 +15,7 @@ import {
   setProjectExpanded,
   setSidebarProjectScopeKey,
   setThreadChangedFilesExpanded,
+  setToolCallsExpanded,
   type UiState,
 } from "./uiStateStore";
 
@@ -27,11 +28,22 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     pullRequestMergeMethod: "merge",
+    toolCallsExpanded: false,
+    toolCallExpansionEpoch: 0,
     ...overrides,
   };
 }
 
 describe("uiStateStore pure functions", () => {
+  it("updates global tool-call expansion and advances its reset epoch", () => {
+    const initialState = makeUiState();
+    const expanded = setToolCallsExpanded(initialState, true);
+
+    expect(expanded.toolCallsExpanded).toBe(true);
+    expect(expanded.toolCallExpansionEpoch).toBe(1);
+    expect(setToolCallsExpanded(expanded, true)).toBe(expanded);
+  });
+
   it("stores server timestamps without moving visit state backwards", () => {
     const threadId = ThreadId.make("thread-1");
     const initialState = makeUiState();
@@ -203,6 +215,8 @@ describe("parsePersistedState", () => {
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
       pullRequestMergeMethod: "merge",
+      toolCallsExpanded: false,
+      toolCallExpansionEpoch: 0,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
           "turn-1": false,
@@ -332,6 +346,7 @@ describe("uiStateStore persistence", () => {
         },
       },
       pullRequestMergeMethod: "merge",
+      toolCallsExpanded: false,
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,

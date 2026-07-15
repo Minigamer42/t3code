@@ -1775,6 +1775,13 @@ export default function ChatView(props: ChatViewProps) {
   const visitThreadMutation = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const lastDispatchedVisitRef = useRef<string | null>(null);
   const lastVisitDispatchAtRef = useRef(0);
+  const toolCallsExpanded = useUiStateStore((store) => store.toolCallsExpanded);
+  const toolCallExpansionEpoch = useUiStateStore((store) => store.toolCallExpansionEpoch);
+  const setToolCallsExpanded = useUiStateStore((store) => store.setToolCallsExpanded);
+  const toggleToolCallsExpanded = useCallback(
+    () => setToolCallsExpanded(!toolCallsExpanded),
+    [setToolCallsExpanded, toolCallsExpanded],
+  );
   const settings = useEnvironmentSettings(environmentId);
   const clientSettingsHydrated = useClientSettingsHydrated();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -11656,6 +11663,8 @@ export default function ChatView(props: ChatViewProps) {
                 {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
                   ? {}
                   : { historyControls: threadHistoryControls })}
+                toolCallsExpanded={toolCallsExpanded}
+                toolCallExpansionEpoch={toolCallExpansionEpoch}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
@@ -11758,6 +11767,8 @@ export default function ChatView(props: ChatViewProps) {
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
+                              toolCallsExpanded={toolCallsExpanded}
+                              onToggleToolCallsExpanded={toggleToolCallsExpanded}
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}

@@ -436,6 +436,22 @@ function buildLongUserMessageText(tail = "deep hidden detail only after expand")
   ).join("\n");
 }
 
+function buildToolTimelineEntry(id: string, detail: string, tone: "tool" | "error" = "tool") {
+  return {
+    id: `${id}-entry`,
+    kind: "work" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    entry: {
+      id,
+      createdAt: MESSAGE_CREATED_AT,
+      label: "Run command",
+      tone,
+      itemType: "command_execution" as const,
+      detail,
+    },
+  };
+}
+
 function buildUserTimelineEntry(text: string) {
   return {
     id: "entry-1",
@@ -492,6 +508,56 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("globally expands existing and future tool rows", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let renderer: ReactTestRenderer | undefined;
+    const current = buildToolTimelineEntry("current", "current detail");
+    const future = buildToolTimelineEntry("future", "future detail");
+    try {
+      await act(() => {
+        renderer = create(<MessagesTimeline {...buildProps()} timelineEntries={[current]} />);
+      });
+      expect(
+        renderer!.root
+          .findAllByProps({ "aria-expanded": false })
+          .filter((node) => typeof node.type === "string"),
+      ).toHaveLength(1);
+      await act(() => {
+        renderer!.update(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[current, future]}
+            toolCallsExpanded
+            toolCallExpansionEpoch={1}
+          />,
+        );
+      });
+      expect(
+        renderer!.root
+          .findAllByProps({ "aria-expanded": true })
+          .filter((node) => typeof node.type === "string"),
+      ).toHaveLength(2);
+      await act(() => {
+        renderer!.update(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[current, future]}
+            toolCallsExpanded={false}
+            toolCallExpansionEpoch={2}
+          />,
+        );
+      });
+      expect(
+        renderer!.root
+          .findAllByProps({ "aria-expanded": false })
+          .filter((node) => typeof node.type === "string"),
+      ).toHaveLength(2);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
   it("shows dynamic tool input without cached output when the row is expanded", async () => {
     activityTestState.expanded = true;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

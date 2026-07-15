@@ -381,6 +381,8 @@ interface TimelineRowActivityState {
    * list itself has already left the timeline.
    */
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
+  toolCallsExpanded: boolean;
+  toolCallExpansionEpoch: number;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -389,6 +391,7 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 interface WorkGroupViewState {
   scrollPositions: Map<string, WorkGroupScrollAnchor>;
   expandedEntries: Set<string>;
+  entryExpansionOverrides?: Map<string, { epoch: number; expanded: boolean }>;
 }
 
 const WorkGroupViewCtx = createContext<{
@@ -546,6 +549,8 @@ interface MessagesTimelineProps {
   findQuery?: string;
   activeFindMatch?: ThreadFindMatch | null;
   findNavigationId?: number;
+  toolCallsExpanded?: boolean;
+  toolCallExpansionEpoch?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +640,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
+  toolCallsExpanded = false,
+  toolCallExpansionEpoch = 0,
 }: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
@@ -1445,6 +1452,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       awaitingUser,
       isPreparingWorktree,
       latestRunId: latestRun?.runId ?? null,
+      toolCallsExpanded,
+      toolCallExpansionEpoch,
     }),
     [
       awaitingUser,
@@ -1455,6 +1464,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       isRevertingCheckpoint,
       isWorking,
       latestRun?.runId,
+      toolCallsExpanded,
+      toolCallExpansionEpoch,
     ],
   );
   const listHeader = useMemo(() => {
@@ -5500,19 +5511,35 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ? notificationChildThreadId(workEntry.projectedItem.item.source)
       : undefined;
   const groupView = use(WorkGroupViewCtx);
-  const [expanded, setExpanded] = useState(
-    () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
+  const activity = use(TimelineRowActivityCtx);
+  const [expandedOverride, setExpandedOverride] = useState<{
+    epoch: number;
+    expanded: boolean;
+  } | null>(
+    () =>
+      groupView?.state.entryExpansionOverrides?.get(workEntry.id) ??
+      (groupView?.state.expandedEntries.has(workEntry.id)
+        ? { epoch: activity.toolCallExpansionEpoch, expanded: true }
+        : null),
   );
+  const expanded =
+    expandedOverride?.epoch === activity.toolCallExpansionEpoch
+      ? expandedOverride.expanded
+      : activity.toolCallsExpanded && workLogEntryIsToolLike(workEntry);
   const toggleExpanded = () => {
     const next = !expanded;
     if (groupView) {
       groupView.onToggleEntry(!next);
       if (next) groupView.state.expandedEntries.add(workEntry.id);
       else groupView.state.expandedEntries.delete(workEntry.id);
+      (groupView.state.entryExpansionOverrides ??= new Map()).set(workEntry.id, {
+        epoch: activity.toolCallExpansionEpoch,
+        expanded: next,
+      });
     } else {
       props.onToggleEntry?.(!next);
     }
-    setExpanded(next);
+    setExpandedOverride({ epoch: activity.toolCallExpansionEpoch, expanded: next });
   };
   const failureItem = workEntry.projectedItem?.item;
   if (failureItem?.type === "error" && failureItem.status === "failed") {

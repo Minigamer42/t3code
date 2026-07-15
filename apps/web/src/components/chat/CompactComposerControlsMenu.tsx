@@ -1,8 +1,9 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon } from "lucide-react";
+import { ChevronsUpDownIcon, EllipsisIcon } from "lucide-react";
 import {
   Menu,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -20,6 +21,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
     readonly mode: RuntimeMode;
     readonly label: string;
   }>;
+  toolCallsExpanded: boolean;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
@@ -30,6 +32,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
    */
   hidden?: boolean;
   onToggleInteractionMode: () => void;
+  onToggleToolCallsExpanded: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -89,6 +92,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             </MenuRadioItem>
           ))}
         </MenuRadioGroup>
+        <MenuDivider />
+        <MenuItem onClick={props.onToggleToolCallsExpanded}>
+          <ChevronsUpDownIcon className="size-4 shrink-0" />
+          {props.toolCallsExpanded ? "Collapse all tool calls" : "Expand all tool calls"}
+        </MenuItem>
       </MenuPopup>
     </Menu>
   );
