@@ -502,6 +502,11 @@ interface QueuedTurnSubmission {
     readonly interactionMode: ProviderInteractionMode;
   };
 }
+interface QueuedAutoDispatchBarrier {
+  readonly previousTurnId: TurnId | null;
+  readonly observedRunning: boolean;
+}
+
 function eventPathContainsSelector(event: Event, selector: string): boolean {
   const path = event.composedPath();
   if (path.length === 0 && event.target) {
@@ -1396,6 +1401,8 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const queuedDispatchInFlightRef = useRef(false);
   const pendingQueuedSendNowMessageIdsRef = useRef<MessageId[]>([]);
+  const [queuedAutoDispatchBarrier, setQueuedAutoDispatchBarrier] =
+    useState<QueuedAutoDispatchBarrier | null>(null);
   const autoDispatchAttemptedMessageIdsRef = useRef<Set<MessageId>>(new Set());
   const [interruptRequestedThreadId, setInterruptRequestedThreadId] = useState<ThreadId | null>(
     null,
@@ -4188,6 +4195,7 @@ function ChatViewContent(props: ChatViewProps) {
     autoDispatchAttemptedMessageIdsRef.current.clear();
     queuedDispatchInFlightRef.current = false;
     pendingQueuedSendNowMessageIdsRef.current = [];
+    setQueuedAutoDispatchBarrier(null);
     interruptRequestedThreadIdRef.current = null;
     interruptAttemptedTurnKeyRef.current = null;
     setInterruptRequestedThreadId(null);
@@ -5654,7 +5662,7 @@ function ChatViewContent(props: ChatViewProps) {
       const queued = queuedTurnSubmissionsRef.current.find(
         (submission) => submission.messageId === messageId,
       );
-      if (!queued) return;
+      if (!queued) return false;
 
       setSendingQueuedMessageIds((existing) => new Set(existing).add(messageId));
       continueFollowingTimelineForNewTurn();
@@ -5704,6 +5712,7 @@ function ChatViewContent(props: ChatViewProps) {
         next.delete(messageId);
         return next;
       });
+      return failure === null;
     },
     [
       beginLocalDispatch,
@@ -5723,22 +5732,53 @@ function ChatViewContent(props: ChatViewProps) {
         if (queueIfBusy && !pendingQueuedSendNowMessageIdsRef.current.includes(messageId)) {
           pendingQueuedSendNowMessageIdsRef.current.push(messageId);
         }
-        return;
+        return false;
       }
 
       queuedDispatchInFlightRef.current = true;
+      let initialDispatchAccepted = false;
+      let isInitialDispatch = true;
       try {
         let nextMessageId: MessageId | undefined = messageId;
         while (nextMessageId) {
-          await dispatchQueuedTurnOnce(nextMessageId);
+          const accepted = await dispatchQueuedTurnOnce(nextMessageId);
+          if (isInitialDispatch) {
+            initialDispatchAccepted = accepted;
+            isInitialDispatch = false;
+          }
           nextMessageId = pendingQueuedSendNowMessageIdsRef.current.shift();
         }
       } finally {
         queuedDispatchInFlightRef.current = false;
       }
+      return initialDispatchAccepted;
     },
     [dispatchQueuedTurnOnce],
   );
+
+  useEffect(() => {
+    if (!queuedAutoDispatchBarrier) return;
+
+    const latestTurnId = activeLatestTurn?.turnId ?? null;
+    const turnChanged = latestTurnId !== queuedAutoDispatchBarrier.previousTurnId;
+    const providerRunning = phase === "running" || !latestTurnSettled;
+
+    if (!queuedAutoDispatchBarrier.observedRunning) {
+      if (turnChanged && !providerRunning && latestTurnSettled) {
+        // Very short turns may start and settle between two client snapshots.
+        setQueuedAutoDispatchBarrier(null);
+      } else if (providerRunning || turnChanged) {
+        setQueuedAutoDispatchBarrier((current) =>
+          current ? { ...current, observedRunning: true } : current,
+        );
+      }
+      return;
+    }
+
+    if (!providerRunning && latestTurnSettled && !isSendBusy) {
+      setQueuedAutoDispatchBarrier(null);
+    }
+  }, [activeLatestTurn?.turnId, isSendBusy, latestTurnSettled, phase, queuedAutoDispatchBarrier]);
 
   useEffect(() => {
     const next = queuedTurnSubmissions[0];
@@ -5749,6 +5789,7 @@ function ChatViewContent(props: ChatViewProps) {
       isSendBusy ||
       isConnecting ||
       activeEnvironmentUnavailable ||
+      queuedAutoDispatchBarrier !== null ||
       queuedDispatchInFlightRef.current ||
       autoDispatchAttemptedMessageIdsRef.current.has(next.messageId)
     ) {
@@ -5764,17 +5805,25 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
       autoDispatchAttemptedMessageIdsRef.current.add(next.messageId);
-      void dispatchQueuedTurn(next.messageId);
+      setQueuedAutoDispatchBarrier({
+        previousTurnId: activeLatestTurn?.turnId ?? null,
+        observedRunning: false,
+      });
+      void dispatchQueuedTurn(next.messageId).then((accepted) => {
+        if (!accepted) setQueuedAutoDispatchBarrier(null);
+      });
     }, QUEUED_TURN_AUTO_DISPATCH_QUIET_MS);
     return () => window.clearTimeout(timer);
   }, [
     activeThread?.updatedAt,
+    activeLatestTurn?.turnId,
     activeEnvironmentUnavailable,
     dispatchQueuedTurn,
     isConnecting,
     isSendBusy,
     latestTurnSettled,
     phase,
+    queuedAutoDispatchBarrier,
     queuedTurnSubmissions,
   ]);
 
