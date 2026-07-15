@@ -1513,6 +1513,23 @@ export const make = Effect.gen(function* () {
       );
   });
 
+  const readCommitMessagePolicy = Effect.fn("readCommitMessagePolicy")(function* (cwd: string) {
+    const instructionsPath = path.join(cwd, ".t3code", "commit-message.md");
+    const exists = yield* fileSystem
+      .exists(instructionsPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) {
+      return undefined;
+    }
+
+    const instructions = yield* fileSystem
+      .readFileString(instructionsPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    return instructions.trim()
+      ? customTextGenerationPolicy({ commitInstructions: instructions })
+      : undefined;
+  });
+
   const resolveCommitAndBranchSuggestion = Effect.fn("resolveCommitAndBranchSuggestion")(
     function* (input: {
       cwd: string;
@@ -1540,7 +1557,19 @@ export const make = Effect.gen(function* () {
         };
       }
 
-      const policy = yield* resolveStylePolicy(input.cwd, input.settings.style);
+      const stylePolicy = yield* resolveStylePolicy(input.cwd, input.settings.style);
+      const repositoryPolicy = yield* readCommitMessagePolicy(input.cwd);
+      const policy = repositoryPolicy?.commitInstructions
+        ? {
+            ...stylePolicy,
+            commitInstructions: [
+              stylePolicy.commitInstructions,
+              repositoryPolicy.commitInstructions,
+            ]
+              .filter((instructions): instructions is string => Boolean(instructions))
+              .join("\n\n"),
+          }
+        : stylePolicy;
 
       const generated = yield* textGeneration
         .generateCommitMessage({
