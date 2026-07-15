@@ -269,6 +269,7 @@ export class GitLabCli extends Context.Service<
     readonly execute: (input: {
       readonly cwd: string;
       readonly args: ReadonlyArray<string>;
+      readonly stdin?: string;
       readonly timeoutMs?: number;
       /** Piped to the child's stdin, for payloads that must never appear in argv. */
       readonly stdin?: string;
@@ -307,6 +308,7 @@ export class GitLabCli extends Context.Service<
       readonly target?: SourceControlProvider.SourceControlRefSelector;
       readonly title: string;
       readonly bodyFile: string;
+      readonly body?: string;
     }) => Effect.Effect<void, GitLabCliError>;
 
     readonly getDefaultBranch: (input: {
@@ -359,16 +361,16 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
-function stateArgs(state: "open" | "closed" | "merged" | "all"): ReadonlyArray<string> {
+function gitLabApiState(state: "open" | "closed" | "merged" | "all"): string {
   switch (state) {
     case "open":
-      return [];
+      return "opened";
     case "closed":
-      return ["--closed"];
+      return "closed";
     case "merged":
-      return ["--merged"];
+      return "merged";
     case "all":
-      return ["--all"];
+      return "all";
   }
 }
 
@@ -429,6 +431,7 @@ export const make = Effect.gen(function* () {
         command: "glab",
         args: input.args,
         cwd: input.cwd,
+        ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
         ...(input.maxOutputBytes === undefined ? {} : { maxOutputBytes: input.maxOutputBytes }),
@@ -466,15 +469,20 @@ export const make = Effect.gen(function* () {
       execute({
         cwd: input.cwd,
         args: [
-          "mr",
-          "list",
-          "--source-branch",
-          sourceRefName(input),
-          ...stateArgs(input.state),
-          "--per-page",
-          String(input.limit ?? 20),
-          "--output",
-          "json",
+          "api",
+          "--method",
+          "GET",
+          "projects/:fullpath/merge_requests",
+          "--raw-field",
+          `source_branch=${sourceRefName(input)}`,
+          "--raw-field",
+          `state=${gitLabApiState(input.state)}`,
+          "--raw-field",
+          `per_page=${String(input.limit ?? 20)}`,
+          "--raw-field",
+          "order_by=updated_at",
+          "--raw-field",
+          "sort=desc",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -630,8 +638,9 @@ export const make = Effect.gen(function* () {
           "--raw-field",
           `title=${input.title}`,
           "--field",
-          `description=@${input.bodyFile}`,
+          input.body === undefined ? `description=@${input.bodyFile}` : "description=@-",
         ],
+        ...(input.body !== undefined ? { stdin: input.body } : {}),
       }).pipe(Effect.asVoid);
     },
     getDefaultBranch: (input) =>
