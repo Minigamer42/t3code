@@ -120,6 +120,10 @@ export class SourceControlProvider extends Context.Service<
       readonly cwd: string;
       readonly context?: SourceControlProviderContext;
     }) => Effect.Effect<string | null, SourceControlProviderError>;
+    readonly getConfiguredChangeRequestTemplate: (input: {
+      readonly cwd: string;
+      readonly context?: SourceControlProviderContext;
+    }) => Effect.Effect<string | null, SourceControlProviderError>;
     readonly checkoutChangeRequest: (input: {
       readonly cwd: string;
       readonly context?: SourceControlProviderContext;

@@ -113,6 +113,13 @@ function unsupportedProvider(
         cwd: input.cwd,
         detail: `No ${kind} source control provider is registered.`,
       }),
+    getConfiguredChangeRequestTemplate: (input) =>
+      new SourceControlProviderError({
+        provider: kind,
+        operation: "getConfiguredChangeRequestTemplate",
+        cwd: input.cwd,
+        detail: `No ${kind} source control provider is registered.`,
+      }),
     checkoutChangeRequest: (input) =>
       new SourceControlProviderError({
         provider: kind,
@@ -183,6 +190,11 @@ function bindProviderContext(
     createRepository: (input) => provider.createRepository(input),
     getDefaultBranch: (input) =>
       provider.getDefaultBranch({
+        ...input,
+        context: input.context ?? context,
+      }),
+    getConfiguredChangeRequestTemplate: (input) =>
+      provider.getConfiguredChangeRequestTemplate({
         ...input,
         context: input.context ?? context,
       }),

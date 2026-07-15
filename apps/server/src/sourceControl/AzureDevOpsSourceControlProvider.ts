@@ -204,6 +204,7 @@ export const make = Effect.gen(function* () {
             }),
         ),
       ),
+    getConfiguredChangeRequestTemplate: () => Effect.succeed(null),
     checkoutChangeRequest: (input) =>
       azure
         .checkoutPullRequest({

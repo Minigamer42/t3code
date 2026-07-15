@@ -60,6 +60,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
+import { defaultChangeRequestTemplatePaths } from "../sourceControl/changeRequestTemplates.ts";
 import { detectPrTemplate } from "../sourceControl/PrTemplateDetection.ts";
 import type { ChangeRequest } from "@t3tools/contracts";
 
@@ -1526,6 +1527,26 @@ export const make = Effect.gen(function* () {
       );
   });
 
+  const readDefaultChangeRequestTemplate = Effect.fn("readDefaultChangeRequestTemplate")(function* (
+    cwd: string,
+    providerKind: "gitlab",
+    baseRangeRef: string,
+  ) {
+    for (const templatePath of defaultChangeRequestTemplatePaths(providerKind)) {
+      const result = yield* gitCore.execute({
+        operation: "GitVcsDriver.readDefaultChangeRequestTemplate",
+        cwd,
+        args: ["show", `${baseRangeRef}:${templatePath}`],
+        allowNonZeroExit: true,
+        maxOutputBytes: 64_000,
+        appendTruncationMarker: true,
+      });
+      const template = result.stdout.trim();
+      if (result.exitCode === 0 && template.length > 0) return template;
+    }
+    return undefined;
+  });
+
   const readCommitMessagePolicy = Effect.fn("readCommitMessagePolicy")(function* (cwd: string) {
     const instructionsPath = path.join(cwd, ".t3code", "commit-message.md");
     const exists = yield* fileSystem
@@ -1769,10 +1790,21 @@ export const make = Effect.gen(function* () {
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
     const policy = yield* resolveStylePolicy(cwd, settings.style);
-    const changeRequestTemplate =
-      settings.style.followChangeRequestTemplates && provider.kind === "github"
-        ? Option.getOrUndefined(yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute))
-        : undefined;
+    let changeRequestTemplate: string | undefined;
+    if (settings.style.followChangeRequestTemplates) {
+      if (provider.kind === "github") {
+        changeRequestTemplate = Option.getOrUndefined(
+          yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute),
+        );
+      } else if (provider.kind === "gitlab") {
+        const configuredTemplate = yield* provider
+          .getConfiguredChangeRequestTemplate({ cwd })
+          .pipe(Effect.orElseSucceed(() => null));
+        changeRequestTemplate =
+          configuredTemplate ??
+          (yield* readDefaultChangeRequestTemplate(cwd, provider.kind, baseRangeRef));
+      }
+    }
 
     const generated = yield* textGeneration.generatePrContent({
       cwd,
