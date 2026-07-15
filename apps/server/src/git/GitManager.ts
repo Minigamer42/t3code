@@ -1547,8 +1547,11 @@ export const make = Effect.gen(function* () {
     return undefined;
   });
 
-  const readCommitMessagePolicy = Effect.fn("readCommitMessagePolicy")(function* (cwd: string) {
-    const instructionsPath = path.join(cwd, ".t3code", "commit-message.md");
+  const readTextGenerationInstructions = Effect.fn("readTextGenerationInstructions")(function* (
+    cwd: string,
+    fileName: string,
+  ) {
+    const instructionsPath = path.join(cwd, ".t3code", fileName);
     const exists = yield* fileSystem
       .exists(instructionsPath)
       .pipe(Effect.orElseSucceed(() => false));
@@ -1559,8 +1562,20 @@ export const make = Effect.gen(function* () {
     const instructions = yield* fileSystem
       .readFileString(instructionsPath)
       .pipe(Effect.orElseSucceed(() => ""));
-    return instructions.trim()
+    return instructions.trim() || undefined;
+  });
+
+  const readCommitMessagePolicy = Effect.fn("readCommitMessagePolicy")(function* (cwd: string) {
+    const instructions = yield* readTextGenerationInstructions(cwd, "commit-message.md");
+    return instructions
       ? customTextGenerationPolicy({ commitInstructions: instructions })
+      : undefined;
+  });
+
+  const readChangeRequestPolicy = Effect.fn("readChangeRequestPolicy")(function* (cwd: string) {
+    const instructions = yield* readTextGenerationInstructions(cwd, "change-request.md");
+    return instructions
+      ? customTextGenerationPolicy({ changeRequestInstructions: instructions })
       : undefined;
   });
 
@@ -1789,7 +1804,19 @@ export const make = Effect.gen(function* () {
     });
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
-    const policy = yield* resolveStylePolicy(cwd, settings.style);
+    const stylePolicy = yield* resolveStylePolicy(cwd, settings.style);
+    const repositoryPolicy = yield* readChangeRequestPolicy(cwd);
+    const policy = repositoryPolicy?.changeRequestInstructions
+      ? {
+          ...stylePolicy,
+          changeRequestInstructions: [
+            stylePolicy.changeRequestInstructions,
+            repositoryPolicy.changeRequestInstructions,
+          ]
+            .filter((instructions): instructions is string => Boolean(instructions))
+            .join("\n\n"),
+        }
+      : stylePolicy;
     let changeRequestTemplate: string | undefined;
     if (settings.style.followChangeRequestTemplates) {
       if (provider.kind === "github") {
