@@ -27,6 +27,7 @@ export interface PersistedUiState {
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpansionVersion?: typeof THREAD_CHANGED_FILES_EXPANSION_VERSION;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
+  toolCallsExpanded?: boolean;
 }
 
 export interface UiProjectState {
@@ -43,7 +44,12 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiToolCallState {
+  toolCallsExpanded: boolean;
+  toolCallExpansionEpoch: number;
+}
+
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState, UiToolCallState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -51,6 +57,8 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
+  toolCallsExpanded: true,
+  toolCallExpansionEpoch: 0,
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -135,6 +143,9 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       parsed.defaultAdvertisedEndpointKey.length > 0
         ? parsed.defaultAdvertisedEndpointKey
         : null,
+    toolCallsExpanded:
+      typeof parsed.toolCallsExpanded === "boolean" ? parsed.toolCallsExpanded : true,
+    toolCallExpansionEpoch: 0,
   };
 }
 
@@ -207,6 +218,7 @@ export function persistState(state: UiState): void {
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
+        toolCallsExpanded: state.toolCallsExpanded,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -304,6 +316,17 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
+export function setToolCallsExpanded(state: UiState, expanded: boolean): UiState {
+  if (state.toolCallsExpanded === expanded) {
+    return state;
+  }
+  return {
+    ...state,
+    toolCallsExpanded: expanded,
+    toolCallExpansionEpoch: state.toolCallExpansionEpoch + 1,
+  };
+}
+
 export function resolveProjectExpanded(
   projectExpandedById: Readonly<Record<string, boolean>>,
   preferenceKeys: readonly string[],
@@ -386,6 +409,7 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
+  setToolCallsExpanded: (expanded: boolean) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
@@ -404,6 +428,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
+  setToolCallsExpanded: (expanded) => set((state) => setToolCallsExpanded(state, expanded)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>

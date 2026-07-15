@@ -1300,6 +1300,13 @@ function ChatViewContent(props: ChatViewProps) {
     };
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const toolCallsExpanded = useUiStateStore((store) => store.toolCallsExpanded);
+  const toolCallExpansionEpoch = useUiStateStore((store) => store.toolCallExpansionEpoch);
+  const setToolCallsExpanded = useUiStateStore((store) => store.setToolCallsExpanded);
+  const toggleToolCallsExpanded = useCallback(
+    () => setToolCallsExpanded(!toolCallsExpanded),
+    [setToolCallsExpanded, toolCallsExpanded],
+  );
   const settings = useEnvironmentSettings(environmentId);
   // New-thread defaults live in the primary environment's settings.json (the
   // settings UI never writes to remote environments), so read them from the
@@ -6425,6 +6432,8 @@ function ChatViewContent(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                toolCallsExpanded={toolCallsExpanded}
+                toolCallExpansionEpoch={toolCallExpansionEpoch}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
@@ -6538,6 +6547,7 @@ function ChatViewContent(props: ChatViewProps) {
                             activeProposedPlan={activeProposedPlan}
                             activeTasksProgress={activeComposerTasksProgress}
                             activeTaskSteps={activeComposerTaskSteps}
+                            toolCallsExpanded={toolCallsExpanded}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}
@@ -6575,6 +6585,7 @@ function ChatViewContent(props: ChatViewProps) {
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
+                            onToggleToolCallsExpanded={toggleToolCallsExpanded}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}

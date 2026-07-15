@@ -155,6 +155,8 @@ interface TimelineRowActivityState {
   workingStepLabel: string | null;
   activeTurnId: TurnId | null;
   expandedTurnIds: ReadonlySet<TurnId>;
+  toolCallsExpanded: boolean;
+  toolCallExpansionEpoch: number;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -242,6 +244,8 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
+  toolCallsExpanded?: boolean;
+  toolCallExpansionEpoch?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +284,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  toolCallsExpanded = true,
+  toolCallExpansionEpoch = 0,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
@@ -571,6 +577,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workingStepLabel,
       activeTurnId,
       expandedTurnIds: effectiveExpandedTurnIds,
+      toolCallsExpanded,
+      toolCallExpansionEpoch,
     }),
     [
       activeTurnId,
@@ -578,6 +586,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isRevertingCheckpoint,
       isWorking,
       latestTurn?.turnId,
+      toolCallsExpanded,
+      toolCallExpansionEpoch,
       workingStepLabel,
     ],
   );
@@ -2680,6 +2690,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const expandedContent = buildToolCallExpandedContent(workEntry, workspaceRoot);
   const canExpand = expandedContent !== null;
   const defaultExpanded =
+    activity.toolCallsExpanded &&
     canExpand &&
     workEntry.turnId !== undefined &&
     workEntry.turnId !== null &&
@@ -2691,8 +2702,14 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       workEntry.detail !== undefined ||
       (workEntry.changedFiles?.length ?? 0) > 0 ||
       workEntry.toolData !== undefined);
-  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
-  const expanded = expandedOverride ?? defaultExpanded;
+  const [expandedOverride, setExpandedOverride] = useState<{
+    epoch: number;
+    expanded: boolean;
+  } | null>(null);
+  const expanded =
+    expandedOverride?.epoch === activity.toolCallExpansionEpoch
+      ? expandedOverride.expanded
+      : defaultExpanded;
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
@@ -2723,11 +2740,18 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         tabIndex: 0 as const,
         "aria-label": accessibleDisplayText,
         "aria-expanded": expanded,
-        onClick: () => setExpandedOverride(!expanded),
+        onClick: () =>
+          setExpandedOverride({
+            epoch: activity.toolCallExpansionEpoch,
+            expanded: !expanded,
+          }),
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setExpandedOverride(!expanded);
+            setExpandedOverride({
+              epoch: activity.toolCallExpansionEpoch,
+              expanded: !expanded,
+            });
           }
         },
       }

@@ -225,6 +225,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
+  ChevronsUpDownIcon,
   CircleAlertIcon,
   PencilRulerIcon,
   type LucideIcon,
@@ -328,7 +329,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  toolCallsExpanded: boolean;
   onToggleInteractionMode: () => void;
+  onToggleToolCallsExpanded: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
@@ -337,6 +340,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
       : "Default mode — click to enter plan mode";
+  const toolCallsTooltip = props.toolCallsExpanded
+    ? "Collapse all tool calls"
+    : "Expand all tool calls";
 
   const interactionModeToggle = props.showInteractionModeToggle ? (
     <>
@@ -412,6 +418,25 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       </Tooltip>
 
       {interactionModeToggle}
+
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              className="size-8 shrink-0 p-0 text-secondary-label hover:text-foreground"
+              size="icon-sm"
+              type="button"
+              onClick={props.onToggleToolCallsExpanded}
+              aria-label={toolCallsTooltip}
+              aria-pressed={!props.toolCallsExpanded}
+            />
+          }
+        >
+          <ChevronsUpDownIcon className="size-4" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{toolCallsTooltip}</TooltipPopup>
+      </Tooltip>
     </>
   );
 });
@@ -575,6 +600,7 @@ export interface ChatComposerProps {
   activeProposedPlan: Thread["proposedPlans"][number] | null;
   activeTasksProgress: ComposerTasksProgress | null;
   activeTaskSteps: readonly ComposerTaskStep[] | null;
+  toolCallsExpanded: boolean;
 
   // Mode
   runtimeMode: RuntimeMode;
@@ -627,6 +653,7 @@ export interface ChatComposerProps {
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  onToggleToolCallsExpanded: () => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -671,6 +698,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     activeTasksProgress,
     activeTaskSteps,
+    toolCallsExpanded,
     runtimeMode,
     interactionMode,
     lockedProvider,
@@ -701,6 +729,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
+    onToggleToolCallsExpanded,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -3320,9 +3349,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <CompactComposerControlsMenu
                       interactionMode={interactionMode}
                       runtimeMode={runtimeMode}
+                      toolCallsExpanded={toolCallsExpanded}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
+                      onToggleToolCallsExpanded={onToggleToolCallsExpanded}
                       onRuntimeModeChange={handleRuntimeModeChange}
                     />
                   ) : (
@@ -3342,7 +3373,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         }
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
+                        toolCallsExpanded={toolCallsExpanded}
                         onToggleInteractionMode={toggleInteractionMode}
+                        onToggleToolCallsExpanded={onToggleToolCallsExpanded}
                         onRuntimeModeChange={handleRuntimeModeChange}
                       />
                     </>

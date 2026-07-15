@@ -24,6 +24,8 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    toolCallsExpanded: true,
+    toolCallExpansionEpoch: 0,
     ...overrides,
   };
 }
