@@ -1164,8 +1164,21 @@ export const make = Effect.gen(function* () {
     const remoteUrl =
       (yield* readConfigValueNullable(cwd, `remote.${preferredRemoteName}.url`)) ??
       (yield* readConfigValueNullable(cwd, "remote.origin.url"));
+    if (!remoteUrl) {
+      return null;
+    }
 
-    return remoteUrl ? detectSourceControlProviderFromGitRemoteUrl(remoteUrl) : null;
+    const detectedProvider = detectSourceControlProviderFromGitRemoteUrl(remoteUrl);
+    if (detectedProvider?.kind !== "unknown") {
+      return detectedProvider;
+    }
+
+    return yield* sourceControlProviders.resolveHandle({ cwd }).pipe(
+      Effect.map((handle) =>
+        handle.context?.remoteUrl === remoteUrl ? handle.context.provider : detectedProvider,
+      ),
+      Effect.orElseSucceed(() => detectedProvider),
+    );
   });
 
   const resolveRemoteRepositoryContext = Effect.fn("resolveRemoteRepositoryContext")(function* (
