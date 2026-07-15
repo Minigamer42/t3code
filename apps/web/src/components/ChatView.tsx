@@ -1397,6 +1397,11 @@ function ChatViewContent(props: ChatViewProps) {
   const queuedDispatchInFlightRef = useRef(false);
   const pendingQueuedSendNowMessageIdsRef = useRef<MessageId[]>([]);
   const autoDispatchAttemptedMessageIdsRef = useRef<Set<MessageId>>(new Set());
+  const [interruptRequestedThreadId, setInterruptRequestedThreadId] = useState<ThreadId | null>(
+    null,
+  );
+  const interruptRequestedThreadIdRef = useRef<ThreadId | null>(null);
+  const interruptAttemptedTurnKeyRef = useRef<string | null>(null);
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, LocalThreadErrorEntry>
   >({});
@@ -2378,6 +2383,11 @@ function ChatViewContent(props: ChatViewProps) {
     threadError,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isTurnInterruptible =
+    phase === "running" ||
+    isSendBusy ||
+    !latestTurnSettled ||
+    interruptRequestedThreadId === activeThread?.id;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -4178,6 +4188,9 @@ function ChatViewContent(props: ChatViewProps) {
     autoDispatchAttemptedMessageIdsRef.current.clear();
     queuedDispatchInFlightRef.current = false;
     pendingQueuedSendNowMessageIdsRef.current = [];
+    interruptRequestedThreadIdRef.current = null;
+    interruptAttemptedTurnKeyRef.current = null;
+    setInterruptRequestedThreadId(null);
     setExpandedImage(null);
   }, [draftId, resetLocalDispatch, threadId]);
 
@@ -5045,6 +5058,73 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
+  const requestThreadInterrupt = useCallback(
+    async (input: { threadId: ThreadId; turnId?: TurnId }) => {
+      const result = await interruptThreadTurn({
+        environmentId,
+        input,
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          input.threadId,
+          error instanceof Error ? error.message : "Failed to interrupt the current turn.",
+        );
+      }
+    },
+    [environmentId, interruptThreadTurn, setThreadError],
+  );
+
+  const interruptAcceptedDispatchIfRequested = useCallback(
+    async (threadId: ThreadId) => {
+      if (interruptRequestedThreadIdRef.current !== threadId) return;
+      await requestThreadInterrupt({ threadId });
+    },
+    [requestThreadInterrupt],
+  );
+
+  useEffect(() => {
+    if (
+      interruptRequestedThreadId === null ||
+      !activeThread ||
+      activeThread.id !== interruptRequestedThreadId
+    ) {
+      return;
+    }
+
+    if (phase === "running") {
+      const activeTurnId =
+        activeThread.session?.status === "running"
+          ? activeThread.session.activeTurnId
+          : activeLatestTurn?.state === "running"
+            ? activeLatestTurn.turnId
+            : null;
+      const turnKey = activeTurnId ?? `${activeThread.id}:running`;
+      if (interruptAttemptedTurnKeyRef.current !== turnKey) {
+        interruptAttemptedTurnKeyRef.current = turnKey;
+        void requestThreadInterrupt({
+          threadId: activeThread.id,
+          ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        });
+      }
+      return;
+    }
+
+    if (!isSendBusy && latestTurnSettled && !sendInFlightRef.current) {
+      interruptRequestedThreadIdRef.current = null;
+      interruptAttemptedTurnKeyRef.current = null;
+      setInterruptRequestedThreadId(null);
+    }
+  }, [
+    activeLatestTurn,
+    activeThread,
+    interruptRequestedThreadId,
+    isSendBusy,
+    latestTurnSettled,
+    phase,
+    requestThreadInterrupt,
+  ]);
+
   const onSend = async (
     e?: { preventDefault: () => void },
     directAnnotation?: {
@@ -5491,6 +5571,7 @@ function ChatViewContent(props: ChatViewProps) {
         } else {
           turnSubmissionAccepted = true;
           acknowledgeActiveThreadWoke();
+          await interruptAcceptedDispatchIfRequested(threadIdForSend);
         }
       }
     }
@@ -5576,6 +5657,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (!queued) return;
 
       setSendingQueuedMessageIds((existing) => new Set(existing).add(messageId));
+      continueFollowingTimelineForNewTurn();
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(queued.input.threadId, null);
       const dispatchedAt = new Date().toISOString();
@@ -5599,6 +5681,8 @@ function ChatViewContent(props: ChatViewProps) {
         });
         if (startResult._tag === "Failure") {
           failure = startResult;
+        } else {
+          await interruptAcceptedDispatchIfRequested(queued.input.threadId);
         }
       }
 
@@ -5623,6 +5707,8 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [
       beginLocalDispatch,
+      continueFollowingTimelineForNewTurn,
+      interruptAcceptedDispatchIfRequested,
       persistThreadSettingsForNextTurn,
       removeQueuedTurnSubmission,
       resetLocalDispatch,
@@ -5800,16 +5886,16 @@ function ChatViewContent(props: ChatViewProps) {
 
   const onInterrupt = async () => {
     if (!activeThread) return;
-    const result = await interruptThreadTurn({
-      environmentId,
-      input: buildThreadTurnInterruptInput(activeThread),
-    });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      setThreadError(
-        activeThread.id,
-        error instanceof Error ? error.message : "Failed to interrupt the current turn.",
-      );
+    const interruptInput = buildThreadTurnInterruptInput(activeThread);
+    interruptRequestedThreadIdRef.current = activeThread.id;
+    interruptAttemptedTurnKeyRef.current =
+      phase === "running" ? (interruptInput.turnId ?? `${activeThread.id}:running`) : null;
+    setInterruptRequestedThreadId(activeThread.id);
+    await requestThreadInterrupt(interruptInput);
+    if (phase !== "running" && !isSendBusy && latestTurnSettled && !sendInFlightRef.current) {
+      interruptRequestedThreadIdRef.current = null;
+      interruptAttemptedTurnKeyRef.current = null;
+      setInterruptRequestedThreadId(null);
     }
   };
 
@@ -6099,6 +6185,9 @@ function ChatViewContent(props: ChatViewProps) {
           },
         });
         failure = startResult._tag === "Failure" ? startResult : null;
+        if (failure === null) {
+          await interruptAcceptedDispatchIfRequested(threadIdForSend);
+        }
       }
 
       if (failure === null) {
@@ -6129,6 +6218,8 @@ function ChatViewContent(props: ChatViewProps) {
       isSendBusy,
       isServerThread,
       localCheckoutBranchMismatch,
+      continueFollowingTimelineForNewTurn,
+      interruptAcceptedDispatchIfRequested,
       persistThreadSettingsForNextTurn,
       resetLocalDispatch,
       runtimeMode,
@@ -6855,6 +6946,7 @@ function ChatViewContent(props: ChatViewProps) {
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
+                            isTurnInterruptible={isTurnInterruptible}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={threadDetailLoading ? "Messages loading" : null}

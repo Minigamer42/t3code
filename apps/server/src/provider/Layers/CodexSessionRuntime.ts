@@ -961,6 +961,20 @@ export const makeCodexSessionRuntime = (
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
     );
+    const cleanBackgroundTerminals = (providerThreadId: string) =>
+      client.raw
+        .request("thread/backgroundTerminals/clean", {
+          threadId: providerThreadId,
+        })
+        .pipe(
+          Effect.asVoid,
+          Effect.catch((cause) =>
+            Effect.logWarning("Failed to clean Codex background terminals after interrupt.", {
+              providerThreadId,
+              cause,
+            }),
+          ),
+        );
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const randomUUIDv4 = (purpose: CodexErrors.CodexAppServerIdentifierPurpose) =>
@@ -1918,6 +1932,10 @@ export const makeCodexSessionRuntime = (
             threadId: providerThreadId,
             turnId: effectiveTurnId,
           });
+          // Codex intentionally leaves turn-owned background terminals alive
+          // after turn/interrupt. A stop action must clean them explicitly so
+          // the visible interrupted state also reflects the actual process.
+          yield* cleanBackgroundTerminals(providerThreadId);
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;
