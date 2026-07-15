@@ -5152,9 +5152,13 @@ function ChatViewContent(props: ChatViewProps) {
         }),
       );
     };
+    const canSteerWhileDispatchBusy =
+      delivery === "steer" &&
+      isServerThread &&
+      (phase === "running" || queuedDispatchInFlightRef.current);
     if (
       !activeThread ||
-      isSendBusy ||
+      (isSendBusy && !canSteerWhileDispatchBusy) ||
       isConnecting ||
       threadDetailLoading ||
       sendInFlightRef.current

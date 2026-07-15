@@ -1986,6 +1986,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => {
+    if (key === "Enter" && !event.shiftKey && (event.ctrlKey || event.metaKey)) {
+      submitComposer(undefined, "steer");
+      return true;
+    }
     if (key === "Tab" && event.shiftKey) {
       if (!planModeUiEnabled) return false;
       toggleInteractionMode();
@@ -2013,7 +2017,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       key === "Enter" &&
       shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })
     ) {
-      submitComposer(undefined, event.ctrlKey || event.metaKey ? "steer" : "default");
+      submitComposer(undefined, "default");
       return true;
     }
     return false;
