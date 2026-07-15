@@ -1498,6 +1498,13 @@ export default function ChatView(props: ChatViewProps) {
     };
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const toolCallsExpanded = useUiStateStore((store) => store.toolCallsExpanded);
+  const toolCallExpansionEpoch = useUiStateStore((store) => store.toolCallExpansionEpoch);
+  const setToolCallsExpanded = useUiStateStore((store) => store.setToolCallsExpanded);
+  const toggleToolCallsExpanded = useCallback(
+    () => setToolCallsExpanded(!toolCallsExpanded),
+    [setToolCallsExpanded, toolCallsExpanded],
+  );
   const settings = useEnvironmentSettings(environmentId);
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -8299,6 +8306,8 @@ export default function ChatView(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                toolCallsExpanded={toolCallsExpanded}
+                toolCallExpansionEpoch={toolCallExpansionEpoch}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
@@ -8427,6 +8436,7 @@ export default function ChatView(props: ChatViewProps) {
                             activeTasksProgress={activeComposerTasksProgress}
                             activeTaskSteps={activeComposerTaskSteps}
                             threadSyncPhase={activeEnvironmentUnavailable ? null : threadSyncPhase}
+                            toolCallsExpanded={toolCallsExpanded}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}
@@ -8482,6 +8492,7 @@ export default function ChatView(props: ChatViewProps) {
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
+                            onToggleToolCallsExpanded={toggleToolCallsExpanded}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}

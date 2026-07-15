@@ -846,6 +846,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
+  ChevronsUpDownIcon,
   CircleAlertIcon,
   PaperclipIcon,
   PencilRulerIcon,
@@ -1001,9 +1002,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  toolCallsExpanded: boolean;
   size?: "sm" | "xs";
   hidden?: boolean;
   onToggleInteractionMode: () => void;
+  onToggleToolCallsExpanded: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const size = props.size ?? "sm";
@@ -1014,6 +1017,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
       : "Default mode — click to enter plan mode";
+  const toolCallsTooltip = props.toolCallsExpanded
+    ? "Collapse all tool calls"
+    : "Expand all tool calls";
 
   const interactionModeToggle = props.showInteractionModeToggle ? (
     <>
@@ -1108,6 +1114,32 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       </Tooltip>
 
       {interactionModeToggle}
+
+      <ComposerControlSeparator size={size} />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComposerControl
+              size={size}
+              className={cn(
+                "shrink-0",
+                props.toolCallsExpanded
+                  ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                  : size === "xs"
+                    ? undefined
+                    : "text-secondary-label hover:text-foreground",
+              )}
+              type="button"
+              onClick={props.onToggleToolCallsExpanded}
+              aria-label={toolCallsTooltip}
+              aria-pressed={props.toolCallsExpanded}
+            />
+          }
+        >
+          <ComposerControlIcon icon={ChevronsUpDownIcon} size={size} />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{toolCallsTooltip}</TooltipPopup>
+      </Tooltip>
     </>
   );
 });
@@ -1303,6 +1335,7 @@ export interface ChatComposerProps {
   activeTasksProgress: ComposerTasksProgress | null;
   activeTaskSteps: readonly ComposerTaskStep[] | null;
   threadSyncPhase: ThreadSyncPhase | null;
+  toolCallsExpanded: boolean;
 
   // Mode
   runtimeMode: RuntimeMode;
@@ -1379,6 +1412,7 @@ export interface ChatComposerProps {
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  onToggleToolCallsExpanded: () => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -1475,6 +1509,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
+    onToggleToolCallsExpanded,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -4107,9 +4142,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           showInteractionModeToggle={planModeUiEnabled}
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
+          toolCallsExpanded={props.toolCallsExpanded}
           size={composerControlsInStrip ? "xs" : "sm"}
           hidden={composerControlsHidden || restingHiddenBlockCount > 0}
           onToggleInteractionMode={toggleInteractionMode}
+          onToggleToolCallsExpanded={onToggleToolCallsExpanded}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
       ),
@@ -4194,9 +4231,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         <CompactComposerControlsMenu
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
+          toolCallsExpanded={props.toolCallsExpanded}
           showInteractionModeToggle={planModeUiEnabled}
           traitsMenuContent={providerTraitsMenuContent}
           onToggleInteractionMode={toggleInteractionMode}
+          onToggleToolCallsExpanded={onToggleToolCallsExpanded}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
       ) : (
@@ -4234,6 +4273,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <CompactComposerControlsMenu
                 interactionMode={interactionMode}
                 runtimeMode={runtimeMode}
+                toolCallsExpanded={props.toolCallsExpanded}
                 size="xs"
                 hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
                 showInteractionModeToggle={
@@ -4243,6 +4283,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
                 }
                 onToggleInteractionMode={toggleInteractionMode}
+                onToggleToolCallsExpanded={onToggleToolCallsExpanded}
                 onRuntimeModeChange={handleRuntimeModeChange}
               />
             </div>

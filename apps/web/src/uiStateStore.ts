@@ -31,6 +31,7 @@ export interface PersistedUiState {
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
+  toolCallsExpanded?: boolean;
 }
 
 export interface UiProjectState {
@@ -55,8 +56,13 @@ export interface UiPullRequestState {
   pullRequestMergeMethod: PullRequestMergeMethod;
 }
 
+export interface UiToolCallState {
+  toolCallsExpanded: boolean;
+  toolCallExpansionEpoch: number;
+}
+
 export interface UiState
-  extends UiProjectState, UiThreadState, UiEndpointState, UiPullRequestState {}
+  extends UiProjectState, UiThreadState, UiEndpointState, UiPullRequestState, UiToolCallState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -66,6 +72,8 @@ const initialState: UiState = {
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
   pullRequestMergeMethod: "merge",
+  toolCallsExpanded: false,
+  toolCallExpansionEpoch: 0,
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -158,6 +166,11 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
+    toolCallsExpanded:
+      typeof parsed.toolCallsExpanded === "boolean"
+        ? parsed.toolCallsExpanded
+        : initialState.toolCallsExpanded,
+    toolCallExpansionEpoch: 0,
   };
 }
 
@@ -232,6 +245,7 @@ export function persistState(state: UiState): void {
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
+        toolCallsExpanded: state.toolCallsExpanded,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -326,6 +340,15 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   return {
     ...state,
     defaultAdvertisedEndpointKey: nextKey,
+  };
+}
+
+export function setToolCallsExpanded(state: UiState, expanded: boolean): UiState {
+  if (state.toolCallsExpanded === expanded) return state;
+  return {
+    ...state,
+    toolCallsExpanded: expanded,
+    toolCallExpansionEpoch: state.toolCallExpansionEpoch + 1,
   };
 }
 
@@ -430,6 +453,7 @@ interface UiStateStore extends UiState {
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
+  setToolCallsExpanded: (expanded: boolean) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
@@ -451,6 +475,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setSidebarProjectScopeKey: (projectKey) =>
     set((state) => setSidebarProjectScopeKey(state, projectKey)),
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
+  setToolCallsExpanded: (expanded) => set((state) => setToolCallsExpanded(state, expanded)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>

@@ -216,6 +216,22 @@ function buildLongUserMessageText(tail = "deep hidden detail only after expand")
   ).join("\n");
 }
 
+function buildToolTimelineEntry(id: string, output: string, tone: "tool" | "error" = "tool") {
+  return {
+    id: `${id}-entry`,
+    kind: "work" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    entry: {
+      id,
+      createdAt: MESSAGE_CREATED_AT,
+      label: "Run command",
+      tone,
+      itemType: "command_execution" as const,
+      output,
+    },
+  };
+}
+
 function buildUserTimelineEntry(text: string) {
   return {
     id: "entry-1",
@@ -272,6 +288,45 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("keeps tool calls collapsed by default and expands existing and future rows globally", async () => {
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let renderer: ReactTestRenderer | undefined;
+    const currentTool = buildToolTimelineEntry("current-tool", "current output", "error");
+    const futureTool = buildToolTimelineEntry("future-tool", "future output");
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[currentTool]}
+            toolCallsExpanded={false}
+            toolCallExpansionEpoch={0}
+          />,
+        );
+      });
+      expect(renderer!.root.findAllByProps({ "aria-expanded": false })).toHaveLength(1);
+      expect(JSON.stringify(renderer!.toJSON())).not.toContain("current output");
+
+      await act(() => {
+        renderer!.update(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[currentTool, futureTool]}
+            toolCallsExpanded
+            toolCallExpansionEpoch={1}
+          />,
+        );
+      });
+      const markup = JSON.stringify(renderer!.toJSON());
+      expect(renderer!.root.findAllByProps({ "aria-expanded": true })).toHaveLength(2);
+      expect(markup).toContain("current output");
+      expect(markup).toContain("future output");
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
   it("renders previous and next controls with the minimap", () => {
     const first = buildUserTimelineEntry("First turn");
     const secondBase = buildUserTimelineEntry("Second turn");
