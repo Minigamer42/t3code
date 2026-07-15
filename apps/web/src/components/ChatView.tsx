@@ -2393,7 +2393,7 @@ function ChatViewContent(props: ChatViewProps) {
   const isTurnInterruptible =
     phase === "running" ||
     isSendBusy ||
-    !latestTurnSettled ||
+    (activeLatestTurn !== null && !latestTurnSettled) ||
     interruptRequestedThreadId === activeThread?.id;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
