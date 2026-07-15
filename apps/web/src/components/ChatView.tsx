@@ -96,6 +96,7 @@ import {
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   isLatestTurnSettled,
+  isThreadTurnRunning,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
 import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./chat/timelineScrollAnchoring";
@@ -1759,6 +1760,7 @@ function ChatViewContent(props: ChatViewProps) {
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const activeTurnRunning = isThreadTurnRunning(activeLatestTurn, activeThread?.session ?? null);
   // Reading a finished thread clears the sidebar's Done badge. The visit is
   // stamped at the turn's completion time — not now/updatedAt — so it clears
   // exactly the completion the user is looking at: a wake or completion that
@@ -5306,10 +5308,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     const threadIdForSend = activeThread.id;
     const queueInsteadOfSending =
-      delivery !== "steer" &&
-      (phase === "running" ||
-        activeLatestTurn?.state === "running" ||
-        queuedTurnSubmissionsRef.current.length > 0);
+      delivery !== "steer" && (activeTurnRunning || queuedTurnSubmissionsRef.current.length > 0);
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -5765,7 +5764,7 @@ function ChatViewContent(props: ChatViewProps) {
 
     const latestTurnId = activeLatestTurn?.turnId ?? null;
     const turnChanged = latestTurnId !== queuedAutoDispatchBarrier.previousTurnId;
-    const providerRunning = phase === "running" || !latestTurnSettled;
+    const providerRunning = activeTurnRunning || !latestTurnSettled;
 
     if (!queuedAutoDispatchBarrier.observedRunning) {
       if (turnChanged && !providerRunning && latestTurnSettled) {
@@ -5782,13 +5781,19 @@ function ChatViewContent(props: ChatViewProps) {
     if (!providerRunning && latestTurnSettled && !isSendBusy) {
       setQueuedAutoDispatchBarrier(null);
     }
-  }, [activeLatestTurn?.turnId, isSendBusy, latestTurnSettled, phase, queuedAutoDispatchBarrier]);
+  }, [
+    activeLatestTurn?.turnId,
+    activeTurnRunning,
+    isSendBusy,
+    latestTurnSettled,
+    queuedAutoDispatchBarrier,
+  ]);
 
   useEffect(() => {
     const next = queuedTurnSubmissions[0];
     if (
       !next ||
-      phase === "running" ||
+      activeTurnRunning ||
       !latestTurnSettled ||
       isSendBusy ||
       isConnecting ||
@@ -5821,12 +5826,12 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeThread?.updatedAt,
     activeLatestTurn?.turnId,
+    activeTurnRunning,
     activeEnvironmentUnavailable,
     dispatchQueuedTurn,
     isConnecting,
     isSendBusy,
     latestTurnSettled,
-    phase,
     queuedAutoDispatchBarrier,
     queuedTurnSubmissions,
   ]);

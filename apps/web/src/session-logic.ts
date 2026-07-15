@@ -337,16 +337,27 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
 }
 
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
+type LatestTurnActivity = Pick<OrchestrationLatestTurn, "state">;
 type SessionActivityState = Pick<NonNullable<Thread["session"]>, "status" | "activeTurnId">;
+
+export function isThreadTurnRunning(
+  latestTurn: LatestTurnActivity | null,
+  session: SessionActivityState | null,
+): boolean {
+  if (session !== null) {
+    return session.status === "running";
+  }
+  return latestTurn?.state === "running";
+}
 
 export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
 ): boolean {
+  if (session?.status === "running" || session?.status === "starting") return false;
+  if (session !== null) return true;
   if (!latestTurn?.startedAt) return false;
   if (!latestTurn.completedAt) return false;
-  if (!session) return true;
-  if (session.status === "running") return false;
   return true;
 }
 
