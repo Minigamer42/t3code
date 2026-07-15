@@ -186,8 +186,8 @@ function sanitizePersistedThreadChangedFilesExpanded(
 
     const nextTurns: Record<string, boolean> = {};
     for (const [turnId, expanded] of Object.entries(turns)) {
-      if (turnId && typeof expanded === "boolean") {
-        nextTurns[turnId] = expanded;
+      if (turnId && expanded === true) {
+        nextTurns[turnId] = true;
       }
     }
 
@@ -209,6 +209,14 @@ export function persistState(state: UiState): void {
         ([key]) => key !== LEGACY_PROJECT_EXPANSION_DEFAULT_KEY,
       ),
     );
+    const threadChangedFilesExpandedById = Object.fromEntries(
+      Object.entries(state.threadChangedFilesExpandedById).flatMap(([threadId, turns]) => {
+        const nextTurns = Object.fromEntries(
+          Object.entries(turns).filter(([, expanded]) => expanded === true),
+        );
+        return Object.keys(nextTurns).length > 0 ? [[threadId, nextTurns]] : [];
+      }),
+    );
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
@@ -217,7 +225,7 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
-        threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
+        threadChangedFilesExpandedById,
         toolCallsExpanded: state.toolCallsExpanded,
       } satisfies PersistedUiState),
     );
@@ -289,8 +297,34 @@ export function setThreadChangedFilesExpanded(
   expanded: boolean,
 ): UiState {
   const currentThreadState = state.threadChangedFilesExpandedById[threadId] ?? {};
-  if (currentThreadState[turnId] === expanded) {
+  const currentExpanded = resolveThreadChangedFilesExpanded(state, threadId, turnId);
+  if (currentExpanded === expanded) {
     return state;
+  }
+
+  if (!expanded) {
+    if (!(turnId in currentThreadState)) {
+      return state;
+    }
+
+    const nextThreadState = { ...currentThreadState };
+    delete nextThreadState[turnId];
+    if (Object.keys(nextThreadState).length === 0) {
+      const nextState = { ...state.threadChangedFilesExpandedById };
+      delete nextState[threadId];
+      return {
+        ...state,
+        threadChangedFilesExpandedById: nextState,
+      };
+    }
+
+    return {
+      ...state,
+      threadChangedFilesExpandedById: {
+        ...state.threadChangedFilesExpandedById,
+        [threadId]: nextThreadState,
+      },
+    };
   }
 
   return {
@@ -299,10 +333,18 @@ export function setThreadChangedFilesExpanded(
       ...state.threadChangedFilesExpandedById,
       [threadId]: {
         ...currentThreadState,
-        [turnId]: expanded,
+        [turnId]: true,
       },
     },
   };
+}
+
+export function resolveThreadChangedFilesExpanded(
+  state: Pick<UiState, "threadChangedFilesExpandedById">,
+  threadId: string,
+  turnId: string,
+): boolean {
+  return state.threadChangedFilesExpandedById[threadId]?.[turnId] ?? false;
 }
 
 export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | null): UiState {

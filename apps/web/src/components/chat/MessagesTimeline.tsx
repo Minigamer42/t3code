@@ -67,7 +67,6 @@ import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
-import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
@@ -104,7 +103,7 @@ import {
   type ParsedPreviewAnnotation,
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
-import { useUiStateStore } from "~/uiStateStore";
+import { resolveThreadChangedFilesExpanded, useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 
@@ -1702,15 +1701,11 @@ function AssistantChangedFilesSectionInner({
 }) {
   const activity = use(TimelineRowActivityCtx);
   const isLatestTurn = activity.latestTurnId === turnSummary.turnId;
-  const persistedExpanded = useUiStateStore(
-    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId],
+  const expanded = useUiStateStore((store) =>
+    resolveThreadChangedFilesExpanded(store, routeThreadKey, turnSummary.turnId),
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
-  const [autoExpanded] = useState(() =>
-    shouldAutoExpandChangedFiles(checkpointFiles, isLatestTurn),
-  );
-  const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(autoExpanded);
-  const expanded = persistedExpanded ?? (isLatestTurn && autoExpanded);
+  const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(false);
 
   return (
     <ChangedFilesCard
