@@ -390,12 +390,12 @@ describe("when: ref has diverged from upstream", () => {
 });
 
 describe("when: working tree has local changes", () => {
-  it("resolveQuickAction returns commit, push, and create PR", () => {
+  it("resolveQuickAction returns commit", () => {
     const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true }), false);
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push_pr",
-      label: "Commit, push & PR",
+      action: "commit",
+      label: "Commit",
     });
   });
 
@@ -414,7 +414,7 @@ describe("when: working tree has local changes", () => {
     });
   });
 
-  it("resolveQuickAction returns commit and push when open PR exists", () => {
+  it("resolveQuickAction returns commit when an open PR exists", () => {
     const quick = resolveQuickAction(
       status({
         hasWorkingTreeChanges: true,
@@ -431,8 +431,8 @@ describe("when: working tree has local changes", () => {
     );
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push",
-      label: "Commit & push",
+      action: "commit",
+      label: "Commit",
     });
   });
 
@@ -510,7 +510,7 @@ describe("when: working tree has local changes", () => {
 });
 
 describe("when: on default ref without open PR", () => {
-  it("resolveQuickAction returns commit and push when local changes exist", () => {
+  it("resolveQuickAction returns commit when local changes exist", () => {
     const quick = resolveQuickAction(
       status({ refName: "main", hasWorkingTreeChanges: true }),
       false,
@@ -518,8 +518,8 @@ describe("when: on default ref without open PR", () => {
     );
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push",
-      label: "Commit & push",
+      action: "commit",
+      label: "Commit",
       disabled: false,
     });
   });
@@ -540,15 +540,15 @@ describe("when: on default ref without open PR", () => {
 });
 
 describe("when: working tree has local changes and ref is behind upstream", () => {
-  it("resolveQuickAction still prefers commit, push, and create PR", () => {
+  it("resolveQuickAction still prefers commit", () => {
     const quick = resolveQuickAction(
       status({ hasWorkingTreeChanges: true, behindCount: 1 }),
       false,
     );
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push_pr",
-      label: "Commit, push & PR",
+      action: "commit",
+      label: "Commit",
     });
   });
 
