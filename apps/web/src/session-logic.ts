@@ -1176,7 +1176,16 @@ function shouldCollapseToolLifecycleEntries(
   if (previous.activityKind === "tool.completed") {
     return false;
   }
-  return previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey;
+  if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
+    return true;
+  }
+  return (
+    previous.toolCallId !== undefined &&
+    next.toolCallId === undefined &&
+    previous.itemType === next.itemType &&
+    normalizeToolLifecycleLabelForCollapse(previous.toolTitle ?? previous.label) ===
+      normalizeToolLifecycleLabelForCollapse(next.toolTitle ?? next.label)
+  );
 }
 
 function mergeDerivedWorkLogEntries(
@@ -1255,7 +1264,7 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
     return itemId;
   }
   const normalizedLabel = normalizeToolLifecycleLabelForCollapse(entry.toolTitle ?? entry.label);
-  const detail = (entry.command ?? entry.detail)?.trim() ?? "";
+  const detail = entry.detail?.trim() ?? "";
   const itemType = entry.itemType ?? "";
   if (normalizedLabel.length === 0 && detail.length === 0 && itemType.length === 0) {
     return undefined;
