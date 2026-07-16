@@ -78,6 +78,55 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
 }
 
 // ---------------------------------------------------------------------------
+// Logical commit plan
+// ---------------------------------------------------------------------------
+
+export interface CommitPlanPromptInput {
+  branch: string | null;
+  stagedSummary: string;
+  stagedPatch: string;
+  policy?: TextGenerationPolicy | undefined;
+}
+
+export function buildCommitPlanPrompt(input: CommitPlanPromptInput) {
+  const prompt = [
+    "You split a staged working tree into logical git commits.",
+    "Return a JSON object with a commits array. Each commit has subject, body, and filePaths.",
+    "Rules:",
+    "- use every path from Staged files exactly once",
+    "- copy file paths exactly; do not invent, omit, or duplicate paths",
+    "- keep implementation, tests, schemas, and supporting changes together when they form one concern",
+    "- separate independently reviewable and reversible concerns",
+    "- order prerequisite commits before commits that depend on them",
+    "- return one commit when the changes form one coherent concern",
+    "- subject must be imperative, <= 72 chars, and have no trailing period",
+    "- body can be an empty string or short bullet points",
+    ...policyInstruction(input.policy?.commitInstructions),
+    "",
+    `Branch: ${input.branch ?? "(detached)"}`,
+    "",
+    "Staged files:",
+    limitSection(input.stagedSummary, 6_000),
+    "",
+    "Staged patch:",
+    limitSection(input.stagedPatch, 40_000),
+  ].join("\n");
+
+  return {
+    prompt,
+    outputSchema: Schema.Struct({
+      commits: Schema.Array(
+        Schema.Struct({
+          subject: Schema.String,
+          body: Schema.String,
+          filePaths: Schema.Array(Schema.String),
+        }),
+      ),
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Change request content
 // ---------------------------------------------------------------------------
 

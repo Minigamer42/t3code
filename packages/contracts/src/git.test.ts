@@ -78,11 +78,13 @@ describe("GitRunStackedActionInput", () => {
     const parsed = decodeRunStackedActionInput({
       actionId: "action-1",
       cwd: "/repo",
-      action: "create_pr",
+      action: "commit",
+      splitCommits: true,
     });
 
     expect(parsed.actionId).toBe("action-1");
-    expect(parsed.action).toBe("create_pr");
+    expect(parsed.action).toBe("commit");
+    expect(parsed.splitCommits).toBe(true);
   });
 });
 

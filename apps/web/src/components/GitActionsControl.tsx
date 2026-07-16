@@ -135,6 +135,7 @@ interface ActiveGitActionProgress {
 interface RunGitActionWithToastInput {
   action: GitStackedAction;
   commitMessage?: string;
+  splitCommits?: boolean;
   onConfirmed?: () => void;
   skipDefaultBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
@@ -1007,6 +1008,7 @@ export default function GitActionsControl({
   });
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
+  const [isSplitCommitDialogOpen, setIsSplitCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
@@ -1264,6 +1266,7 @@ export default function GitActionsControl({
     async ({
       action,
       commitMessage,
+      splitCommits = false,
       onConfirmed,
       skipDefaultBranchPrompt = false,
       statusOverride,
@@ -1307,6 +1310,7 @@ export default function GitActionsControl({
       const progressStages = buildGitActionProgressStages({
         action,
         hasCustomCommitMessage: !!commitMessage?.trim(),
+        splitCommits,
         hasWorkingTreeChanges: !!actionStatus?.hasWorkingTreeChanges,
         featureBranch,
         terminology: changeRequestTerminology,
@@ -1408,6 +1412,7 @@ export default function GitActionsControl({
         actionId,
         action,
         ...(commitMessage ? { commitMessage } : {}),
+        ...(splitCommits ? { splitCommits: true } : {}),
         ...(featureBranch ? { featureBranch } : {}),
         ...(filePaths ? { filePaths } : {}),
         onProgress: applyProgressEvent,
@@ -1799,6 +1804,13 @@ export default function GitActionsControl({
                   </MenuItem>
                 );
               })}
+              <MenuItem
+                disabled={isGitActionRunning || !gitStatusForActions?.hasWorkingTreeChanges}
+                onClick={() => setIsSplitCommitDialogOpen(true)}
+              >
+                <GitCommitIcon />
+                Split into logical commits...
+              </MenuItem>
               {canPublishRepository ? (
                 <MenuItem
                   disabled={isGitActionRunning}
@@ -1994,6 +2006,38 @@ export default function GitActionsControl({
             </Button>
             <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
               Commit
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog open={isSplitCommitDialogOpen} onOpenChange={setIsSplitCommitDialogOpen}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Split into logical commits</DialogTitle>
+            <DialogDescription>
+              T3 Code will use the configured model to group all {allFiles.length} changed
+              {allFiles.length === 1 ? " file" : " files"} into ordered commits and generate a
+              message for each one.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <p className="text-sm text-muted-foreground">
+              Commit boundaries are file-based. Changes within the same file stay together.
+            </p>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsSplitCommitDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setIsSplitCommitDialogOpen(false);
+                void runGitActionWithToast({ action: "commit", splitCommits: true });
+              }}
+            >
+              Split & commit
             </Button>
           </DialogFooter>
         </DialogPopup>

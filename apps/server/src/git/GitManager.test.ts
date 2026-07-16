@@ -282,6 +282,19 @@ function createTextGeneration(
         body: "",
         ...(input.includeBranch ? { branch: "feature/implement-stacked-git-actions" } : {}),
       }),
+    generateCommitPlan: (input) =>
+      Effect.succeed({
+        commits: [
+          {
+            subject: "Implement stacked git actions",
+            body: "",
+            filePaths: input.stagedSummary
+              .split(/\r?\n/g)
+              .map((line) => line.split("\t").at(-1)?.trim() ?? "")
+              .filter((path) => path.length > 0),
+          },
+        ],
+      }),
     generatePrContent: () =>
       Effect.succeed({
         title: "Add stacked git actions",
@@ -305,6 +318,17 @@ function createTextGeneration(
           (cause) =>
             new TextGenerationError({
               operation: "generateCommitMessage",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    generateCommitPlan: (input) =>
+      implementation.generateCommitPlan(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generateCommitPlan",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),
@@ -587,6 +611,7 @@ function runStackedAction(
     action: "commit" | "push" | "create_pr" | "commit_push" | "commit_push_pr";
     actionId?: string;
     commitMessage?: string;
+    splitCommits?: boolean;
     featureBranch?: boolean;
     filePaths?: readonly string[];
   },
@@ -2002,6 +2027,98 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       );
       expect(statusStdout).toContain("b.txt");
       expect(statusStdout).not.toContain("a.txt");
+    }),
+  );
+
+  it.effect("splits changed files into ordered logical commits", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "alpha.ts"), "export const alpha = 1;\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "alpha.test.ts"), "test('alpha', () => {});\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "beta.ts"), "export const beta = 2;\n");
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitPlan: () =>
+            Effect.succeed({
+              commits: [
+                {
+                  subject: "Add alpha behavior",
+                  body: "",
+                  filePaths: ["alpha.ts", "alpha.test.ts"],
+                },
+                {
+                  subject: "Add beta behavior",
+                  body: "",
+                  filePaths: ["beta.ts"],
+                },
+              ],
+            }),
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        splitCommits: true,
+      });
+
+      expect(result.commit).toMatchObject({
+        status: "created",
+        subject: "Add beta behavior",
+        commitCount: 2,
+      });
+      expect(result.toast).toMatchObject({
+        title: "Created 2 commits",
+        description: "Add beta behavior",
+      });
+      expect(
+        yield* runGit(repoDir, ["log", "-2", "--pretty=%s"]).pipe(
+          Effect.map((output) => output.stdout.trim().split("\n")),
+        ),
+      ).toEqual(["Add beta behavior", "Add alpha behavior"]);
+      expect(
+        yield* runGit(repoDir, ["show", "HEAD~1", "--format=", "--name-only"]).pipe(
+          Effect.map((output) => output.stdout.trim().split("\n").toSorted()),
+        ),
+      ).toEqual(["alpha.test.ts", "alpha.ts"]);
+      expect(
+        yield* runGit(repoDir, ["status", "--porcelain"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toBe("");
+    }),
+  );
+
+  it.effect("rejects logical commit plans that omit changed files", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "alpha.ts"), "export const alpha = 1;\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "beta.ts"), "export const beta = 2;\n");
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitPlan: () =>
+            Effect.succeed({
+              commits: [{ subject: "Add alpha behavior", body: "", filePaths: ["alpha.ts"] }],
+            }),
+        },
+      });
+
+      const error = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        splitCommits: true,
+      }).pipe(Effect.flip);
+
+      expect(error.message).toContain("omitted 1 changed file");
+      expect(
+        yield* runGit(repoDir, ["log", "-1", "--pretty=%s"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toBe("Initial commit");
     }),
   );
 

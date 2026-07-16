@@ -23,12 +23,14 @@ import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/Layers/
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
+  buildCommitPlanPrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
+  sanitizeCommitPlan,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -99,6 +101,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const encodeJsonForOperation = (
     operation:
       | "generateCommitMessage"
+      | "generateCommitPlan"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle",
@@ -118,6 +121,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const materializeImageAttachments = Effect.fn("materializeImageAttachments")(function* (
     _operation:
       | "generateCommitMessage"
+      | "generateCommitPlan"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle",
@@ -160,6 +164,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   }: {
     operation:
       | "generateCommitMessage"
+      | "generateCommitPlan"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle";
@@ -328,6 +333,26 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       };
     });
 
+  const generateCommitPlan: TextGeneration.TextGeneration["Service"]["generateCommitPlan"] =
+    Effect.fn("CodexTextGeneration.generateCommitPlan")(function* (input) {
+      const { prompt, outputSchema } = buildCommitPlanPrompt({
+        branch: input.branch,
+        stagedSummary: input.stagedSummary,
+        stagedPatch: input.stagedPatch,
+        policy: input.policy,
+      });
+
+      const generated = yield* runCodexJson({
+        operation: "generateCommitPlan",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return { commits: sanitizeCommitPlan(generated.commits) };
+    });
+
   const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
     Effect.fn("CodexTextGeneration.generatePrContent")(function* (input) {
       const { prompt, outputSchema } = buildPrContentPrompt({
@@ -407,6 +432,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
   return {
     generateCommitMessage,
+    generateCommitPlan,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,

@@ -33,6 +33,20 @@ export function sanitizeCommitSubject(raw: string): string {
   return withoutTrailingPeriod.slice(0, 72).trimEnd();
 }
 
+export function sanitizeCommitPlan(
+  commits: ReadonlyArray<{
+    subject: string;
+    body: string;
+    filePaths: ReadonlyArray<string>;
+  }>,
+): Array<{ subject: string; body: string; filePaths: string[] }> {
+  return commits.map((commit) => ({
+    subject: sanitizeCommitSubject(commit.subject),
+    body: commit.body.trim(),
+    filePaths: commit.filePaths.map((filePath) => filePath.trim()),
+  }));
+}
+
 /** Normalise a raw PR title to a single line with a sensible fallback. */
 export function sanitizePrTitle(raw: string): string {
   const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? "";

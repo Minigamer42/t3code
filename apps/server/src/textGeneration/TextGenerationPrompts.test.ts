@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildBranchNamePrompt,
+  buildCommitPlanPrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
@@ -65,6 +66,23 @@ describe("buildCommitMessagePrompt", () => {
 
     expect(result.prompt).toContain("Additional instructions:");
     expect(result.prompt).toContain("Use a terse repository-specific subject.");
+  });
+});
+
+describe("buildCommitPlanPrompt", () => {
+  it("requires an exact, ordered partition of staged files", () => {
+    const result = buildCommitPlanPrompt({
+      branch: "feature/split",
+      stagedSummary: "M\tsrc/a.ts\nA\tsrc/a.test.ts",
+      stagedPatch: "diff --git a/src/a.ts b/src/a.ts",
+    });
+
+    expect(result.prompt).toContain("use every path from Staged files exactly once");
+    expect(result.prompt).toContain(
+      "order prerequisite commits before commits that depend on them",
+    );
+    expect(result.prompt).toContain("src/a.test.ts");
+    expect(result.prompt).toContain("Branch: feature/split");
   });
 });
 

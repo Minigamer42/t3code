@@ -108,6 +108,7 @@ export class GitManager extends Context.Service<
 >()("t3/git/GitManager") {}
 
 const COMMIT_TIMEOUT_MS = 10 * 60_000;
+const MAX_LOGICAL_COMMITS = 20;
 const MAX_PROGRESS_TEXT_LENGTH = 500;
 const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
@@ -447,6 +448,12 @@ function summarizeGitActionResult(
   }
 
   if (result.commit.status === "created") {
+    if ((result.commit.commitCount ?? 1) > 1) {
+      return withDescription(
+        `Created ${result.commit.commitCount} commits`,
+        truncateText(result.commit.subject),
+      );
+    }
     const shortSha = shortenSha(result.commit.commitSha);
     const title = shortSha ? `Committed ${shortSha}` : "Committed changes";
     return withDescription(title, truncateText(result.commit.subject));
@@ -1651,6 +1658,7 @@ export const make = Effect.gen(function* () {
     filePaths?: readonly string[],
     progressReporter?: GitActionProgressReporter,
     actionId?: string,
+    commitLabel = "Committing...",
   ) {
     const emit = (event: GitActionProgressPayload) =>
       progressReporter && actionId
@@ -1687,7 +1695,7 @@ export const make = Effect.gen(function* () {
     yield* emit({
       kind: "phase_started",
       phase: "commit",
-      label: "Committing...",
+      label: commitLabel,
     });
 
     let currentHookName: string | null = null;
@@ -1751,7 +1759,141 @@ export const make = Effect.gen(function* () {
       status: "created" as const,
       commitSha,
       subject: suggestion.subject,
+      commitCount: 1,
     };
+  });
+
+  const runSplitCommitStep = Effect.fn("runSplitCommitStep")(function* (
+    settings: SourceControlTextGenerationSettings,
+    cwd: string,
+    branch: string | null,
+    selectedFilePaths: readonly string[],
+    progressReporter?: GitActionProgressReporter,
+    actionId?: string,
+  ) {
+    const emit = (event: GitActionProgressPayload) =>
+      progressReporter && actionId
+        ? progressReporter.publish({
+            actionId,
+            cwd,
+            action: "commit",
+            ...event,
+          } as GitActionProgressEvent)
+        : Effect.void;
+
+    yield* emit({
+      kind: "phase_started",
+      phase: "commit",
+      label: "Planning logical commits...",
+    });
+
+    const context = yield* gitCore.prepareCommitContext(cwd, selectedFilePaths);
+    if (!context) {
+      return { status: "skipped_no_changes" as const };
+    }
+
+    const stylePolicy = yield* resolveStylePolicy(cwd, settings.style);
+    const repositoryPolicy = yield* readCommitMessagePolicy(cwd);
+    const policy = repositoryPolicy?.commitInstructions
+      ? {
+          ...stylePolicy,
+          commitInstructions: [stylePolicy.commitInstructions, repositoryPolicy.commitInstructions]
+            .filter((instructions): instructions is string => Boolean(instructions))
+            .join("\n\n"),
+        }
+      : stylePolicy;
+    const generated = yield* textGeneration.generateCommitPlan({
+      cwd,
+      branch,
+      stagedSummary: limitContext(context.stagedSummary, 8_000),
+      stagedPatch: limitContext(context.stagedPatch, 50_000),
+      ...(policy ? { policy } : {}),
+      modelSelection: settings.modelSelection,
+    });
+
+    const expectedPaths = new Set(selectedFilePaths);
+    const plannedPaths = new Set<string>();
+    const commits = generated.commits;
+    if (commits.length === 0 || commits.length > MAX_LOGICAL_COMMITS) {
+      return yield* new GitManagerError({
+        operation: "runSplitCommitStep",
+        cwd,
+        detail: `The generated commit plan must contain between 1 and ${MAX_LOGICAL_COMMITS} commits.`,
+      });
+    }
+
+    for (const commit of commits) {
+      if (commit.filePaths.length === 0) {
+        return yield* new GitManagerError({
+          operation: "runSplitCommitStep",
+          cwd,
+          detail: "The generated commit plan contained an empty commit.",
+        });
+      }
+      for (const filePath of commit.filePaths) {
+        if (!expectedPaths.has(filePath) || plannedPaths.has(filePath)) {
+          return yield* new GitManagerError({
+            operation: "runSplitCommitStep",
+            cwd,
+            detail: `The generated commit plan contained an invalid or duplicate path: ${filePath}`,
+          });
+        }
+        plannedPaths.add(filePath);
+      }
+    }
+
+    const missingPaths = selectedFilePaths.filter((filePath) => !plannedPaths.has(filePath));
+    if (missingPaths.length > 0) {
+      return yield* new GitManagerError({
+        operation: "runSplitCommitStep",
+        cwd,
+        detail: `The generated commit plan omitted ${missingPaths.length} changed file(s).`,
+      });
+    }
+
+    let lastCommit: {
+      status: "created";
+      commitSha: string;
+      subject: string;
+      commitCount: number;
+    } | null = null;
+
+    for (const [index, commit] of commits.entries()) {
+      const staged = yield* gitCore.prepareCommitContext(cwd, commit.filePaths);
+      if (!staged) {
+        return yield* new GitManagerError({
+          operation: "runSplitCommitStep",
+          cwd,
+          detail: `No changes remained for logical commit ${index + 1}.`,
+        });
+      }
+      const result = yield* runCommitStep(
+        settings,
+        cwd,
+        "commit",
+        branch,
+        undefined,
+        {
+          subject: commit.subject,
+          body: commit.body,
+          commitMessage: formatCommitMessage(commit.subject, commit.body),
+        },
+        undefined,
+        progressReporter,
+        actionId,
+        `Committing ${index + 1} of ${commits.length}...`,
+      );
+      if (result.status !== "created") {
+        return yield* new GitManagerError({
+          operation: "runSplitCommitStep",
+          cwd,
+          detail: `Logical commit ${index + 1} could not be created.`,
+        });
+      }
+      lastCommit = { ...result, commitCount: commits.length };
+    }
+
+    return lastCommit ?? { status: "skipped_no_changes" as const };
   });
 
   const runPrStep = Effect.fn("runPrStep")(function* (
@@ -2272,6 +2414,18 @@ export const make = Effect.gen(function* () {
             (!initialStatus.hasUpstream || initialStatus.aheadCount > 0));
         const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
 
+        if (
+          input.splitCommits &&
+          (input.action !== "commit" || input.commitMessage !== undefined || input.featureBranch)
+        ) {
+          return yield* new GitManagerError({
+            operation: "runStackedAction",
+            cwd: input.cwd,
+            detail:
+              "Logical commit splitting is only supported for commit actions without a custom message or feature ref.",
+          });
+        }
+
         if (input.featureBranch && !wantsCommit) {
           return yield* new GitManagerError({
             operation: "runStackedAction",
@@ -2376,23 +2530,36 @@ export const make = Effect.gen(function* () {
             )
           : null;
 
-        const commit = commitAction
+        const commit = input.splitCommits
           ? yield* Ref.set(currentPhase, Option.some("commit")).pipe(
               Effect.flatMap(() =>
-                runCommitStep(
+                runSplitCommitStep(
                   textGenerationSettings,
                   input.cwd,
-                  commitAction,
                   currentBranch,
-                  commitMessageForStep,
-                  preResolvedCommitSuggestion,
-                  input.filePaths,
+                  input.filePaths ?? initialStatus.workingTree.files.map((file) => file.path),
                   options?.progressReporter,
                   progress.actionId,
                 ),
               ),
             )
-          : { status: "skipped_not_requested" as const };
+          : commitAction
+            ? yield* Ref.set(currentPhase, Option.some("commit")).pipe(
+                Effect.flatMap(() =>
+                  runCommitStep(
+                    textGenerationSettings,
+                    input.cwd,
+                    commitAction,
+                    currentBranch,
+                    commitMessageForStep,
+                    preResolvedCommitSuggestion,
+                    input.filePaths,
+                    options?.progressReporter,
+                    progress.actionId,
+                  ),
+                ),
+              )
+            : { status: "skipped_not_requested" as const };
 
         const push = wantsPush
           ? yield* progress

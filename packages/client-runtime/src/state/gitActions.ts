@@ -41,12 +41,13 @@ export type DefaultBranchConfirmableAction =
 
 export type GitActionRequestInput = Pick<
   GitRunStackedActionInput,
-  "action" | "commitMessage" | "featureBranch" | "filePaths"
+  "action" | "commitMessage" | "splitCommits" | "featureBranch" | "filePaths"
 >;
 
 export function buildGitActionProgressStages(input: {
   action: GitStackedAction;
   hasCustomCommitMessage: boolean;
+  splitCommits?: boolean;
   hasWorkingTreeChanges: boolean;
   pushTarget?: string;
   featureBranch?: boolean;
@@ -70,9 +71,11 @@ export function buildGitActionProgressStages(input: {
   const shouldIncludeCommitStages = input.action === "commit" || input.hasWorkingTreeChanges;
   const commitStages = !shouldIncludeCommitStages
     ? []
-    : input.hasCustomCommitMessage
-      ? ["Committing..."]
-      : ["Generating commit message...", "Committing..."];
+    : input.splitCommits
+      ? ["Planning logical commits...", "Committing..."]
+      : input.hasCustomCommitMessage
+        ? ["Committing..."]
+        : ["Generating commit message...", "Committing..."];
   if (input.action === "commit") {
     return [...branchStages, ...commitStages];
   }

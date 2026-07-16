@@ -13,11 +13,13 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
+  buildCommitPlanPrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
+  sanitizeCommitPlan,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -52,6 +54,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
   }: {
     operation:
       | "generateCommitMessage"
+      | "generateCommitPlan"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle";
@@ -192,6 +195,26 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       };
     });
 
+  const generateCommitPlan: TextGeneration.TextGeneration["Service"]["generateCommitPlan"] =
+    Effect.fn("CursorTextGeneration.generateCommitPlan")(function* (input) {
+      const { prompt, outputSchema } = buildCommitPlanPrompt({
+        branch: input.branch,
+        stagedSummary: input.stagedSummary,
+        stagedPatch: input.stagedPatch,
+        policy: input.policy,
+      });
+
+      const generated = yield* runCursorJson({
+        operation: "generateCommitPlan",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return { commits: sanitizeCommitPlan(generated.commits) };
+    });
+
   const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
     Effect.fn("CursorTextGeneration.generatePrContent")(function* (input) {
       const { prompt, outputSchema } = buildPrContentPrompt({
@@ -261,6 +284,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
 
   return {
     generateCommitMessage,
+    generateCommitPlan,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
