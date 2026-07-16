@@ -1689,6 +1689,54 @@ function extractEarlyInputPreview(payload: Record<string, unknown> | null): stri
   return null;
 }
 
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  const text = asTrimmedString(value);
+  if (!text) {
+    return null;
+  }
+  try {
+    return asRecord(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+function extractIdeDiagnosticsPreview(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  if (asTrimmedString(item?.tool)?.toLowerCase() !== "ide_diagnostics") {
+    return null;
+  }
+
+  const args = asRecord(item?.arguments);
+  const file = asTrimmedString(args?.file);
+  const startLine = asNumber(args?.startLine);
+  const endLine = asNumber(args?.endLine);
+  const location = file
+    ? startLine !== null
+      ? `${file}:${startLine}${endLine !== null && endLine !== startLine ? `-${endLine}` : ""}`
+      : file
+    : null;
+
+  const result = asRecord(item?.result);
+  const structuredContent = asRecord(result?.structuredContent);
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const textResult = content
+    .map((entry) => parseJsonRecord(asRecord(entry)?.text))
+    .find((entry) => entry !== null);
+  const diagnostics = structuredContent ?? textResult;
+  const problemCount = asNumber(diagnostics?.problemCount);
+  const problemSummary =
+    problemCount === null
+      ? null
+      : `${problemCount.toLocaleString()} problem${problemCount === 1 ? "" : "s"}`;
+
+  if (location && problemSummary) {
+    return `${location} - ${problemSummary}`;
+  }
+  return location ?? problemSummary;
+}
+
 function isSearchTool(payload: Record<string, unknown> | null): boolean {
   const data = asRecord(payload?.data);
   const kind = asTrimmedString(data?.kind)?.toLowerCase();
@@ -2008,6 +2056,11 @@ function extractToolDetail(
   const command = commandPreview.command;
   const normalizedCommand = normalizePreviewForComparison(command);
   const normalizedRawCommand = normalizePreviewForComparison(commandPreview.rawCommand);
+
+  const diagnosticsPreview = extractIdeDiagnosticsPreview(payload);
+  if (diagnosticsPreview) {
+    return diagnosticsPreview;
+  }
 
   if (isSearchTool(payload)) {
     const searchPreview = extractSearchPreview(payload);
