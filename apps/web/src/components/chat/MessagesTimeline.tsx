@@ -2792,11 +2792,13 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     "flex size-6 shrink-0 items-center justify-center",
     showWarningIndicator || showFailedIndicator
       ? "text-destructive"
-      : showDestructiveRowStyle
-        ? "text-destructive"
-        : workEntry.tone === "tool" || showFailedIndicator
-          ? "text-icon-muted"
-          : iconConfig.className,
+      : workEntry.toolLifecycleStatus === "inProgress"
+        ? "text-sky-500 dark:text-sky-300/80"
+        : showDestructiveRowStyle
+          ? "text-destructive"
+          : workEntry.tone === "tool" || showFailedIndicator
+            ? "text-icon-muted"
+            : iconConfig.className,
   );
   const headingClass = showWarningIndicator
     ? "font-medium text-warning"
@@ -2805,10 +2807,17 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : workLogEntryIsToolLike(workEntry)
         ? "text-secondary-label"
         : "text-foreground/80";
-  const showEntryIcon = !isExpandedToolGroupEntry || showWarningIndicator || showFailedIndicator;
+  const showRunningIndicator = workEntry.toolLifecycleStatus === "inProgress";
+  const showEntryIcon =
+    !isExpandedToolGroupEntry ||
+    showWarningIndicator ||
+    showFailedIndicator ||
+    showRunningIndicator;
   const accessibleDisplayText = showFailedIndicator
     ? `${displayText}, tool call failed`
-    : displayText;
+    : showRunningIndicator
+      ? `${displayText}, tool call running`
+      : displayText;
   const rowToggleProps = canExpand
     ? {
         role: "button" as const,
@@ -2845,13 +2854,22 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
         <span
           className={cn(iconWrapperClass, !showEntryIcon && "invisible")}
-          role={showFailedIndicator ? "img" : undefined}
-          aria-label={showFailedIndicator ? "Tool call failed" : undefined}
+          role={showFailedIndicator || showRunningIndicator ? "img" : undefined}
+          aria-label={
+            showFailedIndicator
+              ? "Tool call failed"
+              : showRunningIndicator
+                ? "Tool call running"
+                : undefined
+          }
           aria-hidden={!showEntryIcon}
         >
           <WorkEntryIconSvg
             name={entryIconName}
-            className="block size-4 shrink-0 stroke-[1.8] opacity-70"
+            className={cn(
+              "block size-4 shrink-0 stroke-[1.8] opacity-70",
+              showRunningIndicator && "animate-status-pulse",
+            )}
           />
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">

@@ -2016,14 +2016,15 @@ export default function GitActionsControl({
           <DialogHeader>
             <DialogTitle>Split into logical commits</DialogTitle>
             <DialogDescription>
-              T3 Code will use the configured model to group all {allFiles.length} changed
+              T3 Code will use the configured model to group the changes across {allFiles.length}
               {allFiles.length === 1 ? " file" : " files"} into ordered commits and generate a
               message for each one.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <p className="text-sm text-muted-foreground">
-              Commit boundaries are file-based. Changes within the same file stay together.
+              Separate Git diff hunks can go into different commits. Binary files, renames, mode
+              changes, and nearby edits that share one hunk stay together.
             </p>
           </DialogPanel>
           <DialogFooter>

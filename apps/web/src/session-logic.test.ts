@@ -1152,6 +1152,51 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.toolData).toEqual(item);
   });
 
+  it("summarizes completed IDE reformat calls from their result message", () => {
+    const item = {
+      type: "mcpToolCall",
+      server: "phpstorm-index",
+      tool: "ide_reformat_code",
+      arguments: {
+        file: "framework/core/Core_DATATABLEFUNCTION.php",
+        startLine: 562,
+        endLine: 577,
+      },
+      status: "completed",
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              affectedFiles: ["framework/core/Core_DATATABLEFUNCTION.php"],
+              changesCount: 1,
+              message: "Reformatted framework/core/Core_DATATABLEFUNCTION.php (lines 562-577)",
+            }),
+          },
+        ],
+        structuredContent: null,
+      },
+    };
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mcp-reformat-done",
+        kind: "tool.completed",
+        summary: "phpstorm-index · ide_reformat_code",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "phpstorm-index · ide_reformat_code",
+          data: { item },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.detail).toBe(
+      "Reformatted framework/core/Core_DATATABLEFUNCTION.php (lines 562-577)",
+    );
+  });
+
   it("keeps MCP payloads while collapsing lifecycle updates", () => {
     const item = {
       type: "mcpToolCall",
