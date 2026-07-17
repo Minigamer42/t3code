@@ -288,10 +288,10 @@ function createTextGeneration(
           {
             subject: "Implement stacked git actions",
             body: "",
-            filePaths: input.stagedSummary
+            hunkIds: input.changeUnitSummary
               .split(/\r?\n/g)
-              .map((line) => line.split("\t").at(-1)?.trim() ?? "")
-              .filter((path) => path.length > 0),
+              .map((line) => line.split("\t").at(0)?.trim() ?? "")
+              .filter((hunkId) => hunkId.length > 0),
           },
         ],
       }),
@@ -2030,7 +2030,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("splits changed files into ordered logical commits", () =>
+  it.effect("splits change units into ordered logical commits", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -2040,21 +2040,31 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         textGeneration: {
-          generateCommitPlan: () =>
-            Effect.succeed({
+          generateCommitPlan: (input) => {
+            const hunkIdByPath = new Map(
+              input.changeUnitSummary.split(/\r?\n/g).map((line) => {
+                const [hunkId = "", path = ""] = line.split("\t");
+                return [path, hunkId] as const;
+              }),
+            );
+            return Effect.succeed({
               commits: [
                 {
                   subject: "Add alpha behavior",
                   body: "",
-                  filePaths: ["alpha.ts", "alpha.test.ts"],
+                  hunkIds: [
+                    hunkIdByPath.get("alpha.ts") ?? "",
+                    hunkIdByPath.get("alpha.test.ts") ?? "",
+                  ],
                 },
                 {
                   subject: "Add beta behavior",
                   body: "",
-                  filePaths: ["beta.ts"],
+                  hunkIds: [hunkIdByPath.get("beta.ts") ?? ""],
                 },
               ],
-            }),
+            });
+          },
         },
       });
 
@@ -2091,7 +2101,75 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("rejects logical commit plans that omit changed files", () =>
+  it.effect("splits distant hunks in the same file into separate commits", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const filePath = NodePath.join(repoDir, "settings.ts");
+      NodeFS.writeFileSync(
+        filePath,
+        `${Array.from(
+          { length: 30 },
+          (_, index) => `export const value${index + 1} = ${index + 1};`,
+        ).join("\n")}\n`,
+      );
+      yield* runGit(repoDir, ["add", "settings.ts"]);
+      yield* runGit(repoDir, ["commit", "-m", "Add settings fixture"]);
+
+      const original = NodeFS.readFileSync(filePath, "utf8");
+      NodeFS.writeFileSync(
+        filePath,
+        original.replace("value2 = 2", "value2 = 200").replace("value29 = 29", "value29 = 2900"),
+      );
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitPlan: (input) => {
+            const hunkIds = input.changeUnitSummary
+              .split(/\r?\n/g)
+              .map((line) => line.split("\t").at(0)?.trim() ?? "")
+              .filter((hunkId) => hunkId.length > 0);
+            return Effect.succeed({
+              commits: [
+                { subject: "Increase early setting", body: "", hunkIds: [hunkIds[0] ?? ""] },
+                { subject: "Increase late setting", body: "", hunkIds: [hunkIds[1] ?? ""] },
+              ],
+            });
+          },
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        splitCommits: true,
+      });
+
+      expect(result.commit).toMatchObject({ status: "created", commitCount: 2 });
+      expect(
+        yield* runGit(repoDir, ["log", "-2", "--pretty=%s"]).pipe(
+          Effect.map((output) => output.stdout.trim().split("\n")),
+        ),
+      ).toEqual(["Increase late setting", "Increase early setting"]);
+      expect(
+        yield* runGit(repoDir, ["show", "HEAD~1", "--format=", "--unified=0"]).pipe(
+          Effect.map((output) => output.stdout),
+        ),
+      ).toContain("value2 = 200");
+      expect(
+        yield* runGit(repoDir, ["show", "HEAD", "--format=", "--unified=0"]).pipe(
+          Effect.map((output) => output.stdout),
+        ),
+      ).toContain("value29 = 2900");
+      expect(
+        yield* runGit(repoDir, ["status", "--porcelain"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toBe("");
+    }),
+  );
+
+  it.effect("rejects logical commit plans that omit change units", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -2102,7 +2180,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         textGeneration: {
           generateCommitPlan: () =>
             Effect.succeed({
-              commits: [{ subject: "Add alpha behavior", body: "", filePaths: ["alpha.ts"] }],
+              commits: [{ subject: "Add alpha behavior", body: "", hunkIds: ["H001"] }],
             }),
         },
       });
@@ -2113,7 +2191,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         splitCommits: true,
       }).pipe(Effect.flip);
 
-      expect(error.message).toContain("omitted 1 changed file");
+      expect(error.message).toContain("omitted 1 change unit");
       expect(
         yield* runGit(repoDir, ["log", "-1", "--pretty=%s"]).pipe(
           Effect.map((output) => output.stdout.trim()),
