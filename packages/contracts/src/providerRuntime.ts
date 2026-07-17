@@ -123,6 +123,7 @@ export const CanonicalItemType = Schema.Literals([
   "assistant_message",
   "reasoning",
   "plan",
+  "subagent_activity",
   ...TOOL_LIFECYCLE_ITEM_TYPES,
   "review_entered",
   "review_exited",
@@ -358,11 +359,13 @@ export type ThreadRealtimeClosedPayload = typeof ThreadRealtimeClosedPayload.Typ
 const TurnStartedPayload = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyStringSchema),
   effort: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type TurnStartedPayload = typeof TurnStartedPayload.Type;
 
 const TurnCompletedPayload = Schema.Struct({
   state: RuntimeTurnState,
+  providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
   stopReason: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
   usage: Schema.optional(Schema.Unknown),
   modelUsage: Schema.optional(UnknownRecordSchema),

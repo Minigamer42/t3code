@@ -223,6 +223,7 @@ function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType 
   if (type.includes("agent message") || type.includes("assistant")) return "assistant_message";
   if (type.includes("reasoning") || type.includes("thought")) return "reasoning";
   if (type.includes("plan") || type.includes("todo")) return "plan";
+  if (type.includes("sub agent activity")) return "subagent_activity";
   if (type.includes("command")) return "command_execution";
   if (type.includes("file change") || type.includes("patch") || type.includes("edit"))
     return "file_change";
@@ -251,6 +252,8 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
       return "Reasoning";
     case "plan":
       return "Plan";
+    case "subagent_activity":
+      return "Subagent activity";
     case "command_execution":
       return "Ran command";
     case "file_change":
@@ -1021,8 +1024,9 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "turn/started") {
+    const payload = readPayload(EffectCodexSchema.V2TurnStartedNotification, event.payload);
     const turnId = event.turnId;
-    if (!turnId) {
+    if (!turnId || !payload) {
       return [];
     }
     return [
@@ -1030,7 +1034,9 @@ function mapToRuntimeEvents(
         ...runtimeEventBase(event, canonicalThreadId),
         turnId,
         type: "turn.started",
-        payload: {},
+        payload: {
+          providerThreadId: payload.threadId,
+        },
       },
     ];
   }
@@ -1047,6 +1053,7 @@ function mapToRuntimeEvents(
         type: "turn.completed",
         payload: {
           state: toTurnStatus(payload.turn.status),
+          providerThreadId: payload.threadId,
           ...(errorMessage ? { errorMessage } : {}),
         },
       },

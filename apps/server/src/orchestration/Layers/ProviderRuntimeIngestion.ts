@@ -110,6 +110,11 @@ type TurnStartRequestedDomainEvent = Extract<
   { type: "thread.turn-start-requested" }
 >;
 
+type TurnInterruptRequestedDomainEvent = Extract<
+  OrchestrationEvent,
+  { type: "thread.turn-interrupt-requested" }
+>;
+
 type RuntimeTurnCompletedEvent = Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
 
 type RuntimeIngestionInput =
@@ -119,7 +124,7 @@ type RuntimeIngestionInput =
     }
   | {
       source: "domain";
-      event: TurnStartRequestedDomainEvent;
+      event: TurnStartRequestedDomainEvent | TurnInterruptRequestedDomainEvent;
     };
 
 function toTurnId(value: TurnId | string | undefined): TurnId | undefined {
@@ -135,6 +140,80 @@ function sameId(left: string | null | undefined, right: string | null | undefine
     return false;
   }
   return left === right;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function openToolItemsForThread(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyMap<
+  string,
+  {
+    readonly itemId: string;
+    readonly turnId: TurnId | null;
+    readonly itemType?: ToolLifecycleItemType;
+    readonly title?: string;
+  }
+> {
+  const openItems = new Map<
+    string,
+    {
+      readonly itemId: string;
+      readonly turnId: TurnId | null;
+      readonly itemType?: ToolLifecycleItemType;
+      readonly title?: string;
+    }
+  >();
+  for (const activity of activities) {
+    if (
+      activity.kind !== "tool.started" &&
+      activity.kind !== "tool.updated" &&
+      activity.kind !== "tool.completed"
+    ) {
+      continue;
+    }
+    const payload = asRecord(activity.payload);
+    const itemId = asTrimmedString(payload?.itemId);
+    if (!itemId) {
+      continue;
+    }
+    const identity = `${activity.turnId ?? ""}:${itemId}`;
+    const status = asTrimmedString(payload?.status);
+    const itemType =
+      typeof payload?.itemType === "string" && isToolLifecycleItemType(payload.itemType)
+        ? payload.itemType
+        : undefined;
+    const title = asTrimmedString(payload?.title);
+    const terminal =
+      activity.kind === "tool.completed" ||
+      status === "completed" ||
+      status === "failed" ||
+      status === "declined" ||
+      status === "stopped";
+    if (terminal) {
+      openItems.delete(identity);
+    } else {
+      openItems.set(identity, {
+        itemId,
+        turnId: activity.turnId,
+        ...(itemType ? { itemType } : {}),
+        ...(title ? { title } : {}),
+      });
+    }
+  }
+  return openItems;
 }
 
 function hasAssistantMessageForTurn(
@@ -399,6 +478,45 @@ export function runtimeEventToActivities(
       : {};
   })();
   switch (event.type) {
+    case "turn.started": {
+      if (!event.payload.providerThreadId) {
+        return [];
+      }
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "provider.turn.started",
+          summary: "Provider turn started",
+          payload: { providerThreadId: event.payload.providerThreadId },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "turn.completed": {
+      if (!event.payload.providerThreadId) {
+        return [];
+      }
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: event.payload.state === "failed" ? "error" : "info",
+          kind: "provider.turn.completed",
+          summary: "Provider turn completed",
+          payload: {
+            providerThreadId: event.payload.providerThreadId,
+            state: event.payload.state,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
         return [];
@@ -852,6 +970,28 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
+      if (event.payload.itemType === "subagent_activity") {
+        const data = asRecord(event.payload.data);
+        const item = asRecord(data?.item);
+        const providerThreadId = asTrimmedString(item?.agentThreadId);
+        const agentPath = asTrimmedString(item?.agentPath);
+        const activity = asTrimmedString(item?.kind);
+        if (!providerThreadId || !agentPath || !activity) {
+          return [];
+        }
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: activity === "interrupted" ? "error" : "info",
+            kind: "subagent.activity",
+            summary: "Subagent activity",
+            payload: { providerThreadId, agentPath, activity },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -940,6 +1080,10 @@ const make = Effect.gen(function* () {
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
+    );
+  const domainCommandId = (event: OrchestrationEvent, tag: string) =>
+    crypto.randomUUIDv4.pipe(
+      Effect.map((uuid) => CommandId.make(`domain:${event.eventId}:${tag}:${uuid}`)),
     );
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
@@ -2314,7 +2458,97 @@ const make = Effect.gen(function* () {
       }
     });
 
-  const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
+  const processDomainEvent = (
+    event: TurnStartRequestedDomainEvent | TurnInterruptRequestedDomainEvent,
+  ) =>
+    Effect.gen(function* () {
+      if (event.type !== "thread.turn-interrupt-requested") {
+        return;
+      }
+
+      const thread = yield* resolveThreadDetail(event.payload.threadId);
+      if (!thread) {
+        return;
+      }
+      const turnId =
+        event.payload.turnId ?? thread.session?.activeTurnId ?? thread.latestTurn?.turnId;
+
+      const openItems = new Map(openToolItemsForThread(thread.activities));
+      const turnKeyPrefix = `${thread.id}:`;
+      for (const [key, itemIds] of openToolItemIdsByTurnKey) {
+        if (!key.startsWith(turnKeyPrefix)) {
+          continue;
+        }
+        const itemTurnId = TurnId.make(key.slice(turnKeyPrefix.length));
+        for (const itemId of itemIds) {
+          const identity = `${itemTurnId}:${itemId}`;
+          openItems.set(identity, openItems.get(identity) ?? { itemId, turnId: itemTurnId });
+        }
+        openToolItemIdsByTurnKey.delete(key);
+      }
+      for (const key of deferredTurnCompletionByTurnKey.keys()) {
+        if (key.startsWith(turnKeyPrefix)) {
+          deferredTurnCompletionByTurnKey.delete(key);
+        }
+      }
+      const nextActivitySequence =
+        thread.activities.reduce(
+          (highest, activity) => Math.max(highest, activity.sequence ?? 0),
+          0,
+        ) + 1;
+
+      yield* Effect.forEach(
+        openItems.values(),
+        (item, index) =>
+          Effect.gen(function* () {
+            const activityId = EventId.make(yield* crypto.randomUUIDv4);
+            yield* orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId: yield* domainCommandId(event, "tool-stopped-on-turn-interrupt"),
+              threadId: thread.id,
+              activity: {
+                id: activityId,
+                createdAt: event.payload.createdAt,
+                tone: "tool",
+                kind: "tool.completed",
+                summary: "Tool stopped",
+                payload: {
+                  itemId: item.itemId,
+                  ...(item.itemType ? { itemType: item.itemType } : {}),
+                  ...(item.title ? { title: item.title } : {}),
+                  status: "stopped",
+                  detail: "Stopped by user.",
+                },
+                turnId: item.turnId ?? turnId ?? null,
+                sequence: nextActivitySequence + index,
+              },
+              createdAt: event.payload.createdAt,
+            });
+          }),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+
+      if (
+        thread.session &&
+        thread.session.status !== "stopped" &&
+        thread.session.status !== "interrupted" &&
+        thread.session.status !== "error"
+      ) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.session.set",
+          commandId: yield* domainCommandId(event, "thread-session-set-after-interrupt"),
+          threadId: thread.id,
+          session: {
+            ...thread.session,
+            status: "ready",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        });
+      }
+    });
 
   const processInput = (input: RuntimeIngestionInput) =>
     input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
@@ -2345,7 +2579,10 @@ const make = Effect.gen(function* () {
       );
       yield* forkParked(
         Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-          if (event.type !== "thread.turn-start-requested") {
+          if (
+            event.type !== "thread.turn-start-requested" &&
+            event.type !== "thread.turn-interrupt-requested"
+          ) {
             return Effect.void;
           }
           return worker.enqueue({ source: "domain", event });
