@@ -431,8 +431,20 @@ function withDescription(title: string, description: string | undefined) {
   return description ? { title, description } : { title };
 }
 
+type GitActionCompletionCommit = GitRunStackedActionResult["commit"] & {
+  readonly subjects?: ReadonlyArray<string>;
+};
+
+interface GitActionCompletionResult {
+  readonly action: GitRunStackedActionResult["action"];
+  readonly branch: GitRunStackedActionResult["branch"];
+  readonly commit: GitActionCompletionCommit;
+  readonly push: GitRunStackedActionResult["push"];
+  readonly pr: GitRunStackedActionResult["pr"];
+}
+
 function summarizeGitActionResult(
-  result: Pick<GitRunStackedActionResult, "commit" | "push" | "pr">,
+  result: Pick<GitActionCompletionResult, "commit" | "push" | "pr">,
   terms: ChangeRequestTerminology,
 ): {
   title: string;
@@ -457,9 +469,12 @@ function summarizeGitActionResult(
 
   if (result.commit.status === "created") {
     if ((result.commit.commitCount ?? 1) > 1) {
+      const subjects = result.commit.subjects
+        ?.map((subject) => truncateText(subject))
+        .filter((subject): subject is string => subject !== undefined);
       return withDescription(
         `Created ${result.commit.commitCount} commits`,
-        truncateText(result.commit.subject),
+        subjects && subjects.length > 0 ? subjects.join("\n") : truncateText(result.commit.subject),
       );
     }
     const shortSha = shortenSha(result.commit.commitSha);
@@ -1400,7 +1415,7 @@ export const make = Effect.gen(function* () {
   });
   const buildCompletionToast = Effect.fn("buildCompletionToast")(function* (
     cwd: string,
-    result: Pick<GitRunStackedActionResult, "action" | "branch" | "commit" | "push" | "pr">,
+    result: GitActionCompletionResult,
   ) {
     const terms = yield* sourceControlProvider(cwd).pipe(
       Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
@@ -1887,6 +1902,7 @@ export const make = Effect.gen(function* () {
       commitSha: string;
       subject: string;
       commitCount: number;
+      subjects: ReadonlyArray<string>;
     } | null = null;
 
     for (const [index, commit] of commits.entries()) {
@@ -1929,7 +1945,11 @@ export const make = Effect.gen(function* () {
           detail: `Logical commit ${index + 1} could not be created.`,
         });
       }
-      lastCommit = { ...result, commitCount: commits.length };
+      lastCommit = {
+        ...result,
+        commitCount: commits.length,
+        subjects: commits.map((plannedCommit) => plannedCommit.subject),
+      };
     }
 
     return lastCommit ?? { status: "skipped_no_changes" as const };
@@ -2599,6 +2619,7 @@ export const make = Effect.gen(function* () {
                 ),
               )
             : { status: "skipped_not_requested" as const };
+        const commitSummary: GitActionCompletionCommit = commit;
 
         const push = wantsPush
           ? yield* progress
@@ -2631,15 +2652,16 @@ export const make = Effect.gen(function* () {
         const toast = yield* buildCompletionToast(input.cwd, {
           action: input.action,
           branch: branchStep,
-          commit,
+          commit: commitSummary,
           push,
           pr,
         });
+        const { subjects: _subjects, ...commitResult } = commitSummary;
 
         const result = {
           action: input.action,
           branch: branchStep,
-          commit,
+          commit: commitResult,
           push,
           pr,
           toast,
