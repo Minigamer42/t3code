@@ -300,8 +300,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     Effect.fn("ClaudeTextGeneration.generateCommitPlan")(function* (input) {
       const { prompt, outputSchema } = buildCommitPlanPrompt({
         branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
         policy: input.policy,
       });
 

@@ -337,8 +337,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     Effect.fn("CodexTextGeneration.generateCommitPlan")(function* (input) {
       const { prompt, outputSchema } = buildCommitPlanPrompt({
         branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
         policy: input.policy,
       });
 

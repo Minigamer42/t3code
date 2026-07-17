@@ -34,8 +34,8 @@ export interface CommitMessageGenerationResult {
 export interface CommitPlanGenerationInput {
   cwd: string;
   branch: string | null;
-  stagedSummary: string;
-  stagedPatch: string;
+  changeUnitSummary: string;
+  annotatedPatch: string;
   /** Optional repository-specific instructions for generated commit text. */
   policy?: TextGenerationPolicy | undefined;
   /** What model and provider to use for generation. */
@@ -46,7 +46,7 @@ export interface CommitPlanGenerationResult {
   commits: Array<{
     subject: string;
     body: string;
-    filePaths: string[];
+    hunkIds: string[];
   }>;
 }
 

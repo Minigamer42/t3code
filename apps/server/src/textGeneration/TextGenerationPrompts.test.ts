@@ -70,18 +70,18 @@ describe("buildCommitMessagePrompt", () => {
 });
 
 describe("buildCommitPlanPrompt", () => {
-  it("requires an exact, ordered partition of staged files", () => {
+  it("requires an exact, ordered partition of change-unit IDs", () => {
     const result = buildCommitPlanPrompt({
       branch: "feature/split",
-      stagedSummary: "M\tsrc/a.ts\nA\tsrc/a.test.ts",
-      stagedPatch: "diff --git a/src/a.ts b/src/a.ts",
+      changeUnitSummary: "H001\tsrc/a.ts\t@@ -1 +1 @@\nH002\tsrc/a.test.ts\twhole-file change",
+      annotatedPatch: "### H001 — src/a.ts\n@@ -1 +1 @@\n-old\n+new",
     });
 
-    expect(result.prompt).toContain("use every path from Staged files exactly once");
+    expect(result.prompt).toContain("use every ID from Available change units exactly once");
     expect(result.prompt).toContain(
       "order prerequisite commits before commits that depend on them",
     );
-    expect(result.prompt).toContain("src/a.test.ts");
+    expect(result.prompt).toContain("H002\tsrc/a.test.ts");
     expect(result.prompt).toContain("Branch: feature/split");
   });
 });

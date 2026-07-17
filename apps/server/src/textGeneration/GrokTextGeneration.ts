@@ -191,8 +191,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     Effect.fn("GrokTextGeneration.generateCommitPlan")(function* (input) {
       const { prompt, outputSchema } = buildCommitPlanPrompt({
         branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
         policy: input.policy,
       });
 

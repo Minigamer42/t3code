@@ -199,8 +199,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     Effect.fn("CursorTextGeneration.generateCommitPlan")(function* (input) {
       const { prompt, outputSchema } = buildCommitPlanPrompt({
         branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
         policy: input.policy,
       });
 

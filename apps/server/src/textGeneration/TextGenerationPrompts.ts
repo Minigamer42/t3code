@@ -83,18 +83,19 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
 
 export interface CommitPlanPromptInput {
   branch: string | null;
-  stagedSummary: string;
-  stagedPatch: string;
+  changeUnitSummary: string;
+  annotatedPatch: string;
   policy?: TextGenerationPolicy | undefined;
 }
 
 export function buildCommitPlanPrompt(input: CommitPlanPromptInput) {
   const prompt = [
     "You split a staged working tree into logical git commits.",
-    "Return a JSON object with a commits array. Each commit has subject, body, and filePaths.",
+    "Return a JSON object with a commits array. Each commit has subject, body, and hunkIds.",
     "Rules:",
-    "- use every path from Staged files exactly once",
-    "- copy file paths exactly; do not invent, omit, or duplicate paths",
+    "- use every ID from Available change units exactly once",
+    "- copy hunk IDs exactly; do not invent, omit, or duplicate IDs",
+    "- hunks from the same file may be assigned to different commits when they represent separate concerns",
     "- keep implementation, tests, schemas, and supporting changes together when they form one concern",
     "- separate independently reviewable and reversible concerns",
     "- order prerequisite commits before commits that depend on them",
@@ -105,11 +106,11 @@ export function buildCommitPlanPrompt(input: CommitPlanPromptInput) {
     "",
     `Branch: ${input.branch ?? "(detached)"}`,
     "",
-    "Staged files:",
-    limitSection(input.stagedSummary, 6_000),
+    "Available change units:",
+    limitSection(input.changeUnitSummary, 20_000),
     "",
-    "Staged patch:",
-    limitSection(input.stagedPatch, 40_000),
+    "Detailed change units:",
+    limitSection(input.annotatedPatch, 40_000),
   ].join("\n");
 
   return {
@@ -119,7 +120,7 @@ export function buildCommitPlanPrompt(input: CommitPlanPromptInput) {
         Schema.Struct({
           subject: Schema.String,
           body: Schema.String,
-          filePaths: Schema.Array(Schema.String),
+          hunkIds: Schema.Array(Schema.String),
         }),
       ),
     }),

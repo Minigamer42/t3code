@@ -63,6 +63,12 @@ import * as SourceControlProviderRegistry from "../sourceControl/SourceControlPr
 import { defaultChangeRequestTemplatePaths } from "../sourceControl/changeRequestTemplates.ts";
 import { detectPrTemplate } from "../sourceControl/PrTemplateDetection.ts";
 import type { ChangeRequest } from "@t3tools/contracts";
+import {
+  buildPatchForLogicalChangeUnits,
+  formatLogicalChangeUnitsForModel,
+  parseLogicalChangeUnits,
+  summarizeLogicalChangeUnits,
+} from "./LogicalCommitPatch.ts";
 
 export interface GitActionProgressReporter {
   readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
@@ -109,6 +115,8 @@ export class GitManager extends Context.Service<
 
 const COMMIT_TIMEOUT_MS = 10 * 60_000;
 const MAX_LOGICAL_COMMITS = 20;
+const MAX_LOGICAL_CHANGE_UNITS = 200;
+const MAX_LOGICAL_COMMIT_PATCH_BYTES = 2_000_000;
 const MAX_PROGRESS_TEXT_LENGTH = 500;
 const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
@@ -1787,9 +1795,31 @@ export const make = Effect.gen(function* () {
       label: "Planning logical commits...",
     });
 
-    const context = yield* gitCore.prepareCommitContext(cwd, selectedFilePaths);
-    if (!context) {
+    const prepared = yield* gitCore.prepareCommitContext(cwd, selectedFilePaths);
+    if (!prepared) {
       return { status: "skipped_no_changes" as const };
+    }
+
+    const stagedPatch = yield* gitCore.execute({
+      operation: "GitManager.runSplitCommitStep.readStagedPatch",
+      cwd,
+      args: ["diff", "--cached", "--binary", "--full-index", "--patch"],
+      maxOutputBytes: MAX_LOGICAL_COMMIT_PATCH_BYTES,
+    });
+    if (stagedPatch.stdoutTruncated) {
+      return yield* new GitManagerError({
+        operation: "runSplitCommitStep",
+        cwd,
+        detail: `Logical commit splitting supports patches up to ${MAX_LOGICAL_COMMIT_PATCH_BYTES} bytes.`,
+      });
+    }
+    const changeUnits = parseLogicalChangeUnits(stagedPatch.stdout);
+    if (changeUnits.length === 0 || changeUnits.length > MAX_LOGICAL_CHANGE_UNITS) {
+      return yield* new GitManagerError({
+        operation: "runSplitCommitStep",
+        cwd,
+        detail: `Logical commit splitting supports between 1 and ${MAX_LOGICAL_CHANGE_UNITS} change units.`,
+      });
     }
 
     const stylePolicy = yield* resolveStylePolicy(cwd, settings.style);
@@ -1805,14 +1835,15 @@ export const make = Effect.gen(function* () {
     const generated = yield* textGeneration.generateCommitPlan({
       cwd,
       branch,
-      stagedSummary: limitContext(context.stagedSummary, 8_000),
-      stagedPatch: limitContext(context.stagedPatch, 50_000),
+      changeUnitSummary: summarizeLogicalChangeUnits(changeUnits),
+      annotatedPatch: formatLogicalChangeUnitsForModel(changeUnits),
       ...(policy ? { policy } : {}),
       modelSelection: settings.modelSelection,
     });
 
-    const expectedPaths = new Set(selectedFilePaths);
-    const plannedPaths = new Set<string>();
+    const unitsById = new Map(changeUnits.map((unit) => [unit.id, unit] as const));
+    const unitOrder = new Map(changeUnits.map((unit, index) => [unit.id, index] as const));
+    const plannedIds = new Set<string>();
     const commits = generated.commits;
     if (commits.length === 0 || commits.length > MAX_LOGICAL_COMMITS) {
       return yield* new GitManagerError({
@@ -1823,31 +1854,31 @@ export const make = Effect.gen(function* () {
     }
 
     for (const commit of commits) {
-      if (commit.filePaths.length === 0) {
+      if (commit.hunkIds.length === 0) {
         return yield* new GitManagerError({
           operation: "runSplitCommitStep",
           cwd,
           detail: "The generated commit plan contained an empty commit.",
         });
       }
-      for (const filePath of commit.filePaths) {
-        if (!expectedPaths.has(filePath) || plannedPaths.has(filePath)) {
+      for (const hunkId of commit.hunkIds) {
+        if (!unitsById.has(hunkId) || plannedIds.has(hunkId)) {
           return yield* new GitManagerError({
             operation: "runSplitCommitStep",
             cwd,
-            detail: `The generated commit plan contained an invalid or duplicate path: ${filePath}`,
+            detail: `The generated commit plan contained an invalid or duplicate hunk ID: ${hunkId}`,
           });
         }
-        plannedPaths.add(filePath);
+        plannedIds.add(hunkId);
       }
     }
 
-    const missingPaths = selectedFilePaths.filter((filePath) => !plannedPaths.has(filePath));
-    if (missingPaths.length > 0) {
+    const missingIds = changeUnits.filter((unit) => !plannedIds.has(unit.id));
+    if (missingIds.length > 0) {
       return yield* new GitManagerError({
         operation: "runSplitCommitStep",
         cwd,
-        detail: `The generated commit plan omitted ${missingPaths.length} changed file(s).`,
+        detail: `The generated commit plan omitted ${missingIds.length} change unit(s).`,
       });
     }
 
@@ -1859,14 +1890,22 @@ export const make = Effect.gen(function* () {
     } | null = null;
 
     for (const [index, commit] of commits.entries()) {
-      const staged = yield* gitCore.prepareCommitContext(cwd, commit.filePaths);
-      if (!staged) {
-        return yield* new GitManagerError({
-          operation: "runSplitCommitStep",
-          cwd,
-          detail: `No changes remained for logical commit ${index + 1}.`,
-        });
-      }
+      const commitUnits = commit.hunkIds
+        .map((hunkId) => unitsById.get(hunkId))
+        .filter((unit): unit is NonNullable<typeof unit> => unit !== undefined)
+        .toSorted((left, right) => (unitOrder.get(left.id) ?? 0) - (unitOrder.get(right.id) ?? 0));
+      const commitPatch = buildPatchForLogicalChangeUnits(commitUnits);
+      yield* gitCore.execute({
+        operation: "GitManager.runSplitCommitStep.resetIndex",
+        cwd,
+        args: ["reset"],
+      });
+      yield* gitCore.execute({
+        operation: "GitManager.runSplitCommitStep.applyPatch",
+        cwd,
+        args: ["apply", "--cached", "--recount", "--whitespace=nowarn", "-"],
+        stdin: commitPatch,
+      });
       const result = yield* runCommitStep(
         settings,
         cwd,

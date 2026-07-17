@@ -37,13 +37,13 @@ export function sanitizeCommitPlan(
   commits: ReadonlyArray<{
     subject: string;
     body: string;
-    filePaths: ReadonlyArray<string>;
+    hunkIds: ReadonlyArray<string>;
   }>,
-): Array<{ subject: string; body: string; filePaths: string[] }> {
+): Array<{ subject: string; body: string; hunkIds: string[] }> {
   return commits.map((commit) => ({
     subject: sanitizeCommitSubject(commit.subject),
     body: commit.body.trim(),
-    filePaths: commit.filePaths.map((filePath) => filePath.trim()),
+    hunkIds: commit.hunkIds.map((hunkId) => hunkId.trim()),
   }));
 }
 

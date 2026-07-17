@@ -557,8 +557,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     Effect.fn("OpenCodeTextGeneration.generateCommitPlan")(function* (input) {
       const { prompt, outputSchema } = buildCommitPlanPrompt({
         branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
         policy: input.policy,
       });
       const generated = yield* runOpenCodeJson({
