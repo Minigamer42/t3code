@@ -154,6 +154,7 @@ export interface CodexSessionRuntimeShape {
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly terminateCommand: (processId: string) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
     numTurns: number,
@@ -172,10 +173,22 @@ export interface CodexSessionRuntimeShape {
 
 export type CodexSessionRuntimeError =
   | CodexErrors.CodexAppServerError
+  | CodexSessionRuntimeCommandNotRunningError
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
   | CodexSessionRuntimeThreadIdMissingError;
+
+export class CodexSessionRuntimeCommandNotRunningError extends Schema.TaggedErrorClass<CodexSessionRuntimeCommandNotRunningError>()(
+  "CodexSessionRuntimeCommandNotRunningError",
+  {
+    processId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Codex command process is no longer running: ${this.processId}`;
+  }
+}
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -1936,6 +1949,22 @@ export const makeCodexSessionRuntime = (
           // after turn/interrupt. A stop action must clean them explicitly so
           // the visible interrupted state also reflects the actual process.
           yield* cleanBackgroundTerminals(providerThreadId);
+        }),
+      terminateCommand: (processId) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const response = yield* client.raw.request("thread/backgroundTerminals/terminate", {
+            threadId: providerThreadId,
+            processId,
+          });
+          if (
+            typeof response !== "object" ||
+            response === null ||
+            !("terminated" in response) ||
+            response.terminated !== true
+          ) {
+            return yield* new CodexSessionRuntimeCommandNotRunningError({ processId });
+          }
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;

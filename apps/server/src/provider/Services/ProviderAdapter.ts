@@ -69,6 +69,15 @@ export interface ProviderAdapterShape<TError> {
   readonly interruptTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void, TError>;
 
   /**
+   * Terminate one provider-owned command process when the provider exposes a
+   * connection-scoped process handle.
+   */
+  readonly terminateCommand?: (
+    threadId: ThreadId,
+    processId: string,
+  ) => Effect.Effect<void, TError>;
+
+  /**
    * Respond to an interactive approval request.
    */
   readonly respondToRequest: (

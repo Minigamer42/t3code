@@ -21,6 +21,7 @@ import type {
   ProviderSession,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  ProviderTerminateCommandInput,
   ThreadId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
@@ -56,6 +57,13 @@ export interface ProviderServiceShape {
    */
   readonly interruptTurn: (
     input: ProviderInterruptTurnInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Terminate one command process without interrupting its owning turn.
+   */
+  readonly terminateCommand: (
+    input: ProviderTerminateCommandInput,
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**

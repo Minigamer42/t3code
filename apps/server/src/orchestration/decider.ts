@@ -1058,6 +1058,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.tool.stop": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+          metadata: { providerItemId: command.itemId },
+        })),
+        type: "thread.tool-stop-requested",
+        payload: {
+          threadId: command.threadId,
+          turnId: command.turnId,
+          itemId: command.itemId,
+          processId: command.processId,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.approval.respond": {
       yield* requireThread({
         readModel,
