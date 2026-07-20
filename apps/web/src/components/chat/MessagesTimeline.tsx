@@ -152,6 +152,7 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  onStopTool: (input: { itemId: string; processId: string; turnId: TurnId | null }) => void;
 }
 
 interface TimelineRowActivityState {
@@ -258,6 +259,7 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
+  onStopTool?: (input: { itemId: string; processId: string; turnId: TurnId | null }) => void;
   toolCallsExpanded?: boolean;
   toolCallExpansionEpoch?: number;
 }
@@ -303,6 +305,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  onStopTool = NOOP_QUEUED_MESSAGE_ACTION,
   toolCallsExpanded = true,
   toolCallExpansionEpoch = 0,
 }: MessagesTimelineProps) {
@@ -575,6 +578,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      onStopTool,
     }),
     [
       timestampFormat,
@@ -596,6 +600,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      onStopTool,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -2665,6 +2670,18 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function workEntryCommandProcessId(workEntry: TimelineWorkEntry): string | null {
+  if (
+    workEntry.itemType !== "command_execution" ||
+    typeof workEntry.toolData !== "object" ||
+    workEntry.toolData === null
+  ) {
+    return null;
+  }
+  const processId = (workEntry.toolData as { processId?: unknown }).processId;
+  return typeof processId === "string" && processId.trim().length > 0 ? processId : null;
+}
+
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
 /**
@@ -2786,12 +2803,15 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  const { onStopTool } = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
   const entryIconName =
     showWarningIndicator || showFailedIndicator ? "x" : workEntryIconName(workEntry);
+  const heading = toolWorkEntryHeading(workEntry);
+  const commandProcessId = workEntryCommandProcessId(workEntry);
   const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
   const expandedContent = buildToolCallExpandedContent(workEntry, workspaceRoot);
   const canExpand = expandedContent !== null;
@@ -2931,6 +2951,27 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
+          {showRunningIndicator && workEntry.itemId && commandProcessId ? (
+            <div className="mb-1 flex justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1.5 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() =>
+                  onStopTool({
+                    itemId: workEntry.itemId!,
+                    processId: commandProcessId,
+                    turnId: workEntry.turnId ?? null,
+                  })
+                }
+                aria-label={`Stop ${heading}`}
+              >
+                <span className="size-2 rounded-[2px] bg-current" aria-hidden />
+                Stop
+              </Button>
+            </div>
+          ) : null}
           <pre className={toolCallExpandedBodyClassName}>{expandedContent.body}</pre>
         </div>
       ) : null}

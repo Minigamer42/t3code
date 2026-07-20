@@ -9,6 +9,7 @@ import {
   type ProjectId,
   type PreviewAnnotationPayload,
   type ProviderApprovalDecision,
+  ProviderItemId,
   ProviderInstanceId,
   type ServerProvider,
   type ResolvedKeybindingsConfig,
@@ -1271,6 +1272,9 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
+    reportFailure: false,
+  });
+  const stopThreadTool = useAtomCommand(threadEnvironment.stopTool, {
     reportFailure: false,
   });
   const respondToThreadApproval = useAtomCommand(threadEnvironment.respondToApproval, {
@@ -5085,6 +5089,29 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, interruptThreadTurn, setThreadError],
   );
 
+  const requestToolStop = useCallback(
+    async (input: { itemId: string; processId: string; turnId: TurnId | null }) => {
+      if (!activeThreadId) return;
+      const result = await stopThreadTool({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          turnId: input.turnId,
+          itemId: ProviderItemId.make(input.itemId),
+          processId: input.processId,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : "Failed to stop the tool call.",
+        );
+      }
+    },
+    [activeThreadId, environmentId, setThreadError, stopThreadTool],
+  );
+
   const interruptAcceptedDispatchIfRequested = useCallback(
     async (threadId: ThreadId) => {
       if (interruptRequestedThreadIdRef.current !== threadId) return;
@@ -6908,6 +6935,7 @@ function ChatViewContent(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                onStopTool={(input) => void requestToolStop(input)}
                 toolCallsExpanded={toolCallsExpanded}
                 toolCallExpansionEpoch={toolCallExpansionEpoch}
               />
