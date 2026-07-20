@@ -126,7 +126,7 @@ describe("VcsProjectConfig", () => {
     );
   });
 
-  it.layer(TestLayer)("resolves project branch naming conventions", (it) => {
+  it.layer(layerTest)("resolves project branch naming conventions", (it) => {
     it.effect("supports unprefixed, namespaced branch names from nested workspaces", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
