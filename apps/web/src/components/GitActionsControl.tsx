@@ -338,6 +338,124 @@ const COMMIT_DIALOG_TITLE = "Commit changes";
 const COMMIT_DIALOG_DESCRIPTION =
   "Review and confirm your commit. Leave the message blank to auto-generate one.";
 
+type WorkingTreeFile = VcsStatusResult["workingTree"]["files"][number];
+
+function CommitFileSelection({
+  files,
+  excludedFiles,
+  isEditing,
+  onExcludedFilesChange,
+  onEditingChange,
+  onOpenFile,
+}: {
+  files: ReadonlyArray<WorkingTreeFile>;
+  excludedFiles: ReadonlySet<string>;
+  isEditing: boolean;
+  onExcludedFilesChange: (files: ReadonlySet<string>) => void;
+  onEditingChange: (isEditing: boolean) => void;
+  onOpenFile: (path: string) => void;
+}) {
+  const selectedFiles = files.filter((file) => !excludedFiles.has(file.path));
+  const allSelected = excludedFiles.size === 0;
+  const noneSelected = selectedFiles.length === 0;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isEditing && files.length > 0 && (
+            <Checkbox
+              aria-label="Select all files"
+              checked={allSelected}
+              indeterminate={!allSelected && !noneSelected}
+              onCheckedChange={() => {
+                onExcludedFilesChange(
+                  allSelected ? new Set(files.map((file) => file.path)) : new Set(),
+                );
+              }}
+            />
+          )}
+          <span className="text-muted-foreground">Files</span>
+          {!allSelected && !isEditing && (
+            <span className="text-muted-foreground">
+              ({selectedFiles.length} of {files.length})
+            </span>
+          )}
+        </div>
+        {files.length > 0 && (
+          <Button variant="ghost" size="xs" onClick={() => onEditingChange(!isEditing)}>
+            {isEditing ? "Done" : "Edit"}
+          </Button>
+        )}
+      </div>
+      {files.length === 0 ? (
+        <p className="font-medium">none</p>
+      ) : (
+        <div className="space-y-2">
+          <ScrollArea className="h-44 rounded-md border border-input bg-background">
+            <div className="space-y-1 p-1">
+              {files.map((file) => {
+                const isExcluded = excludedFiles.has(file.path);
+                return (
+                  <div
+                    key={file.path}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono text-xs transition-colors hover:bg-accent/50"
+                  >
+                    {isEditing && (
+                      <Checkbox
+                        aria-label={`Include ${file.path}`}
+                        checked={!isExcluded}
+                        onCheckedChange={() => {
+                          const next = new Set(excludedFiles);
+                          if (next.has(file.path)) {
+                            next.delete(file.path);
+                          } else {
+                            next.add(file.path);
+                          }
+                          onExcludedFilesChange(next);
+                        }}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="flex flex-1 items-center justify-between gap-3 text-left truncate"
+                      onClick={() => onOpenFile(file.path)}
+                    >
+                      <span className={`truncate${isExcluded ? " text-muted-foreground" : ""}`}>
+                        {file.path}
+                      </span>
+                      <span className="shrink-0">
+                        {isExcluded ? (
+                          <span className="text-muted-foreground">Excluded</span>
+                        ) : (
+                          <>
+                            <span className="text-success">+{file.insertions}</span>
+                            <span className="text-muted-foreground"> / </span>
+                            <span className="text-destructive">-{file.deletions}</span>
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+          <div className="flex justify-end font-mono">
+            <span className="text-success">
+              +{selectedFiles.reduce((sum, file) => sum + file.insertions, 0)}
+            </span>
+            <span className="text-muted-foreground"> / </span>
+            <span className="text-destructive">
+              -{selectedFiles.reduce((sum, file) => sum + file.deletions, 0)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GitActionItemIcon({
   icon,
   SourceControlIcon,
@@ -1874,104 +1992,14 @@ export default function GitActionsControl({
                   )}
                 </span>
               </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {isEditingFiles && allFiles.length > 0 && (
-                      <Checkbox
-                        checked={allSelected}
-                        indeterminate={!allSelected && !noneSelected}
-                        onCheckedChange={() => {
-                          setExcludedFiles(
-                            allSelected ? new Set(allFiles.map((f) => f.path)) : new Set(),
-                          );
-                        }}
-                      />
-                    )}
-                    <span className="text-muted-foreground">Files</span>
-                    {!allSelected && !isEditingFiles && (
-                      <span className="text-muted-foreground">
-                        ({selectedFiles.length} of {allFiles.length})
-                      </span>
-                    )}
-                  </div>
-                  {allFiles.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setIsEditingFiles((prev) => !prev)}
-                    >
-                      {isEditingFiles ? "Done" : "Edit"}
-                    </Button>
-                  )}
-                </div>
-                {!gitStatusForActions || allFiles.length === 0 ? (
-                  <p className="font-medium">none</p>
-                ) : (
-                  <div className="space-y-2">
-                    <ScrollArea className="h-44 rounded-lg bg-card ring-1 ring-black/5 dark:bg-white/[0.025] dark:ring-white/5">
-                      <div className="space-y-1 p-1">
-                        {allFiles.map((file) => {
-                          const isExcluded = excludedFiles.has(file.path);
-                          return (
-                            <div
-                              key={file.path}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono hover:bg-accent/50"
-                            >
-                              {isEditingFiles && (
-                                <Checkbox
-                                  checked={!excludedFiles.has(file.path)}
-                                  onCheckedChange={() => {
-                                    setExcludedFiles((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(file.path)) {
-                                        next.delete(file.path);
-                                      } else {
-                                        next.add(file.path);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                />
-                              )}
-                              <button
-                                type="button"
-                                className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
-                                onClick={() => openChangedFileInEditor(file.path)}
-                              >
-                                <StartTruncatedPath
-                                  path={file.path}
-                                  className={`flex-1${isExcluded ? " text-muted-foreground" : ""}`}
-                                />
-                                <span className="shrink-0">
-                                  {isExcluded ? (
-                                    <span className="text-muted-foreground">Excluded</span>
-                                  ) : (
-                                    <>
-                                      <span className="text-success">+{file.insertions}</span>
-                                      <span className="text-muted-foreground"> / </span>
-                                      <span className="text-destructive">-{file.deletions}</span>
-                                    </>
-                                  )}
-                                </span>
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </ScrollArea>
-                    <div className="flex justify-end font-mono">
-                      <span className="text-success">
-                        +{selectedFiles.reduce((sum, f) => sum + f.insertions, 0)}
-                      </span>
-                      <span className="text-muted-foreground"> / </span>
-                      <span className="text-destructive">
-                        -{selectedFiles.reduce((sum, f) => sum + f.deletions, 0)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <CommitFileSelection
+                files={allFiles}
+                excludedFiles={excludedFiles}
+                isEditing={isEditingFiles}
+                onExcludedFilesChange={setExcludedFiles}
+                onEditingChange={setIsEditingFiles}
+                onOpenFile={openChangedFileInEditor}
+              />
             </div>
             <div className="space-y-1">
               <p className="text-sm font-medium">Commit message (optional)</p>
