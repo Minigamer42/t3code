@@ -281,6 +281,7 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
 const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(ProjectSetupScriptRunner.layer),
   Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(VcsProjectConfig.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(TextGeneration.layer),
 );
