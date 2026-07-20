@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatWorkspaceRelativePath } from "./filePathDisplay";
+import {
+  formatWorkspaceAbsolutePath,
+  formatWorkspaceRelativePath,
+  resolveChangedFilePaths,
+} from "./filePathDisplay";
 
 describe("formatWorkspaceRelativePath", () => {
   it("formats absolute workspace paths from the workspace root", () => {
@@ -37,5 +41,46 @@ describe("formatWorkspaceRelativePath", () => {
         "C:/Users/mike/dev-stuff/t3code",
       ),
     ).toBe("t3code/apps/web/src/session-logic.ts:501:9");
+  });
+
+  it("formats relative paths as absolute workspace paths", () => {
+    expect(
+      formatWorkspaceAbsolutePath(
+        "t3code/apps/web/src/session-logic.ts:501",
+        "C:/Users/mike/dev-stuff/t3code",
+      ),
+    ).toBe("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts:501");
+  });
+
+  it("collapses absolute and short aliases for changed files", () => {
+    expect(
+      resolveChangedFilePaths(
+        ["/home/me/projects/jobagent/individuell/target.php", "jobagent/individuell/target.php"],
+        "/home/me/projects/jobagent",
+      ),
+    ).toEqual([
+      {
+        displayPath: "jobagent/individuell/target.php",
+        fullPath: "/home/me/projects/jobagent/individuell/target.php",
+      },
+    ]);
+  });
+
+  it("keeps distinct changed files while resolving their full paths", () => {
+    expect(
+      resolveChangedFilePaths(
+        ["apps/web/src/index.ts", "apps/web/src/main.ts"],
+        "/home/me/projects/t3code",
+      ),
+    ).toEqual([
+      {
+        displayPath: "t3code/apps/web/src/index.ts",
+        fullPath: "/home/me/projects/t3code/apps/web/src/index.ts",
+      },
+      {
+        displayPath: "t3code/apps/web/src/main.ts",
+        fullPath: "/home/me/projects/t3code/apps/web/src/main.ts",
+      },
+    ]);
   });
 });
