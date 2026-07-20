@@ -51,7 +51,7 @@ import {
 } from "@t3tools/shared/projectSettings";
 import {
   mergeGitStatusParts,
-  resolveAutoFeatureBranchName,
+  resolveAutoBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
 } from "@t3tools/shared/git";
@@ -90,6 +90,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isNonRepositoryGitStderr } from "../vcs/GitVcsDriverCore.ts";
 import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
+import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import type { ChangeRequest } from "@t3tools/contracts";
 import {
@@ -632,6 +633,17 @@ function formatCommitMessage(subject: string, body: string): string {
   return `${subject}\n\n${trimmedBody}`;
 }
 
+function removeBuiltInFeaturePrefix(
+  branch: string,
+  naming: VcsProjectConfig.VcsBranchNamingConfig,
+): string {
+  const sanitized = sanitizeBranchFragment(branch);
+  if (naming.defaultPrefix === "feature" && !naming.preserveNamespaces) {
+    return sanitized;
+  }
+  return sanitized.startsWith("feature/") ? sanitized.slice("feature/".length) : sanitized;
+}
+
 function parseCustomCommitMessage(raw: string): { subject: string; body: string } | null {
   const normalized = raw.replace(/\r\n/g, "\n").trim();
   if (normalized.length === 0) {
@@ -754,6 +766,7 @@ export const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const random = yield* SecureRandom.SecureRandom;
+  const vcsProjectConfig = yield* VcsProjectConfig.VcsProjectConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -3700,9 +3713,11 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const preferredBranch = suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
+    const naming = yield* vcsProjectConfig.resolveBranchNaming({ cwd });
+    const suggestedBranch = suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
+    const preferredBranch = removeBuiltInFeaturePrefix(suggestedBranch, naming);
     const existingBranchNames = yield* gitCore.listLocalBranchNames(cwd);
-    const resolvedBranch = resolveAutoFeatureBranchName(existingBranchNames, preferredBranch);
+    const resolvedBranch = resolveAutoBranchName(existingBranchNames, preferredBranch, naming);
 
     yield* gitCore.createRef({ cwd, refName: resolvedBranch });
     yield* Effect.scoped(gitCore.switchRef({ cwd, refName: resolvedBranch }));

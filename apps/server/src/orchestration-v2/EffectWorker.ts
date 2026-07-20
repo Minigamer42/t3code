@@ -204,7 +204,8 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
-          case "provider-command.stop":
+          case "provider-command.stop": {
+            const stopRequest = effect.request;
             return providerTurnControl
               .terminateCommand({
                 threadId: effect.threadId,
@@ -214,6 +215,14 @@ export const layerExecutor: Layer.Layer<
                 processId: effect.request.processId,
               })
               .pipe(
+                Effect.tapError(() =>
+                  threads.dispatch({
+                    type: "thread.tool.stop.failed",
+                    commandId: CommandId.make(`${effect.id}:failed:${effect.attemptCount}`),
+                    threadId: effect.threadId,
+                    itemId: stopRequest.itemId,
+                  }),
+                ),
                 Effect.andThen(
                   threads.dispatch({
                     type: "thread.tool.stop.complete",
@@ -223,14 +232,6 @@ export const layerExecutor: Layer.Layer<
                   }),
                 ),
                 Effect.asVoid,
-                Effect.tapError(() =>
-                  threads.dispatch({
-                    type: "thread.tool.stop.failed",
-                    commandId: CommandId.make(`${effect.id}:failed:${effect.attemptCount}`),
-                    threadId: effect.threadId,
-                    itemId: effect.request.itemId,
-                  }),
-                ),
                 Effect.mapError(
                   (cause) =>
                     new OrchestrationEffectExecutionError({
@@ -240,6 +241,7 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          }
           case "provider-session.apply-model-selection":
             return providerTurnControl
               .applyModelSelection({
