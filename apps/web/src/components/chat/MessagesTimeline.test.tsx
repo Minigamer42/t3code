@@ -737,7 +737,8 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Work Log");
   });
 
-  it("summarizes changed files in one line", () => {
+  it("resolves duplicate lifecycle file paths for summaries and details", () => {
+    const turnId = TurnId.make("turn-1");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -749,18 +750,29 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Updated files",
+              label: "Changed files",
               tone: "tool",
-              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              itemType: "file_change",
+              changedFiles: [
+                "/home/me/projects/jobagent/individuell/target.php",
+                "jobagent/individuell/target.php",
+              ],
+              detail: "/home/me/projects/jobagent/individuell/target.php",
+              turnId,
             },
           },
         ]}
-        workspaceRoot="C:/Users/mike/dev-stuff/t3code"
+        activeTurnInProgress
+        isWorking
+        runningTurnId={turnId}
       />,
     );
 
-    expect(markup).toContain("Changed 1 file");
-    expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+    expect(markup).toContain('aria-label="jobagent/individuell/target.php, tool call running"');
+    expect(markup).not.toContain("+1 more");
+    expect(markup.match(/\/home\/me\/projects\/jobagent\/individuell\/target\.php/g)).toHaveLength(
+      1,
+    );
   });
 
   it("shows the animated one-line label for a live tool group", () => {

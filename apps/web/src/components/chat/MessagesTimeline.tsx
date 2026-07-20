@@ -116,7 +116,7 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 import { SkillInlineText } from "./SkillInlineText";
-import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { formatWorkspaceRelativePath, resolveChangedFilePaths } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
   formatReviewCommentFence,
@@ -2327,19 +2327,47 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles" | "output">,
+  workEntry: Pick<
+    TimelineWorkEntry,
+    | "detail"
+    | "command"
+    | "changedFiles"
+    | "output"
+    | "itemType"
+    | "requestKind"
+    | "label"
+    | "toolTitle"
+  >,
   workspaceRoot: string | undefined,
 ) {
   if (workEntry.command) return workEntry.command;
+  const [firstPath, ...remainingPaths] = resolveChangedFilePaths(
+    workEntry.changedFiles ?? [],
+    workspaceRoot,
+  );
+  const changedFilesPreview = firstPath
+    ? remainingPaths.length === 0
+      ? firstPath.displayPath
+      : `${firstPath.displayPath} +${remainingPaths.length} more`
+    : null;
+  if (workEntryRepresentsFileChange(workEntry) && changedFilesPreview) {
+    return changedFilesPreview;
+  }
   if (workEntry.detail) return workEntry.detail;
   if (workEntry.output) return "Output";
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  const [firstPath] = workEntry.changedFiles ?? [];
-  if (!firstPath) return null;
-  const displayPath = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-  return workEntry.changedFiles!.length === 1
-    ? displayPath
-    : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
+  return changedFilesPreview;
+}
+
+function workEntryRepresentsFileChange(
+  workEntry: Pick<
+    TimelineWorkEntry,
+    "changedFiles" | "itemType" | "requestKind" | "label" | "toolTitle"
+  >,
+): boolean {
+  if ((workEntry.changedFiles?.length ?? 0) === 0) return false;
+  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") return true;
+  const heading = normalizeCompactToolLabel(workEntry.toolTitle ?? workEntry.label).toLowerCase();
+  return heading === "changed files" || heading === "editing files" || heading === "updated files";
 }
 
 function workEntryRawCommand(
@@ -2557,6 +2585,14 @@ function buildToolCallExpandedContent(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
 ): ToolCallExpandedContent | null {
+  const changedFiles = workEntry.changedFiles ?? [];
+  const resolvedChangedFiles = resolveChangedFilePaths(changedFiles, workspaceRoot);
+  if (workEntryRepresentsFileChange(workEntry)) {
+    return {
+      body: resolvedChangedFiles.map(({ fullPath }) => fullPath).join("\n"),
+    };
+  }
+
   const blocks: string[] = [];
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
     blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
@@ -2573,13 +2609,8 @@ function buildToolCallExpandedContent(
   if (workEntry.output?.trim()) {
     appendUniqueExpandedBlock(blocks, workEntry.output);
   }
-  const changedFiles = workEntry.changedFiles ?? [];
-  if (changedFiles.length > 0) {
-    blocks.push(
-      changedFiles
-        .map((filePath) => formatWorkspaceRelativePath(filePath, workspaceRoot))
-        .join("\n"),
-    );
+  if (resolvedChangedFiles.length > 0) {
+    blocks.push(resolvedChangedFiles.map(({ fullPath }) => fullPath).join("\n"));
   }
   if (blocks.length === 0) {
     return null;
