@@ -36,7 +36,7 @@ import {
   detectSourceControlProviderFromGitRemoteUrl,
   mergeGitStatusParts,
   normalizeGitRemoteUrl,
-  resolveAutoFeatureBranchName,
+  resolveAutoBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
 } from "@t3tools/shared/git";
@@ -59,6 +59,7 @@ import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import {
   detectGitLabMergeRequestTemplate,
@@ -586,6 +587,17 @@ function formatCommitMessage(subject: string, body: string): string {
   return `${subject}\n\n${trimmedBody}`;
 }
 
+function removeBuiltInFeaturePrefix(
+  branch: string,
+  naming: VcsProjectConfig.VcsBranchNamingConfig,
+): string {
+  const sanitized = sanitizeBranchFragment(branch);
+  if (naming.defaultPrefix === "feature" && !naming.preserveNamespaces) {
+    return sanitized;
+  }
+  return sanitized.startsWith("feature/") ? sanitized.slice("feature/".length) : sanitized;
+}
+
 function parseCustomCommitMessage(raw: string): { subject: string; body: string } | null {
   const normalized = raw.replace(/\r\n/g, "\n").trim();
   if (normalized.length === 0) {
@@ -688,6 +700,7 @@ export const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration.TextGeneration;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+  const vcsProjectConfig = yield* VcsProjectConfig.VcsProjectConfig;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -2782,9 +2795,11 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const preferredBranch = suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
+    const naming = yield* vcsProjectConfig.resolveBranchNaming({ cwd });
+    const suggestedBranch = suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
+    const preferredBranch = removeBuiltInFeaturePrefix(suggestedBranch, naming);
     const existingBranchNames = yield* gitCore.listLocalBranchNames(cwd);
-    const resolvedBranch = resolveAutoFeatureBranchName(existingBranchNames, preferredBranch);
+    const resolvedBranch = resolveAutoBranchName(existingBranchNames, preferredBranch, naming);
 
     yield* gitCore.createRef({ cwd, refName: resolvedBranch });
     yield* Effect.scoped(gitCore.switchRef({ cwd, refName: resolvedBranch }));

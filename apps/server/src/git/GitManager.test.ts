@@ -34,6 +34,7 @@ import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as GitLabCli from "../sourceControl/GitLabCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
 import * as GitLabSourceControlProvider from "../sourceControl/GitLabSourceControlProvider.ts";
@@ -728,6 +729,7 @@ function makeManager(input?: {
       },
     ),
     vcsDriverLayer,
+    VcsProjectConfig.layer,
     serverSettingsLayer,
   ).pipe(Layer.provideMerge(sourceControlRegistryLayer), Layer.provideMerge(NodeServices.layer));
 
@@ -3385,6 +3387,54 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         Effect.map((r) => r.stdout.trim()),
       );
       expect(mergeBase).toBe(mainSha);
+    }),
+  );
+
+  it.effect("featureBranch honors project branch naming config", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const configDir = NodePath.join(repoDir, ".t3code");
+      NodeFS.mkdirSync(configDir, { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(configDir, "vcs.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          branchNaming: {
+            defaultPrefix: null,
+            preserveNamespaces: true,
+          },
+        }),
+      );
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nconfigured-branch\n");
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: (input) =>
+            Effect.succeed({
+              subject: "Respect project branch naming",
+              body: "",
+              ...(input.includeBranch
+                ? { branch: "feature/jm/bugfix/externe-budgetgrenze-abrechnungsart" }
+                : {}),
+            }),
+        },
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        featureBranch: true,
+      });
+
+      expect(result.branch).toEqual({
+        status: "created",
+        name: "jm/bugfix/externe-budgetgrenze-abrechnungsart",
+      });
+      expect(
+        yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toBe("jm/bugfix/externe-budgetgrenze-abrechnungsart");
     }),
   );
 
