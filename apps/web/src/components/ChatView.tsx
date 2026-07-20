@@ -363,6 +363,12 @@ import {
   serverUpdateGuidance,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
+import {
+  EMPTY_QUEUED_TURN_THREAD_STATE,
+  queuedTurnSubmissionToChatMessage,
+  type QueuedTurnSubmission,
+  useQueuedTurnStore,
+} from "../queuedTurnStore";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -484,26 +490,6 @@ type EnvironmentUnavailableState = {
   readonly connection: EnvironmentConnectionPresentation;
 };
 
-interface QueuedTurnSubmission {
-  readonly messageId: MessageId;
-  readonly environmentId: EnvironmentId;
-  readonly input: StartThreadTurnInput;
-  readonly composer: {
-    readonly prompt: string;
-    readonly images: ComposerImageAttachment[];
-    readonly terminalContexts: TerminalContextDraft[];
-    readonly elementContexts: ElementContextDraft[];
-    readonly previewAnnotations: PreviewAnnotationPayload[];
-    readonly reviewComments: ReviewCommentContext[];
-  };
-  readonly settings: {
-    readonly threadId: ThreadId;
-    readonly createdAt: string;
-    readonly modelSelection?: ModelSelection;
-    readonly runtimeMode: RuntimeMode;
-    readonly interactionMode: ProviderInteractionMode;
-  };
-}
 interface QueuedAutoDispatchBarrier {
   readonly previousTurnId: TurnId | null;
   readonly observedRunning: boolean;
@@ -1398,12 +1384,13 @@ function ChatViewContent(props: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
-  const [queuedTurnSubmissions, setQueuedTurnSubmissions] = useState<QueuedTurnSubmission[]>([]);
+  const queuedTurnState = useQueuedTurnStore(
+    (state) => state.byThreadKey[routeThreadKey] ?? EMPTY_QUEUED_TURN_THREAD_STATE,
+  );
+  const queuedTurnSubmissions = queuedTurnState.submissions;
   const queuedTurnSubmissionsRef = useRef(queuedTurnSubmissions);
   queuedTurnSubmissionsRef.current = queuedTurnSubmissions;
-  const [sendingQueuedMessageIds, setSendingQueuedMessageIds] = useState<ReadonlySet<MessageId>>(
-    () => new Set(),
-  );
+  const sendingQueuedMessageIds = queuedTurnState.sendingMessageIds;
   const queuedDispatchInFlightRef = useRef(false);
   const pendingQueuedSendNowMessageIdsRef = useRef<MessageId[]>([]);
   const [queuedAutoDispatchBarrier, setQueuedAutoDispatchBarrier] =
@@ -2595,6 +2582,10 @@ function ChatViewContent(props: ChatViewProps) {
       }
     };
   }, [attachmentPreviewHandoffByMessageId, clearAttachmentPreviewHandoff, displayServerMessages]);
+  const queuedOptimisticMessages = useMemo(
+    () => queuedTurnSubmissions.map(queuedTurnSubmissionToChatMessage),
+    [queuedTurnSubmissions],
+  );
   const timelineMessages = useMemo(() => {
     const messages = displayServerMessages;
     const serverMessagesWithPreviewHandoff =
@@ -2637,16 +2628,26 @@ function ChatViewContent(props: ChatViewProps) {
             return changed ? { ...message, attachments } : message;
           });
 
-    if (optimisticUserMessages.length === 0) {
+    if (optimisticUserMessages.length === 0 && queuedOptimisticMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
     }
     const serverIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
-    const pendingMessages = optimisticUserMessages.filter((message) => !serverIds.has(message.id));
+    const optimisticIds = new Set(optimisticUserMessages.map((message) => message.id));
+    const clientMessages = [
+      ...optimisticUserMessages,
+      ...queuedOptimisticMessages.filter((message) => !optimisticIds.has(message.id)),
+    ];
+    const pendingMessages = clientMessages.filter((message) => !serverIds.has(message.id));
     if (pendingMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
-  }, [attachmentPreviewHandoffByMessageId, displayServerMessages, optimisticUserMessages]);
+  }, [
+    attachmentPreviewHandoffByMessageId,
+    displayServerMessages,
+    optimisticUserMessages,
+    queuedOptimisticMessages,
+  ]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
@@ -4196,8 +4197,6 @@ function ChatViewContent(props: ChatViewProps) {
       return [];
     });
     resetLocalDispatch();
-    setQueuedTurnSubmissions([]);
-    setSendingQueuedMessageIds(new Set());
     autoDispatchAttemptedMessageIdsRef.current.clear();
     queuedDispatchInFlightRef.current = false;
     pendingQueuedSendNowMessageIdsRef.current = [];
@@ -5574,29 +5573,28 @@ function ChatViewContent(props: ChatViewProps) {
         createdAt: messageCreatedAt,
       };
       if (queueInsteadOfSending) {
-        setQueuedTurnSubmissions((existing) => [
-          ...existing,
-          {
-            messageId: messageIdForSend,
-            environmentId,
-            input: turnInput,
-            composer: {
-              prompt: promptForSend,
-              images: composerImagesSnapshot,
-              terminalContexts: composerTerminalContexts,
-              elementContexts: composerElementContextsSnapshot,
-              previewAnnotations: composerPreviewAnnotationsSnapshot,
-              reviewComments: composerReviewCommentsSnapshot,
-            },
-            settings: {
-              threadId: threadIdForSend,
-              createdAt: messageCreatedAt,
-              ...(ctxSelectedModel ? { modelSelection: ctxSelectedModelSelection } : {}),
-              runtimeMode,
-              interactionMode,
-            },
+        const queuedSubmission: QueuedTurnSubmission = {
+          messageId: messageIdForSend,
+          environmentId,
+          input: turnInput,
+          composer: {
+            prompt: promptForSend,
+            images: composerImagesSnapshot,
+            terminalContexts: composerTerminalContexts,
+            elementContexts: composerElementContextsSnapshot,
+            previewAnnotations: composerPreviewAnnotationsSnapshot,
+            reviewComments: composerReviewCommentsSnapshot,
           },
-        ]);
+          settings: {
+            threadId: threadIdForSend,
+            createdAt: messageCreatedAt,
+            ...(ctxSelectedModel ? { modelSelection: ctxSelectedModelSelection } : {}),
+            runtimeMode,
+            interactionMode,
+          },
+        };
+        useQueuedTurnStore.getState().enqueue(routeThreadKey, queuedSubmission);
+        queuedTurnSubmissionsRef.current = [...queuedTurnSubmissionsRef.current, queuedSubmission];
         turnSubmissionAccepted = true;
       } else {
         beginLocalDispatch({ preparingWorktree: false });
@@ -5669,23 +5667,25 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
-  const removeQueuedTurnSubmission = useCallback((messageId: MessageId) => {
-    const queued = queuedTurnSubmissionsRef.current.find(
-      (submission) => submission.messageId === messageId,
-    );
-    if (!queued) return null;
+  const removeQueuedTurnSubmission = useCallback(
+    (messageId: MessageId) => {
+      const queued = queuedTurnSubmissionsRef.current.find(
+        (submission) => submission.messageId === messageId,
+      );
+      if (!queued) return null;
 
-    const next = queuedTurnSubmissionsRef.current.filter(
-      (submission) => submission.messageId !== messageId,
-    );
-    queuedTurnSubmissionsRef.current = next;
-    setQueuedTurnSubmissions(next);
-    autoDispatchAttemptedMessageIdsRef.current.delete(messageId);
-    pendingQueuedSendNowMessageIdsRef.current = pendingQueuedSendNowMessageIdsRef.current.filter(
-      (pendingId) => pendingId !== messageId,
-    );
-    return queued;
-  }, []);
+      const removed = useQueuedTurnStore.getState().remove(routeThreadKey, messageId);
+      if (!removed) return null;
+      queuedTurnSubmissionsRef.current =
+        useQueuedTurnStore.getState().byThreadKey[routeThreadKey]?.submissions ?? [];
+      autoDispatchAttemptedMessageIdsRef.current.delete(messageId);
+      pendingQueuedSendNowMessageIdsRef.current = pendingQueuedSendNowMessageIdsRef.current.filter(
+        (pendingId) => pendingId !== messageId,
+      );
+      return removed;
+    },
+    [routeThreadKey],
+  );
 
   const dispatchQueuedTurnOnce = useCallback(
     async (messageId: MessageId) => {
@@ -5694,7 +5694,7 @@ function ChatViewContent(props: ChatViewProps) {
       );
       if (!queued) return false;
 
-      setSendingQueuedMessageIds((existing) => new Set(existing).add(messageId));
+      useQueuedTurnStore.getState().setSending(routeThreadKey, messageId, true);
       continueFollowingTimelineForNewTurn();
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(queued.input.threadId, null);
@@ -5737,11 +5737,7 @@ function ChatViewContent(props: ChatViewProps) {
         }
       }
 
-      setSendingQueuedMessageIds((existing) => {
-        const next = new Set(existing);
-        next.delete(messageId);
-        return next;
-      });
+      useQueuedTurnStore.getState().setSending(routeThreadKey, messageId, false);
       return failure === null;
     },
     [
@@ -5751,6 +5747,7 @@ function ChatViewContent(props: ChatViewProps) {
       persistThreadSettingsForNextTurn,
       removeQueuedTurnSubmission,
       resetLocalDispatch,
+      routeThreadKey,
       setThreadError,
       startThreadTurn,
     ],
@@ -5827,6 +5824,7 @@ function ChatViewContent(props: ChatViewProps) {
       activeEnvironmentUnavailable ||
       queuedAutoDispatchBarrier !== null ||
       queuedDispatchInFlightRef.current ||
+      sendingQueuedMessageIds.has(next.messageId) ||
       autoDispatchAttemptedMessageIdsRef.current.has(next.messageId)
     ) {
       return;
@@ -5861,6 +5859,7 @@ function ChatViewContent(props: ChatViewProps) {
     latestTurnSettled,
     queuedAutoDispatchBarrier,
     queuedTurnSubmissions,
+    sendingQueuedMessageIds,
   ]);
 
   const queuedMessageIds = useMemo(
