@@ -1924,7 +1924,11 @@ export default function GitActionsControl({
               })}
               <MenuItem
                 disabled={isGitActionRunning || !gitStatusForActions?.hasWorkingTreeChanges}
-                onClick={() => setIsSplitCommitDialogOpen(true)}
+                onClick={() => {
+                  setExcludedFiles(new Set());
+                  setIsEditingFiles(false);
+                  setIsSplitCommitDialogOpen(true);
+                }}
               >
                 <GitCommitIcon />
                 Split into logical commits...
@@ -2039,31 +2043,64 @@ export default function GitActionsControl({
         </DialogPopup>
       </Dialog>
 
-      <Dialog open={isSplitCommitDialogOpen} onOpenChange={setIsSplitCommitDialogOpen}>
+      <Dialog
+        open={isSplitCommitDialogOpen}
+        onOpenChange={(open) => {
+          setIsSplitCommitDialogOpen(open);
+          if (!open) {
+            setExcludedFiles(new Set());
+            setIsEditingFiles(false);
+          }
+        }}
+      >
         <DialogPopup>
           <DialogHeader>
             <DialogTitle>Split into logical commits</DialogTitle>
             <DialogDescription>
-              T3 Code will use the configured model to group the changes across {allFiles.length}
-              {allFiles.length === 1 ? " file" : " files"} into ordered commits and generate a
-              message for each one.
+              T3 Code will use the configured model to group the selected changes into ordered
+              commits and generate a message for each one.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel>
+          <DialogPanel className="space-y-4">
+            <div className="space-y-3 rounded-lg border border-input bg-muted/40 p-3 text-xs">
+              <CommitFileSelection
+                files={allFiles}
+                excludedFiles={excludedFiles}
+                isEditing={isEditingFiles}
+                onExcludedFilesChange={setExcludedFiles}
+                onEditingChange={setIsEditingFiles}
+                onOpenFile={openChangedFileInEditor}
+              />
+            </div>
             <p className="text-sm text-muted-foreground">
               Separate Git diff hunks can go into different commits. Binary files, renames, mode
               changes, and nearby edits that share one hunk stay together.
             </p>
           </DialogPanel>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setIsSplitCommitDialogOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsSplitCommitDialogOpen(false);
+                setExcludedFiles(new Set());
+                setIsEditingFiles(false);
+              }}
+            >
               Cancel
             </Button>
             <Button
               size="sm"
+              disabled={noneSelected}
               onClick={() => {
                 setIsSplitCommitDialogOpen(false);
-                void runGitActionWithToast({ action: "commit", splitCommits: true });
+                setExcludedFiles(new Set());
+                setIsEditingFiles(false);
+                void runGitActionWithToast({
+                  action: "commit",
+                  splitCommits: true,
+                  ...(!allSelected ? { filePaths: selectedFiles.map((file) => file.path) } : {}),
+                });
               }}
             >
               Split & commit
