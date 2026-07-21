@@ -1346,6 +1346,34 @@ function extractIdeReformatPreview(payload: Record<string, unknown> | null): str
   return message ? truncateInlinePreview(normalizeInlinePreview(message)) : null;
 }
 
+function extractIdeFindReferencesPreview(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  if (asTrimmedString(item?.tool)?.toLowerCase() !== "ide_find_references") {
+    return null;
+  }
+
+  const args = asRecord(item?.arguments);
+  const file = asTrimmedString(args?.file);
+  const line = asNumber(args?.line);
+  const column = asNumber(args?.column);
+  const location = file
+    ? `${file}${line !== null ? `:${line}${column !== null ? `:${column}` : ""}` : ""}`
+    : null;
+
+  const result = extractMcpToolResultRecord(item);
+  const totalCount = asNumber(result?.totalCount) ?? asNumber(result?.totalCollected);
+  const countSummary =
+    totalCount === null
+      ? null
+      : `${totalCount.toLocaleString()} usage${totalCount === 1 ? "" : "s"}`;
+
+  if (location && countSummary) {
+    return `${location} - ${countSummary}`;
+  }
+  return location ?? countSummary;
+}
+
 function extractToolResultPreview(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const rawOutput = asRecord(data?.rawOutput);
@@ -1433,6 +1461,11 @@ function extractToolDetail(
   const reformatPreview = extractIdeReformatPreview(payload);
   if (reformatPreview) {
     return reformatPreview;
+  }
+
+  const findReferencesPreview = extractIdeFindReferencesPreview(payload);
+  if (findReferencesPreview) {
+    return findReferencesPreview;
   }
 
   if (commandTool && command) {
