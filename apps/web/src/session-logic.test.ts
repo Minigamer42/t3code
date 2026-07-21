@@ -1197,6 +1197,58 @@ describe("deriveWorkLogEntries", () => {
     );
   });
 
+  it("summarizes completed IDE find references calls from their usage count", () => {
+    const item = {
+      type: "mcpToolCall",
+      server: "phpstorm-index",
+      tool: "ide_find_references",
+      arguments: {
+        file: "module/datenaustausch/mod/auswertung.php",
+        line: 185,
+        column: 25,
+        scope: "project_files",
+        pageSize: 50,
+      },
+      status: "completed",
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              usages: [
+                {
+                  file: "module/konfiguration/datenaustausch/data/notifications.php",
+                  line: 138,
+                  column: 30,
+                  type: "REFERENCE",
+                },
+              ],
+              totalCount: 1,
+              truncated: false,
+              totalCollected: 1,
+            }),
+          },
+        ],
+        structuredContent: null,
+      },
+    };
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mcp-find-references-done",
+        kind: "tool.completed",
+        summary: "phpstorm-index · ide_find_references",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "phpstorm-index · ide_find_references",
+          data: { item },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.detail).toBe("module/datenaustausch/mod/auswertung.php:185:25 - 1 usage");
+  });
+
   it("keeps MCP payloads while collapsing lifecycle updates", () => {
     const item = {
       type: "mcpToolCall",
