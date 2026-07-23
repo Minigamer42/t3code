@@ -387,6 +387,7 @@ function buildCodexCollaborationMode(input: {
       developer_instructions: buildCodexDeveloperInstructions(
         input.interactionMode,
         { model, reasoningEffort },
+        input.serverMode,
         input.browserToolsAvailable ?? true,
       ),
     },

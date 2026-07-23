@@ -1,4 +1,5 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { RuntimeMode as ServerRuntimeMode } from "../config.ts";
 
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -183,6 +184,7 @@ function toSingleLine(value: string): string {
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   runtime: CodexRuntimeInfo,
+  serverMode: ServerRuntimeMode,
   /**
    * Whether the `t3-code` MCP server is attached to this turn. Callers derive
    * it from the session's actual MCP configuration rather than re-reading the
@@ -190,10 +192,11 @@ export function buildCodexDeveloperInstructions(
    */
   browserToolsAvailable = true,
 ): string {
+  const includeBrowserTools = serverMode === "desktop" && browserToolsAvailable;
   const base =
     interactionMode === "plan"
-      ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
-      : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
+      ? codexPlanModeDeveloperInstructions(includeBrowserTools)
+      : codexDefaultModeDeveloperInstructions(includeBrowserTools);
   return `${base}
 
 <runtime_info>In case you're asked: you are running in T3 Code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
