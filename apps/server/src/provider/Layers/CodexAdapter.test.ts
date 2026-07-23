@@ -292,6 +292,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         model: "gpt-5.3-codex",
         providerInstanceId: ProviderInstanceId.make("codex"),
         serviceTier: "priority",
+        serverMode: "web",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });

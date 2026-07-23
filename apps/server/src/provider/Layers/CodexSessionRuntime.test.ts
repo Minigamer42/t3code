@@ -71,6 +71,7 @@ describe("buildTurnStartParams", () => {
       buildTurnStartParams({
         threadId: "provider-thread-1",
         runtimeMode: "full-access",
+        serverMode: "web",
         attachments: [
           {
             type: "image",
@@ -100,6 +101,7 @@ describe("buildTurnStartParams", () => {
         model: "gpt-5.3-codex",
         effort: "medium",
         interactionMode: "plan",
+        serverMode: "desktop",
       }),
     );
 
@@ -123,10 +125,14 @@ describe("buildTurnStartParams", () => {
         settings: {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
-          developer_instructions: buildCodexDeveloperInstructions("plan", {
-            model: "gpt-5.3-codex",
-            reasoningEffort: "medium",
-          }),
+          developer_instructions: buildCodexDeveloperInstructions(
+            "plan",
+            {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            },
+            "desktop",
+          ),
         },
       },
     });
@@ -140,6 +146,7 @@ describe("buildTurnStartParams", () => {
         prompt: "Implement it",
         model: "gpt-5.3-codex",
         interactionMode: "default",
+        serverMode: "desktop",
         attachments: [
           {
             type: "image",
@@ -172,10 +179,14 @@ describe("buildTurnStartParams", () => {
         settings: {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
-          developer_instructions: buildCodexDeveloperInstructions("default", {
-            model: "gpt-5.3-codex",
-            reasoningEffort: "medium",
-          }),
+          developer_instructions: buildCodexDeveloperInstructions(
+            "default",
+            {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            },
+            "desktop",
+          ),
         },
       },
     });
@@ -188,6 +199,7 @@ describe("buildTurnStartParams", () => {
         runtimeMode: "full-access",
         prompt: "Go",
         interactionMode: "default",
+        serverMode: "web",
       }),
     );
 
@@ -228,6 +240,7 @@ describe("buildTurnStartParams", () => {
         threadId: "provider-thread-1",
         runtimeMode: "approval-required",
         prompt: "Review",
+        serverMode: "web",
       }),
     );
 
