@@ -1232,7 +1232,8 @@ describe("getVisibleThreadsForProject", () => {
 
     const result = getVisibleThreadsForProject({
       threads,
-      activeThreadId: ThreadId.make("thread-8"),
+      activeThreadKey: ThreadId.make("thread-8"),
+      getThreadKey: (thread) => thread.id,
       isThreadListExpanded: false,
       previewLimit: 6,
     });
@@ -1259,7 +1260,8 @@ describe("getVisibleThreadsForProject", () => {
 
     const result = getVisibleThreadsForProject({
       threads,
-      activeThreadId: ThreadId.make("thread-8"),
+      activeThreadKey: ThreadId.make("thread-8"),
+      getThreadKey: (thread) => thread.id,
       isThreadListExpanded: true,
       previewLimit: 6,
     });
@@ -1269,6 +1271,29 @@ describe("getVisibleThreadsForProject", () => {
       threads.map((thread) => thread.id),
     );
     expect(result.hiddenThreads).toEqual([]);
+  });
+
+  it("restores the preview limit after an expanded list is collapsed", () => {
+    const threads = Array.from({ length: 8 }, (_, index) =>
+      makeThread({
+        id: ThreadId.make(`thread-${index + 1}`),
+      }),
+    );
+
+    const result = getVisibleThreadsForProject({
+      threads,
+      activeThreadKey: ThreadId.make("thread-1"),
+      getThreadKey: (thread) => thread.id,
+      isThreadListExpanded: false,
+      previewLimit: 6,
+    });
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
+      threads.slice(0, 6).map((thread) => thread.id),
+    );
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(
+      threads.slice(6).map((thread) => thread.id),
+    );
   });
 });
 
