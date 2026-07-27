@@ -152,6 +152,8 @@ import {
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapTopPercent,
+  resolveToolCallExpansionIdentity,
+  resolveToolCallExpanded,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
@@ -162,6 +164,7 @@ import {
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
+  type ToolCallExpansionOverride,
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -260,7 +263,7 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 
 interface WorkGroupViewState {
   scrollPositions: Map<string, WorkGroupScrollAnchor>;
-  entryExpansionOverrides: Map<string, { epoch: number; expanded: boolean }>;
+  entryExpansionOverrides: Map<string, ToolCallExpansionOverride>;
 }
 
 const WorkGroupViewCtx = createContext<{
@@ -2040,7 +2043,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
       <div className="space-y-px">
         {nonEmptyEntries.map((workEntry) => (
           <SimpleWorkEntryRow
-            key={workEntry.id}
+            key={resolveToolCallExpansionIdentity(workEntry)}
             workEntry={workEntry}
             workspaceRoot={workspaceRoot}
             isExpandedToolGroupEntry={false}
@@ -2146,7 +2149,7 @@ function ExpandedWorkGroupEntries({
   const renderEntry = useCallback(
     ({ item }: { item: TimelineWorkEntry }) => (
       <SimpleWorkEntryRow
-        key={item.id}
+        key={resolveToolCallExpansionIdentity(item)}
         workEntry={item}
         workspaceRoot={workspaceRoot}
         isExpandedToolGroupEntry
@@ -2193,7 +2196,7 @@ function ExpandedWorkGroupEntries({
   );
 }
 
-const workEntryKey = (entry: TimelineWorkEntry) => entry.id;
+const workEntryKey = resolveToolCallExpansionIdentity;
 
 function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
   return (
@@ -3414,13 +3417,15 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
-  const { threadRef, onImageExpand, onStopTool } = use(TimelineRowCtx);
+  const { threadRef, routeThreadKey, workGroupViewState, onImageExpand, onStopTool } =
+    use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
   const groupView = use(WorkGroupViewCtx);
-  const [expandedOverride, setExpandedOverride] = useState<{
-    epoch: number;
-    expanded: boolean;
-  } | null>(() => groupView?.state.entryExpansionOverrides.get(workEntry.id) ?? null);
+  const expansionIdentity = resolveToolCallExpansionIdentity(workEntry);
+  const expansionOverrideKey = `${routeThreadKey}\u0000${activity.toolCallExpansionEpoch}\u0000${expansionIdentity}`;
+  const [expandedOverride, setExpandedOverride] = useState<ToolCallExpansionOverride | null>(
+    () => workGroupViewState.entryExpansionOverrides.get(expansionOverrideKey) ?? null,
+  );
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
@@ -3465,22 +3470,29 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     );
   const defaultExpanded =
     activity.toolCallsExpanded && canExpand && workLogEntryIsToolLike(workEntry);
-  const expanded =
-    expandedOverride?.epoch === activity.toolCallExpansionEpoch
-      ? expandedOverride.expanded
-      : defaultExpanded;
+  const retainedExpandedOverride =
+    workGroupViewState.entryExpansionOverrides.get(expansionOverrideKey) ?? null;
+  const expanded = resolveToolCallExpanded({
+    defaultExpanded,
+    expansionKey: expansionOverrideKey,
+    expansionEpoch: activity.toolCallExpansionEpoch,
+    localOverride: expandedOverride,
+    retainedOverride: retainedExpandedOverride,
+  });
   const toggleExpanded = () => {
     const next = !expanded;
+    const override = {
+      key: expansionOverrideKey,
+      epoch: activity.toolCallExpansionEpoch,
+      expanded: next,
+    };
+    workGroupViewState.entryExpansionOverrides.set(expansionOverrideKey, override);
     if (groupView) {
       groupView.onToggleEntry(!next);
-      groupView.state.entryExpansionOverrides.set(workEntry.id, {
-        epoch: activity.toolCallExpansionEpoch,
-        expanded: next,
-      });
     } else {
       props.onToggleEntry?.(!next);
     }
-    setExpandedOverride({ epoch: activity.toolCallExpansionEpoch, expanded: next });
+    setExpandedOverride(override);
   };
   const expandedBody = expanded
     ? buildToolCallExpandedBody(

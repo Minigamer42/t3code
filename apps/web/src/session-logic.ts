@@ -95,6 +95,21 @@ export interface WorkLogEntry {
   };
 }
 
+export function workLogEntryStableIdentity(
+  entry: Pick<WorkLogEntry, "toolCallId" | "toolData">,
+): string | null {
+  if (entry.toolCallId?.trim()) {
+    return `tool-call:${entry.toolCallId.trim()}`;
+  }
+  if (typeof entry.toolData === "object" && entry.toolData !== null) {
+    const processId = (entry.toolData as { processId?: unknown }).processId;
+    if (typeof processId === "string" && processId.trim()) {
+      return `process:${processId.trim()}`;
+    }
+  }
+  return null;
+}
+
 const workLogCollapseKey = Symbol();
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -1304,6 +1319,101 @@ function extractMcpToolResultRecord(
   );
 }
 
+function extractMcpToolResultText(item: Record<string, unknown> | null): string | null {
+  const result = asRecord(item?.result);
+  const content = Array.isArray(result?.content) ? result.content : [];
+  return (
+    content
+      .map((entry) => asTrimmedString(asRecord(entry)?.text))
+      .find((entry) => entry !== null) ?? null
+  );
+}
+
+function formatCount(value: number, singular: string, plural = `${singular}s`): string {
+  return `${value.toLocaleString()} ${value === 1 ? singular : plural}`;
+}
+
+function extractMariaDbPreview(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  if (asTrimmedString(item?.server)?.toLowerCase() !== "mariadb") {
+    return null;
+  }
+
+  const tool = asTrimmedString(item?.tool)?.toLowerCase();
+  const args = asRecord(item?.arguments);
+  const result = extractMcpToolResultRecord(item);
+
+  if (tool === "list_connections") {
+    const connections = Array.isArray(result?.connections) ? result.connections : null;
+    const active = asTrimmedString(result?.active);
+    if (connections) {
+      const count = formatCount(connections.length, "connection");
+      return active ? `${count} · ${active} active` : count;
+    }
+  }
+
+  if (tool === "open_connection") {
+    const server = asTrimmedString(result?.opened) ?? asTrimmedString(args?.server);
+    const database = asTrimmedString(result?.database) ?? asTrimmedString(args?.database);
+    const readOnly = typeof result?.readOnly === "boolean" ? result.readOnly : null;
+    const parts = [
+      server,
+      database,
+      readOnly === null ? null : readOnly ? "read-only" : "read-write",
+    ].filter((part): part is string => part !== null);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+
+  if (tool === "close_connection") {
+    return asTrimmedString(result?.closed);
+  }
+
+  if (tool === "list_databases") {
+    const databases = Array.isArray(result?.databases) ? result.databases : null;
+    return databases ? formatCount(databases.length, "database") : null;
+  }
+
+  if (tool === "list_tables") {
+    const tables = Array.isArray(result?.tables) ? result.tables : null;
+    const database = asTrimmedString(result?.database) ?? asTrimmedString(args?.database);
+    const count = tables ? formatCount(tables.length, "table") : null;
+    return [database, count].filter((part): part is string => part !== null).join(" · ") || null;
+  }
+
+  if (tool === "describe_table") {
+    const database = asTrimmedString(result?.database) ?? asTrimmedString(args?.database);
+    const table = asTrimmedString(result?.table) ?? asTrimmedString(args?.table);
+    const columns = Array.isArray(result?.columns) ? result.columns : null;
+    const tableName = table ? (database ? `${database}.${table}` : table) : database;
+    const count = columns ? formatCount(columns.length, "column") : null;
+    return [tableName, count].filter((part): part is string => part !== null).join(" · ") || null;
+  }
+
+  if (tool === "execute_sql") {
+    const sql = asTrimmedString(args?.sql);
+    const sqlPreview = sql ? truncateInlinePreview(normalizeInlinePreview(sql), 72) : null;
+    if (asTrimmedString(item?.status)?.toLowerCase() === "failed") {
+      const error = extractMcpToolResultText(item);
+      return error ? truncateInlinePreview(normalizeInlinePreview(error), 140) : sqlPreview;
+    }
+
+    const rows = Array.isArray(result?.rows) ? result.rows : null;
+    const affectedRows = asNumber(result?.affectedRows);
+    const outcome =
+      rows !== null
+        ? formatCount(rows.length, "row")
+        : affectedRows !== null
+          ? `${formatCount(affectedRows, "row")} affected`
+          : null;
+    return (
+      [sqlPreview, outcome].filter((part): part is string => part !== null).join(" · ") || null
+    );
+  }
+
+  return null;
+}
+
 function extractIdeDiagnosticsPreview(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
@@ -1452,6 +1562,11 @@ function extractToolDetail(
     ? extractToolCommand(payload)
     : { command: null, rawCommand: null };
   const command = commandPreview.command;
+
+  const mariaDbPreview = extractMariaDbPreview(payload);
+  if (mariaDbPreview) {
+    return mariaDbPreview;
+  }
 
   const diagnosticsPreview = extractIdeDiagnosticsPreview(payload);
   if (diagnosticsPreview) {
@@ -1671,7 +1786,7 @@ function timelineEntryFromProposedPlan(proposedPlan: ProposedPlan): TimelineEntr
 
 function timelineEntryFromWork(workEntry: WorkLogEntry): TimelineEntry {
   return {
-    id: workEntry.id,
+    id: workLogEntryStableIdentity(workEntry) ?? workEntry.id,
     kind: "work",
     createdAt: workEntry.createdAt,
     entry: workEntry,
