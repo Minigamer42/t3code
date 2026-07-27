@@ -819,7 +819,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(configDir, { recursive: true });
       NodeFS.writeFileSync(
         NodePath.join(configDir, "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({
           branchNaming: {
             defaultPrefix: null,
