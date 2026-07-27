@@ -83,11 +83,14 @@ import {
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapTopPercent,
+  resolveToolCallExpansionIdentity,
+  resolveToolCallExpanded,
   shouldPreserveAssistantLineBreaks,
   toolGroupAction,
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type ToolCallExpansionOverride,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
@@ -165,6 +168,7 @@ interface TimelineRowActivityState {
   expandedTurnIds: ReadonlySet<TurnId>;
   toolCallsExpanded: boolean;
   toolCallExpansionEpoch: number;
+  toolCallExpansionOverrides: Map<string, ToolCallExpansionOverride>;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -312,6 +316,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
+  const [toolCallExpansionOverrides] = useState(() => new Map<string, ToolCallExpansionOverride>());
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -613,6 +618,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       expandedTurnIds: effectiveExpandedTurnIds,
       toolCallsExpanded,
       toolCallExpansionEpoch,
+      toolCallExpansionOverrides,
     }),
     [
       activeTurnId,
@@ -623,6 +629,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       toolCallsExpanded,
       toolCallExpansionEpoch,
       workingStepLabel,
+      toolCallExpansionOverrides,
     ],
   );
 
@@ -1526,7 +1533,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
       <div className="space-y-px">
         {nonEmptyEntries.map((workEntry) => (
           <SimpleWorkEntryRow
-            key={workEntry.id}
+            key={resolveToolCallExpansionIdentity(workEntry)}
             workEntry={workEntry}
             workspaceRoot={workspaceRoot}
             isExpandedToolGroupEntry={isExpandedToolGroupEntry}
@@ -2803,7 +2810,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
-  const { onStopTool } = use(TimelineRowCtx);
+  const { onStopTool, routeThreadKey } = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
@@ -2828,14 +2835,18 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       workEntry.detail !== undefined ||
       (workEntry.changedFiles?.length ?? 0) > 0 ||
       workEntry.toolData !== undefined);
-  const [expandedOverride, setExpandedOverride] = useState<{
-    epoch: number;
-    expanded: boolean;
-  } | null>(null);
-  const expanded =
-    expandedOverride?.epoch === activity.toolCallExpansionEpoch
-      ? expandedOverride.expanded
-      : defaultExpanded;
+  const expansionIdentity = resolveToolCallExpansionIdentity(workEntry);
+  const expansionOverrideKey = `${routeThreadKey}\u0000${activity.toolCallExpansionEpoch}\u0000${expansionIdentity}`;
+  const [expandedOverride, setExpandedOverride] = useState<ToolCallExpansionOverride | null>(null);
+  const retainedExpandedOverride =
+    activity.toolCallExpansionOverrides.get(expansionOverrideKey) ?? null;
+  const expanded = resolveToolCallExpanded({
+    defaultExpanded,
+    expansionKey: expansionOverrideKey,
+    expansionEpoch: activity.toolCallExpansionEpoch,
+    localOverride: expandedOverride,
+    retainedOverride: retainedExpandedOverride,
+  });
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
@@ -2875,18 +2886,25 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         tabIndex: 0 as const,
         "aria-label": accessibleDisplayText,
         "aria-expanded": expanded,
-        onClick: () =>
-          setExpandedOverride({
+        onClick: () => {
+          const override = {
+            key: expansionOverrideKey,
             epoch: activity.toolCallExpansionEpoch,
             expanded: !expanded,
-          }),
+          };
+          activity.toolCallExpansionOverrides.set(expansionOverrideKey, override);
+          setExpandedOverride(override);
+        },
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setExpandedOverride({
+            const override = {
+              key: expansionOverrideKey,
               epoch: activity.toolCallExpansionEpoch,
               expanded: !expanded,
-            });
+            };
+            activity.toolCallExpansionOverrides.set(expansionOverrideKey, override);
+            setExpandedOverride(override);
           }
         },
       }

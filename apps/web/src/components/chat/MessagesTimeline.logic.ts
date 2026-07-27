@@ -4,6 +4,7 @@ import {
   workEntryDisplayIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workLogEntryIsToolLike,
+  workLogEntryStableIdentity,
   type TimelineEntry,
   type TurnPlanEntry,
   type WorkLogEntry,
@@ -28,6 +29,34 @@ export function workEntryIsVisibleInGroup(
         entry.sourceActivityKind === "task.progress")) ||
     !workEntryIndicatesToolNeutralStatus(entry)
   );
+}
+
+export interface ToolCallExpansionOverride {
+  readonly key: string;
+  readonly epoch: number;
+  readonly expanded: boolean;
+}
+
+export function resolveToolCallExpansionIdentity(
+  entry: Pick<WorkLogEntry, "id" | "itemId" | "toolCallId" | "toolData">,
+): string {
+  return workLogEntryStableIdentity(entry) ?? `entry:${entry.id}`;
+}
+
+export function resolveToolCallExpanded(input: {
+  readonly defaultExpanded: boolean;
+  readonly expansionKey: string;
+  readonly expansionEpoch: number;
+  readonly localOverride: ToolCallExpansionOverride | null;
+  readonly retainedOverride: ToolCallExpansionOverride | null;
+}): boolean {
+  const override =
+    input.localOverride?.key === input.expansionKey
+      ? input.localOverride
+      : input.retainedOverride?.key === input.expansionKey
+        ? input.retainedOverride
+        : null;
+  return override?.epoch === input.expansionEpoch ? override.expanded : input.defaultExpanded;
 }
 
 export interface TimelineEndState {

@@ -5,6 +5,8 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveToolCallExpansionIdentity,
+  resolveToolCallExpanded,
   shouldPreserveAssistantLineBreaks,
 } from "./MessagesTimeline.logic";
 
@@ -16,6 +18,69 @@ describe("shouldPreserveAssistantLineBreaks", () => {
       ),
     ).toBe(true);
     expect(shouldPreserveAssistantLineBreaks("A normal\\nmarkdown paragraph")).toBe(false);
+  });
+});
+
+describe("resolveToolCallExpansionIdentity", () => {
+  it("uses the stable tool call id while streaming activity row ids change", () => {
+    expect(
+      resolveToolCallExpansionIdentity({
+        id: "tool-updated-activity-2",
+        itemId: "item-1",
+        toolCallId: "call-1",
+      }),
+    ).toBe("tool-call:call-1");
+  });
+
+  it("falls back through item and process ids before the transient entry id", () => {
+    expect(
+      resolveToolCallExpansionIdentity({
+        id: "tool-updated-activity-2",
+        itemId: "item-1",
+      }),
+    ).toBe("item:item-1");
+    expect(
+      resolveToolCallExpansionIdentity({
+        id: "tool-updated-activity-2",
+        toolData: { processId: "process-1" },
+      }),
+    ).toBe("process:process-1");
+  });
+});
+
+describe("resolveToolCallExpanded", () => {
+  it("retains a manual expansion after a streaming tool row is remounted", () => {
+    const retainedOverride = {
+      key: "thread-1\u00000\u0000tool-1",
+      epoch: 0,
+      expanded: true,
+    };
+
+    expect(
+      resolveToolCallExpanded({
+        defaultExpanded: false,
+        expansionKey: retainedOverride.key,
+        expansionEpoch: 0,
+        localOverride: null,
+        retainedOverride,
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores retained overrides after a global expansion toggle", () => {
+    expect(
+      resolveToolCallExpanded({
+        defaultExpanded: false,
+        expansionKey: "thread-1\u00001\u0000tool-1",
+        expansionEpoch: 1,
+        localOverride: null,
+        retainedOverride: {
+          key: "thread-1\u00000\u0000tool-1",
+          epoch: 0,
+          expanded: true,
+        },
+      }),
+    ).toBe(false);
   });
 });
 

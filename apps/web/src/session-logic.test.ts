@@ -1249,6 +1249,154 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.detail).toBe("module/datenaustausch/mod/auswertung.php:185:25 - 1 usage");
   });
 
+  it("summarizes MariaDB connection and schema tool calls", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mariadb-open",
+        kind: "tool.completed",
+        summary: "mariadb · open_connection",
+        payload: {
+          itemType: "mcp_tool_call",
+          data: {
+            item: {
+              type: "mcpToolCall",
+              server: "mariadb",
+              tool: "open_connection",
+              arguments: { server: "localhost", database: "MANAGER" },
+              status: "completed",
+              result: {
+                structuredContent: {
+                  opened: "localhost",
+                  database: "MANAGER",
+                  transport: "direct",
+                  readOnly: false,
+                },
+              },
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "mariadb-describe",
+        kind: "tool.completed",
+        summary: "mariadb · describe_table",
+        payload: {
+          itemType: "mcp_tool_call",
+          data: {
+            item: {
+              type: "mcpToolCall",
+              server: "mariadb",
+              tool: "describe_table",
+              arguments: { database: "MANAGER", table: "KI_PROMPT_ART" },
+              status: "completed",
+              result: {
+                structuredContent: {
+                  database: "MANAGER",
+                  table: "KI_PROMPT_ART",
+                  columns: [{ columnName: "ART_ID" }, { columnName: "BEZ" }],
+                },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(Object.fromEntries(entries.map((entry) => [entry.label, entry.detail]))).toEqual({
+      "mariadb · open_connection": "localhost · MANAGER · read-write",
+      "mariadb · describe_table": "MANAGER.KI_PROMPT_ART · 2 columns",
+    });
+  });
+
+  it("summarizes MariaDB SQL calls without rendering row payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mariadb-select",
+        kind: "tool.completed",
+        summary: "mariadb · execute_sql",
+        payload: {
+          itemType: "mcp_tool_call",
+          data: {
+            item: {
+              type: "mcpToolCall",
+              server: "mariadb",
+              tool: "execute_sql",
+              arguments: {
+                sql: "SELECT ART_ID, BEZ FROM KI_PROMPT_ART ORDER BY ART_ID",
+              },
+              status: "completed",
+              result: {
+                structuredContent: {
+                  rows: [
+                    { ART_ID: 1, BEZ: "Text-Vervollständigung" },
+                    { ART_ID: 2, BEZ: "Text-Extraktion aus Datei" },
+                  ],
+                  fields: [{ name: "ART_ID" }, { name: "BEZ" }],
+                },
+              },
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "mariadb-update",
+        kind: "tool.completed",
+        summary: "mariadb · execute_sql",
+        payload: {
+          itemType: "mcp_tool_call",
+          data: {
+            item: {
+              type: "mcpToolCall",
+              server: "mariadb",
+              tool: "execute_sql",
+              arguments: { sql: "UPDATE KI_PROMPT_ART SET TEST_DIALOG = '' WHERE ART_ID = 2" },
+              status: "completed",
+              result: {
+                structuredContent: { affectedRows: 1, changedRows: 1, warningStatus: 0 },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(Object.fromEntries(entries.map((entry) => [entry.id, entry.detail]))).toEqual({
+      "mariadb-select": "SELECT ART_ID, BEZ FROM KI_PROMPT_ART ORDER BY ART_ID · 2 rows",
+      "mariadb-update":
+        "UPDATE KI_PROMPT_ART SET TEST_DIALOG = '' WHERE ART_ID = 2 · 1 row affected",
+    });
+  });
+
+  it("keeps MariaDB SQL errors visible", () => {
+    const error =
+      "You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mariadb-failed-query",
+        kind: "tool.completed",
+        summary: "mariadb · execute_sql",
+        payload: {
+          itemType: "mcp_tool_call",
+          data: {
+            item: {
+              type: "mcpToolCall",
+              server: "mariadb",
+              tool: "execute_sql",
+              arguments: { sql: "SELECT 1; SELECT 2" },
+              status: "failed",
+              result: { content: [{ type: "text", text: error }], structuredContent: null },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.detail).toBe(error);
+  });
+
   it("keeps MCP payloads while collapsing lifecycle updates", () => {
     const item = {
       type: "mcpToolCall",
@@ -1883,6 +2031,39 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
+  it("keeps a streaming tool timeline id stable across lifecycle activity updates", () => {
+    const initial = deriveTimelineEntries(
+      [],
+      [],
+      [
+        {
+          id: "tool-update-1",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          label: "Command output",
+          tone: "tool",
+          toolCallId: "call-1",
+        },
+      ],
+    );
+    const updated = deriveTimelineEntries(
+      [],
+      [],
+      [
+        {
+          id: "tool-update-2",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          label: "Command output",
+          tone: "tool",
+          toolCallId: "call-1",
+          output: "streaming output",
+        },
+      ],
+    );
+
+    expect(initial[0]?.id).toBe("tool-call:call-1");
+    expect(updated[0]?.id).toBe(initial[0]?.id);
+  });
+
   it("includes proposed plans alongside messages and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [
