@@ -5529,7 +5529,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     expanded: boolean;
   } | null>(
     () =>
-      groupView?.state.entryExpansionOverrides?.get(workEntry.id) ??
+      ctx.workGroupViewState.entryExpansionOverrides?.get(workEntry.id) ??
       (groupView?.state.expandedEntries.has(workEntry.id)
         ? { epoch: activity.toolCallExpansionEpoch, expanded: true }
         : null),
@@ -5540,6 +5540,10 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       : activity.toolCallsExpanded && workLogEntryIsToolLike(workEntry);
   const toggleExpanded = () => {
     const next = !expanded;
+    (ctx.workGroupViewState.entryExpansionOverrides ??= new Map()).set(workEntry.id, {
+      epoch: activity.toolCallExpansionEpoch,
+      expanded: next,
+    });
     if (groupView) {
       groupView.onToggleEntry(!next);
       if (next) groupView.state.expandedEntries.add(workEntry.id);
