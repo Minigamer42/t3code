@@ -175,22 +175,10 @@ export interface CodexSessionRuntimeShape {
 
 export type CodexSessionRuntimeError =
   | CodexErrors.CodexAppServerError
-  | CodexSessionRuntimeCommandNotRunningError
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
   | CodexSessionRuntimeThreadIdMissingError;
-
-export class CodexSessionRuntimeCommandNotRunningError extends Schema.TaggedErrorClass<CodexSessionRuntimeCommandNotRunningError>()(
-  "CodexSessionRuntimeCommandNotRunningError",
-  {
-    processId: Schema.String,
-  },
-) {
-  override get message(): string {
-    return `Codex command process is no longer running: ${this.processId}`;
-  }
-}
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -527,6 +515,25 @@ export const openCodexThread = (input: {
       ),
     );
 };
+
+interface CodexCommandTerminationClient {
+  readonly request: (
+    method: string,
+    payload: unknown,
+  ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+}
+
+export const terminateCodexCommand = (input: {
+  readonly client: CodexCommandTerminationClient;
+  readonly threadId: string;
+  readonly processId: string;
+}): Effect.Effect<void, CodexErrors.CodexAppServerError> =>
+  input.client
+    .request("thread/backgroundTerminals/terminate", {
+      threadId: input.threadId,
+      processId: input.processId,
+    })
+    .pipe(Effect.asVoid);
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
   switch (notification.method) {
@@ -1960,18 +1967,11 @@ export const makeCodexSessionRuntime = (
       terminateCommand: (processId) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.raw.request("thread/backgroundTerminals/terminate", {
+          yield* terminateCodexCommand({
+            client: client.raw,
             threadId: providerThreadId,
             processId,
           });
-          if (
-            typeof response !== "object" ||
-            response === null ||
-            !("terminated" in response) ||
-            response.terminated !== true
-          ) {
-            return yield* new CodexSessionRuntimeCommandNotRunningError({ processId });
-          }
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;
