@@ -137,15 +137,20 @@ layer("GitLabCli.layer", (it) => {
           command: "glab",
           cwd: "/repo",
           args: [
-            "mr",
-            "list",
-            "--source-branch",
-            "feature/mr-list",
-            "--all",
-            "--per-page",
-            "20",
-            "--output",
-            "json",
+            "api",
+            "--method",
+            "GET",
+            "projects/:fullpath/merge_requests",
+            "--raw-field",
+            "source_branch=feature/mr-list",
+            "--raw-field",
+            "state=all",
+            "--raw-field",
+            "per_page=20",
+            "--raw-field",
+            "order_by=updated_at",
+            "--raw-field",
+            "sort=desc",
           ],
         }),
       );
@@ -186,7 +191,11 @@ layer("GitLabCli.layer", (it) => {
 
   it.effect("creates merge requests through the GitLab API without placing the body in argv", () =>
     Effect.gen(function* () {
-      mockedRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
+      mockedRun
+        .mockReturnValueOnce(
+          Effect.succeed(processOutput('{"remove_source_branch_after_merge":true}')),
+        )
+        .mockReturnValueOnce(Effect.succeed(processOutput("{}")));
 
       const glab = yield* GitLabCli.GitLabCli;
       yield* glab.createMergeRequest({
@@ -197,7 +206,16 @@ layer("GitLabCli.layer", (it) => {
         bodyFile: "/tmp/t3-mr-body.md",
       });
 
-      expect(mockedRun).toHaveBeenCalledWith(
+      expect(mockedRun).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          command: "glab",
+          cwd: "/repo",
+          args: ["api", "projects/:fullpath"],
+        }),
+      );
+      expect(mockedRun).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
           command: "glab",
           cwd: "/repo",
@@ -213,8 +231,45 @@ layer("GitLabCli.layer", (it) => {
             "--raw-field",
             "title=Provider MR",
             "--field",
+            "remove_source_branch=true",
+            "--field",
             "description=@/tmp/t3-mr-body.md",
           ],
+        }),
+      );
+    }),
+  );
+
+  it.effect("preserves a disabled project source branch removal setting", () =>
+    Effect.gen(function* () {
+      mockedRun
+        .mockReturnValueOnce(
+          Effect.succeed(processOutput('{"remove_source_branch_after_merge":false}')),
+        )
+        .mockReturnValueOnce(Effect.succeed(processOutput("{}")));
+
+      const glab = yield* GitLabCli.GitLabCli;
+      yield* glab.createMergeRequest({
+        cwd: "/repo",
+        baseBranch: "main",
+        headSelector: "feature/provider",
+        title: "Provider MR",
+        bodyFile: "/tmp/t3-mr-body.md",
+        body: "Merge request body",
+      });
+
+      expect(mockedRun).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          command: "glab",
+          cwd: "/repo",
+          args: expect.arrayContaining([
+            "--field",
+            "remove_source_branch=false",
+            "--field",
+            "description=@-",
+          ]),
+          stdin: "Merge request body",
         }),
       );
     }),
