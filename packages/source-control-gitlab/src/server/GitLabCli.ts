@@ -206,8 +206,8 @@ export class GitLabRepositoryDecodeError extends Schema.TaggedError<GitLabReposi
     operation: Schema.Literals([
       "getRepositoryCloneUrls",
       "createRepository",
-      "getDefaultBranch",
       "createMergeRequest",
+      "getDefaultBranch",
       "getConfiguredChangeRequestTemplate",
     ]),
     repository: Schema.optional(Schema.String),
@@ -354,6 +354,9 @@ const RawGitLabProjectConfigurationSchema = Schema.Struct({
 const decodeGitLabMergeRequestProject = Schema.decodeEffect(
   Schema.fromJsonString(Schema.Struct({ id: Schema.Number, path: TrimmedNonEmptyString })),
 );
+const RawGitLabRemoveSourceBranchSettingSchema = Schema.Struct({
+  remove_source_branch_after_merge: Schema.Boolean,
+});
 
 const RawGitLabNamespaceSchema = Schema.Struct({
   id: Schema.Number,
@@ -364,6 +367,9 @@ const decodeGitLabRepositoryCloneUrls = Schema.decodeEffect(
 );
 const decodeGitLabProjectConfiguration = Schema.decodeEffect(
   Schema.fromJsonString(RawGitLabProjectConfigurationSchema),
+);
+const decodeGitLabRemoveSourceBranchSetting = Schema.decodeEffect(
+  Schema.fromJsonString(RawGitLabRemoveSourceBranchSettingSchema),
 );
 const decodeGitLabNamespace = Schema.decodeEffect(Schema.fromJsonString(RawGitLabNamespaceSchema));
 
@@ -693,11 +699,16 @@ export const make = Effect.gen(function* () {
       );
     }),
     createMergeRequest: Effect.fn("GitLabCli.createMergeRequest")(function* (input) {
+      const projectResult = yield* execute({ cwd: input.cwd, args: ["api", "projects/:fullpath"] });
+      const projectSettings = yield* decodeGitLabRemoveSourceBranchSetting(projectResult.stdout).pipe(
+        Effect.mapError((cause) => new GitLabRepositoryDecodeError({
+          operation: "createMergeRequest", command: "glab", cwd: input.cwd, cause,
+        })),
+      );
       let project = ":fullpath";
       let targetProjectId: number | undefined;
       if (input.source?.repository || input.source?.owner) {
-        const result = yield* execute({ cwd: input.cwd, args: ["api", "projects/:fullpath"] });
-        const targetProject = yield* decodeGitLabMergeRequestProject(result.stdout).pipe(
+        const targetProject = yield* decodeGitLabMergeRequestProject(projectResult.stdout).pipe(
           Effect.mapError(
             (cause) =>
               new GitLabRepositoryDecodeError({
@@ -729,6 +740,8 @@ export const make = Effect.gen(function* () {
             : ["--raw-field", `target_project_id=${targetProjectId}`]),
           "--raw-field",
           `title=${input.title}`,
+          "--field",
+          `remove_source_branch=${String(projectSettings.remove_source_branch_after_merge)}`,
           "--field",
           input.body === undefined ? `description=@${input.bodyFile}` : "description=@-",
         ],
