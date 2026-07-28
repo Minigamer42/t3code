@@ -1125,6 +1125,67 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.toolLifecycleStatus).toBe("completed");
   });
 
+  it("keeps one stopped row when the provider also completes the command", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-started",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Running command",
+        payload: {
+          itemId: "command-item",
+          itemType: "command_execution",
+          status: "inProgress",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "sleep 60",
+              processId: "18604",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-stopped",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Tool stopped",
+        payload: {
+          itemId: "command-item",
+          status: "stopped",
+          detail: "The command process was terminated.",
+        },
+      }),
+      makeActivity({
+        id: "command-provider-completed",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemId: "command-item",
+          itemType: "command_execution",
+          status: "completed",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "sleep 60",
+              processId: "18604",
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      label: "Tool stopped",
+      itemId: "command-item",
+      toolLifecycleStatus: "stopped",
+    });
+  });
+
   it("preserves MCP server, tool, arguments, and results for expanded display", () => {
     const item = {
       type: "mcpToolCall",

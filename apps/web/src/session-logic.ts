@@ -1190,7 +1190,11 @@ function shouldCollapseToolLifecycleEntries(
     return false;
   }
   if (previous.activityKind === "tool.completed") {
-    return false;
+    return (
+      next.activityKind === "tool.completed" &&
+      ((previous.itemId !== undefined && previous.itemId === next.itemId) ||
+        (previous.toolCallId !== undefined && previous.toolCallId === next.toolCallId))
+    );
   }
   if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
     return true;
@@ -1224,11 +1228,16 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
-  const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
+  const commandWasStopped =
+    previous.toolLifecycleStatus === "stopped" && next.activityKind === "tool.completed";
+  const toolLifecycleStatus = commandWasStopped
+    ? previous.toolLifecycleStatus
+    : (next.toolLifecycleStatus ?? previous.toolLifecycleStatus);
   const toolData = next.toolData ?? previous.toolData;
   return {
     ...previous,
     ...next,
+    ...(commandWasStopped ? { label: previous.label } : {}),
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
