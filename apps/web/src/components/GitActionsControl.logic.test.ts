@@ -3,6 +3,7 @@ import { assert, describe, it } from "vite-plus/test";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
+  isDuplicatePendingThreadBranchSync,
   requiresDefaultBranchConfirmation,
   resolveAutoFeatureBranchName,
   resolveDefaultBranchActionDialogCopy,
@@ -1130,6 +1131,42 @@ describe("resolveThreadBranchMetadataPatch", () => {
         branch: "feature/current-ref",
         expectedBranch: "feature/previous-ref",
       },
+    );
+  });
+});
+
+describe("isDuplicatePendingThreadBranchSync", () => {
+  const pending = {
+    threadId: "thread-a",
+    expectedBranch: "feature/old-ref",
+    branch: "feature/current-ref",
+  };
+
+  it("suppresses the same branch compare-and-set while it is pending", () => {
+    assert.equal(isDuplicatePendingThreadBranchSync(pending, { ...pending }), true);
+  });
+
+  it("allows a new target, source branch, or thread to synchronize", () => {
+    assert.equal(
+      isDuplicatePendingThreadBranchSync(pending, {
+        ...pending,
+        branch: "feature/new-ref",
+      }),
+      false,
+    );
+    assert.equal(
+      isDuplicatePendingThreadBranchSync(pending, {
+        ...pending,
+        expectedBranch: "feature/intervening-ref",
+      }),
+      false,
+    );
+    assert.equal(
+      isDuplicatePendingThreadBranchSync(pending, {
+        ...pending,
+        threadId: "thread-b",
+      }),
+      false,
     );
   });
 });

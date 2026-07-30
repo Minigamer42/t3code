@@ -47,6 +47,8 @@ import { cn } from "~/lib/utils";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
+  isDuplicatePendingThreadBranchSync,
+  type PendingThreadBranchSync,
   type GitActionIconName,
   type GitActionMenuItem,
   type GitQuickAction,
@@ -1081,6 +1083,7 @@ export default function GitActionsControl({
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
+  const pendingThreadBranchSyncRef = useRef<PendingThreadBranchSync | null>(null);
   const sourceControlScope = useMemo(
     () => ({ environmentId: activeEnvironmentId, cwd: gitCwd }),
     [activeEnvironmentId, gitCwd],
@@ -1109,8 +1112,19 @@ export default function GitActionsControl({
 
       if (activeServerThread) {
         if (activeServerThread.branch === branch) {
+          pendingThreadBranchSyncRef.current = null;
           return;
         }
+
+        const pendingSync = {
+          threadId: activeThreadRef.threadId,
+          expectedBranch: activeServerThread.branch,
+          branch,
+        };
+        if (isDuplicatePendingThreadBranchSync(pendingThreadBranchSyncRef.current, pendingSync)) {
+          return;
+        }
+        pendingThreadBranchSyncRef.current = pendingSync;
 
         void updateThreadMetadata({
           environmentId: activeThreadRef.environmentId,
@@ -1118,6 +1132,13 @@ export default function GitActionsControl({
             threadId: activeThreadRef.threadId,
             ...resolveThreadBranchMetadataPatch(branch, activeServerThread.branch),
           },
+        }).then((result) => {
+          if (
+            result._tag === "Failure" &&
+            isDuplicatePendingThreadBranchSync(pendingThreadBranchSyncRef.current, pendingSync)
+          ) {
+            pendingThreadBranchSyncRef.current = null;
+          }
         });
 
         return;
@@ -1145,6 +1166,17 @@ export default function GitActionsControl({
       updateThreadMetadata,
     ],
   );
+
+  useEffect(() => {
+    const pendingSync = pendingThreadBranchSyncRef.current;
+    if (
+      pendingSync !== null &&
+      (pendingSync.threadId !== activeThreadRef?.threadId ||
+        activeServerThread?.branch !== pendingSync.expectedBranch)
+    ) {
+      pendingThreadBranchSyncRef.current = null;
+    }
+  }, [activeServerThread?.branch, activeThreadRef?.threadId]);
 
   const syncThreadBranchAfterGitAction = useCallback(
     (result: GitRunStackedActionResult) => {
