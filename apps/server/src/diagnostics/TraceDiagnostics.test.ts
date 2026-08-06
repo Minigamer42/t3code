@@ -7,6 +7,7 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
+import * as Stream from "effect/Stream";
 
 import * as TraceDiagnostics from "./TraceDiagnostics.ts";
 
@@ -186,29 +187,33 @@ describe("TraceDiagnostics", () => {
     }),
   );
 
-  it.effect("keeps loaded trace data when one rotated trace file fails to read", () =>
+  it.effect("streams loaded trace data when one rotated trace file fails to read", () =>
     Effect.gen(function* () {
       const traceFilePath = "/tmp/server.trace.ndjson";
       const readFailure = PlatformError.systemError({
         _tag: "PermissionDenied",
         module: "FileSystem",
-        method: "readFileString",
+        method: "stream",
         description: "permission denied",
         pathOrDescriptor: `${traceFilePath}.1`,
       });
+      const traceRecord = record({
+        name: "server.getConfig",
+        traceId: "trace-a",
+        spanId: "span-a",
+        startMs: 1_000,
+        durationMs: 50,
+      });
+      const splitAt = Math.floor(traceRecord.length / 2);
+      const encoder = new TextEncoder();
       const fileSystemLayer = FileSystem.layerNoop({
-        readFileString: (path) =>
+        stream: (path) =>
           path === `${traceFilePath}.1`
-            ? Effect.fail(readFailure)
-            : Effect.succeed(
-                record({
-                  name: "server.getConfig",
-                  traceId: "trace-a",
-                  spanId: "span-a",
-                  startMs: 1_000,
-                  durationMs: 50,
-                }),
-              ),
+            ? Stream.fail(readFailure)
+            : Stream.fromIterable([
+                encoder.encode(traceRecord.slice(0, splitAt)),
+                encoder.encode(traceRecord.slice(splitAt)),
+              ]),
       });
       const logAnnotations: Array<Record<string, unknown>> = [];
       const logger = Logger.make<unknown, void>((options) => {
@@ -278,6 +283,43 @@ describe("TraceDiagnostics", () => {
         diagnostics.slowestSpans.map((span) => span.durationMs),
         [24, 23, 22, 21, 20, 19, 18, 17, 16, 15],
       );
+    }),
+  );
+
+  it.effect("keeps recent failures and warning logs bounded while aggregating", () =>
+    Effect.sync(() => {
+      const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
+        traceFilePath: "/tmp/server.trace.ndjson",
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        files: [
+          {
+            path: "/tmp/server.trace.ndjson",
+            text: Array.from({ length: 250 }, (_, index) =>
+              record({
+                name: "orchestration.dispatch",
+                traceId: `trace-${index}`,
+                spanId: `span-${index}`,
+                startMs: index * 1_000,
+                durationMs: 25,
+                exit: { _tag: "Failure", cause: "Provider crashed" },
+                events: [
+                  {
+                    name: `warning-${index}`,
+                    timeUnixNano: ns(index * 1_000 + 10),
+                    attributes: { "effect.logLevel": "Warning" },
+                  },
+                ],
+              }),
+            ).join("\n"),
+          },
+        ],
+      });
+
+      assert.equal(diagnostics.failureCount, 250);
+      assert.equal(diagnostics.latestFailures.length, 20);
+      assert.equal(diagnostics.latestFailures[0]?.traceId, "trace-249");
+      assert.equal(diagnostics.latestWarningAndErrorLogs.length, 20);
+      assert.equal(diagnostics.latestWarningAndErrorLogs[0]?.message, "warning-249");
     }),
   );
 });
