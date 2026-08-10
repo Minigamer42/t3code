@@ -154,6 +154,7 @@ function parseTargetPathAndPosition(target: string): Option.Option<TargetPathAnd
 function resolveCommandEditorArgs(
   editor: (typeof EDITORS)[number],
   target: string,
+  projectCwd?: string,
 ): ReadonlyArray<string> {
   const parsedTarget = parseTargetPathAndPosition(target);
 
@@ -166,6 +167,7 @@ function resolveCommandEditorArgs(
       return Option.match(parsedTarget, {
         onNone: () => [target],
         onSome: ({ path, line, column }) => [
+          ...(projectCwd ? [projectCwd] : []),
           "--line",
           line,
           ...Option.match(column, {
@@ -553,7 +555,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
       editor: editorDef.id,
       target: input.cwd,
       command,
-      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, input.cwd)],
+      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, input.cwd, input.projectCwd)],
     };
   }
 

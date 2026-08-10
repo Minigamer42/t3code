@@ -216,6 +216,81 @@ for (const platform of ["darwin", "linux"] as const) {
   );
 }
 
+it.effect("passes the project before JetBrains line navigation arguments", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    const phpstormPath = path.join(binDir, "phpstorm");
+    yield* fileSystem.writeFileString(phpstormPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(phpstormPath, 0o755);
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchEditor({
+        editor: "phpstorm",
+        cwd: "/workspace/framework/core/Core_SESSION.php:2705",
+        projectCwd: "/workspace",
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "linux",
+          env: { PATH: binDir },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "phpstorm");
+    assert.deepEqual(spawned.args, [
+      "/workspace",
+      "--line",
+      "2705",
+      "/workspace/framework/core/Core_SESSION.php",
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.skipIf(windowsHost)("reveals a file in Finder with open -R on macOS", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    const openPath = path.join(binDir, "open");
+    yield* fileSystem.writeFileString(openPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(openPath, 0o755);
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchEditor({
+        editor: "file-manager",
+        cwd: "/workspace/media/linux-mini-v2.mp4",
+        reveal: true,
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "darwin",
+          env: { PATH: binDir },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "open");
+    assert.deepEqual(spawned.args, ["-R", "/workspace/media/linux-mini-v2.mp4"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("launches Cursor in classic IDE mode through the Windows command shim", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
