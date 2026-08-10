@@ -100,32 +100,32 @@ const TEXT_GENERATION_FALLBACK_DRIVERS = [
  * model usually means a backend that may refuse the built-in default, and
  * the thread default, with its options, is known to work there.
  *
- * `includeConfiguredInstances` is for the project-scoped caller only: a
- * project that disabled every built-in instance should still be able to
- * fall back to one it configured itself. The machine-level caller leaves it
- * unset, since widening the candidates there would change behavior for
- * every user regardless of project scope.
+ * `configuredInstancesFirst` preserves a machine's preference for its configured
+ * instances before trying unconfigured defaults. Project callers can include
+ * configured instances after the defaults with `includeConfiguredInstances`.
  */
 export function fallbackTextGenerationModelSelection(
   providerInstances: ServerSettings["providerInstances"],
   isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => boolean,
   options?: {
     readonly includeConfiguredInstances?: boolean;
+    readonly configuredInstancesFirst?: boolean;
     readonly defaultModelSelection?: ModelSelection | null;
   },
 ): ModelSelection | null {
-  const candidates = [
-    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
-      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
-    ),
-    ...(options?.includeConfiguredInstances === true
-      ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-          TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
-            ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
-            : [],
-        )
-      : []),
-  ];
+  const defaults = TEXT_GENERATION_FALLBACK_DRIVERS.map(
+    (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
+  );
+  const configured = options?.includeConfiguredInstances === true
+    ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
+        options.configuredInstancesFirst === true || TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
+          ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
+          : [],
+      )
+    : [];
+  const candidates = options?.configuredInstancesFirst === true
+    ? [...configured, ...defaults]
+    : [...defaults, ...configured];
   const match = candidates.find(([instanceId, driver]) => isEnabled(instanceId, driver));
   if (match === undefined) return null;
   const [instanceId, driver] = match;

@@ -481,10 +481,14 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
   const fallback = fallbackTextGenerationModelSelection(
     settings.providerInstances,
     (instanceId, driver) =>
-      resolveProviderInstanceEnabled(
+      driver !== ACP_REGISTRY_DRIVER && resolveProviderInstanceEnabled(
         settings.providerInstances[instanceId] ?? { driver, config: {} },
       ),
-    { defaultModelSelection: settings.defaultModelSelection },
+    {
+      includeConfiguredInstances: true,
+      configuredInstancesFirst: true,
+      defaultModelSelection: settings.defaultModelSelection,
+    },
   );
   return fallback === null ? settings : { ...settings, textGenerationModelSelection: fallback };
 }

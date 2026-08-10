@@ -851,6 +851,50 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("falls back from a disabled instance to an enabled provider instance", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const enabledInstanceId = ProviderInstanceId.make("codex_kidevteam01");
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [ProviderInstanceId.make("codex")]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: false,
+            config: { binaryPath: "/stale/nvm/bin/codex" },
+          },
+          [enabledInstanceId]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            config: { binaryPath: "codex" },
+          },
+        },
+      });
+
+      assert.deepEqual(next.textGenerationModelSelection, {
+        instanceId: enabledInstanceId,
+        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+      });
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("prefers a configured instance over an implicit default and retains its custom model", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const configured = ProviderInstanceId.make("claude_work");
+      const selection = { instanceId: configured, model: "custom-work", options: [{ id: "thinking", value: false }] };
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          claudeAgent: { driver: ProviderDriverKind.make("claudeAgent"), enabled: false, config: {} },
+          [configured]: { driver: ProviderDriverKind.make("claudeAgent"), enabled: true, config: { customModels: ["custom-work"] } },
+        },
+        textGenerationModelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-5-5" },
+        defaultModelSelection: selection,
+      });
+      assert.deepEqual(next.textGenerationModelSelection, selection);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("preserves enabled text generation selections for non-built-in drivers", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
