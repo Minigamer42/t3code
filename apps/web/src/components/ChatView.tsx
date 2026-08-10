@@ -205,6 +205,8 @@ import {
   preventRepeatedTerminalCloseShortcut,
   preventTerminalCloseShortcut,
 } from "../lib/terminalCloseShortcut";
+import { useOpenInPreferredEditor } from "../editorPreferences";
+import { resolvePathLinkTarget } from "../terminal-links";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   derivePhysicalProjectKey,
@@ -2728,6 +2730,11 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
+  const openInPreferredEditor = useOpenInPreferredEditor(
+    activeThread?.environmentId ?? null,
+    serverConfig?.availableEditors ?? [],
+    activeThread?.worktreePath ?? activeProject?.workspaceRoot,
+  );
   // Prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
   // than the default Codex's. Falls back to first-match-by-kind when no

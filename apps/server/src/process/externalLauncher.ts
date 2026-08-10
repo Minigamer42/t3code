@@ -127,6 +127,7 @@ function parseTargetPathAndPosition(target: string): Option.Option<TargetPathAnd
 function resolveCommandEditorArgs(
   editor: (typeof EDITORS)[number],
   target: string,
+  projectCwd?: string,
 ): ReadonlyArray<string> {
   const parsedTarget = parseTargetPathAndPosition(target);
 
@@ -139,6 +140,7 @@ function resolveCommandEditorArgs(
       return Option.match(parsedTarget, {
         onNone: () => [target],
         onSome: ({ path, line, column }) => [
+          ...(projectCwd ? [projectCwd] : []),
           "--line",
           line,
           ...Option.match(column, {
@@ -154,9 +156,10 @@ function resolveCommandEditorArgs(
 function resolveEditorArgs(
   editor: (typeof EDITORS)[number],
   target: string,
+  projectCwd?: string,
 ): ReadonlyArray<string> {
   const baseArgs = "baseArgs" in editor ? editor.baseArgs : [];
-  return [...baseArgs, ...resolveCommandEditorArgs(editor, target)];
+  return [...baseArgs, ...resolveCommandEditorArgs(editor, target, projectCwd)];
 }
 
 const resolveAvailableCommand = Effect.fn("externalLauncher.resolveAvailableCommand")(function* (
@@ -368,7 +371,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
       editor: editorDef.id,
       target: input.cwd,
       command,
-      args: resolveEditorArgs(editorDef, input.cwd),
+      args: resolveEditorArgs(editorDef, input.cwd, input.projectCwd),
     };
   }
 
