@@ -72,11 +72,15 @@ const TEXT_GENERATION_FALLBACK_DRIVERS = [
   "antigravity",
 ].map((driver) => ProviderDriverKind.make(driver));
 
-/** Configured instances come after every default instance, so they only win when no default qualifies. */
+/** Configured instances can take priority while each candidate model is checked for availability. */
 export function fallbackTextGenerationModelSelection(
   providerInstances: ServerSettings["providerInstances"],
   isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind, model: string) => boolean,
-  options?: { readonly defaultModelSelection?: ModelSelection | null },
+  options?: {
+    readonly includeConfiguredInstances?: boolean;
+    readonly configuredInstancesFirst?: boolean;
+    readonly defaultModelSelection?: ModelSelection | null;
+  },
 ): ModelSelection | null {
   const threadDefault = options?.defaultModelSelection;
   // The thread default's custom model wins on its instance; the driver default still serves when that model is unusable.
@@ -90,16 +94,22 @@ export function fallbackTextGenerationModelSelection(
       ? [threadDefault, driverDefault]
       : [driverDefault];
   };
-  const candidates = [
-    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
-      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
-    ),
-    ...Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-      TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
-        ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
-        : [],
-    ),
-  ];
+  const defaults = TEXT_GENERATION_FALLBACK_DRIVERS.map(
+    (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
+  );
+  const configured =
+    options?.includeConfiguredInstances !== false
+      ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
+          options.configuredInstancesFirst === true ||
+          TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
+            ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
+            : [],
+        )
+      : [];
+  const candidates =
+    options?.configuredInstancesFirst === true
+      ? [...configured, ...defaults]
+      : [...defaults, ...configured];
   for (const [instanceId, driver] of candidates) {
     for (const selection of selectionsFor(instanceId, driver)) {
       if (isEnabled(instanceId, driver, selection.model)) return selection;
