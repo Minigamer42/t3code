@@ -322,6 +322,23 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
 }
 
 function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings {
+  const fallbackInstanceEntry = Object.entries(settings.providerInstances).find(([, instance]) =>
+    resolveProviderInstanceEnabled(instance),
+  );
+  if (fallbackInstanceEntry) {
+    const [instanceId, instance] = fallbackInstanceEntry;
+    return {
+      ...settings,
+      textGenerationModelSelection: {
+        instanceId: ProviderInstanceId.make(instanceId),
+        model:
+          DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[instance.driver] ??
+          DEFAULT_MODEL_BY_PROVIDER[instance.driver] ??
+          DEFAULT_TEXT_GENERATION_MODEL,
+      } satisfies ModelSelection,
+    };
+  }
+
   // Same precedence as isModelSelectionProviderEnabled: an explicit provider
   // instance wins over the legacy providers map, which decodes to defaults
   // (codex enabled) when the Providers UI has only written providerInstances.
