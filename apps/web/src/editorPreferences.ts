@@ -63,6 +63,7 @@ export function resolveAndPersistPreferredEditor(
 export function useOpenInPreferredEditor(
   environmentId: EnvironmentId | null,
   availableEditors: readonly EditorId[],
+  projectCwd?: string | null,
 ) {
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
@@ -106,10 +107,11 @@ export function useOpenInPreferredEditor(
         input: {
           cwd: targetPath,
           editor,
+          ...(projectCwd ? { projectCwd } : {}),
         },
       });
       return mapAtomCommandResult(result, () => editor);
     },
-    [availableEditors, environmentId, openInEditor],
+    [availableEditors, environmentId, openInEditor, projectCwd],
   );
 }
