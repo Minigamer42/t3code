@@ -80,7 +80,7 @@ function resolveAndPersistPreferredEditor(availableEditors: readonly EditorId[])
 export function useOpenInPreferredEditor(
   environmentId: EnvironmentId | null,
   availableEditors: readonly EditorId[],
-  projectRoot?: string,
+  projectRoot?: string | null,
 ) {
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
