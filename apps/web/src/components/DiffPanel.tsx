@@ -444,7 +444,6 @@ export default function DiffPanel({
   const openDiffFile = useCallback(
     (filePath: string) => {
       openDiffFilePrimaryAction({
-        threadRef: routeThreadRef,
         filePath,
         activeCwd,
         repositoryRoot: activeRepositoryRoot,

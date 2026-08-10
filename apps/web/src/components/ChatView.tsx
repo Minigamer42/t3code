@@ -3390,12 +3390,24 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
-  const openFileSurface = useCallback(
+  const openFileInMainEditor = useCallback(
     (relativePath: string) => {
-      if (!activeThreadRef || !activeProject) return;
-      useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
+      if (!activeWorkspaceRoot) return;
+      const targetPath = resolvePathLinkTarget(relativePath, activeWorkspaceRoot);
+      void (async () => {
+        const result = await openInPreferredEditor(targetPath);
+        if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Unable to open file",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      })();
     },
-    [activeProject, activeThreadRef],
+    [activeWorkspaceRoot, openInPreferredEditor],
   );
   // The thread's own change request, placed against the project it belongs to. Without a
   // project there is nothing to resolve it against, so the caller falls back to the browser.
@@ -6794,7 +6806,7 @@ function ChatViewContent(props: ChatViewProps) {
           }
           revealLine={activeFileSurface?.revealLine ?? null}
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
-          onOpenFile={openFileSurface}
+          onOpenFile={openFileInMainEditor}
           onPendingChange={handleFilePendingChange}
         />
       </Suspense>

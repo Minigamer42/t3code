@@ -1,44 +1,12 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { openDiffFilePrimaryAction, resolveDiffPathForWorkspace } from "./diffFileActions";
-import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";
-
-const THREAD_REF = scopeThreadRef(
-  EnvironmentId.make("environment-local"),
-  ThreadId.make("thread-1"),
-);
 
 describe("openDiffFilePrimaryAction", () => {
-  beforeEach(() => {
-    useRightPanelStore.setState({ byThreadKey: {} });
-  });
-
-  it("opens diff files in the thread file viewer", () => {
+  it("opens diff files in the main editor", () => {
     const openInEditor = vi.fn();
 
     openDiffFilePrimaryAction({
-      threadRef: THREAD_REF,
-      filePath: "apps/web/src/components/DiffPanel.tsx",
-      activeCwd: "/repo/project",
-      openInEditor,
-    });
-
-    expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toMatchObject({
-      isOpen: true,
-      activeSurfaceId: "file:apps/web/src/components/DiffPanel.tsx",
-    });
-    expect(openInEditor).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the editor without thread context", () => {
-    const openInEditor = vi.fn();
-
-    openDiffFilePrimaryAction({
-      threadRef: null,
       filePath: "apps/web/src/components/DiffPanel.tsx",
       activeCwd: "/repo/project",
       openInEditor,
@@ -53,20 +21,13 @@ describe("openDiffFilePrimaryAction", () => {
     const openInEditor = vi.fn();
 
     openDiffFilePrimaryAction({
-      threadRef: THREAD_REF,
       filePath: "frontend/Dockerfile",
       activeCwd: "/repo/frontend",
       repositoryRoot: "/repo",
       openInEditor,
     });
 
-    expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toMatchObject({
-      isOpen: true,
-      activeSurfaceId: "file:Dockerfile",
-    });
-    expect(openInEditor).not.toHaveBeenCalled();
+    expect(openInEditor).toHaveBeenCalledWith("/repo/frontend/Dockerfile");
   });
 
   it("preserves repository-relative paths in a separate worktree", () => {
@@ -108,17 +69,25 @@ describe("openDiffFilePrimaryAction", () => {
       const openInEditor = vi.fn();
 
       openDiffFilePrimaryAction({
-        threadRef: THREAD_REF,
         filePath,
         activeCwd: "/repo/frontend",
         repositoryRoot: "/repo",
         openInEditor,
       });
 
-      expect(
-        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
-      ).toMatchObject({ isOpen: false });
       expect(openInEditor).not.toHaveBeenCalled();
     },
   );
+
+  it("passes through paths when the workspace root is unavailable", () => {
+    const openInEditor = vi.fn();
+
+    openDiffFilePrimaryAction({
+      filePath: "apps/web/src/components/DiffPanel.tsx",
+      activeCwd: undefined,
+      openInEditor,
+    });
+
+    expect(openInEditor).toHaveBeenCalledWith("apps/web/src/components/DiffPanel.tsx");
+  });
 });

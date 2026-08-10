@@ -1,11 +1,7 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
 import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@t3tools/shared/path";
-
-import { useRightPanelStore } from "./rightPanelStore";
 import { resolvePathLinkTarget } from "./terminal-links";
 
 interface OpenDiffFilePrimaryActionInput {
-  readonly threadRef: ScopedThreadRef | null;
   readonly filePath: string;
   readonly activeCwd: string | undefined;
   readonly repositoryRoot?: string | undefined;
@@ -78,7 +74,6 @@ export function resolveDiffPathForWorkspace(input: {
 }
 
 export function openDiffFilePrimaryAction({
-  threadRef,
   filePath,
   activeCwd,
   repositoryRoot,
@@ -90,11 +85,6 @@ export function openDiffFilePrimaryAction({
     repositoryRoot,
   });
   if (!workspaceFilePath) return;
-
-  if (threadRef) {
-    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath);
-    return;
-  }
 
   openInEditor(activeCwd ? resolvePathLinkTarget(workspaceFilePath, activeCwd) : workspaceFilePath);
 }
