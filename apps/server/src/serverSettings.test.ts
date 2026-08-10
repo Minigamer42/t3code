@@ -324,6 +324,33 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("falls back from a disabled instance to an enabled provider instance", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const enabledInstanceId = ProviderInstanceId.make("codex_kidevteam01");
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [ProviderInstanceId.make("codex")]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: false,
+            config: { binaryPath: "/stale/nvm/bin/codex" },
+          },
+          [enabledInstanceId]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            config: { binaryPath: "codex" },
+          },
+        },
+      });
+
+      assert.deepEqual(next.textGenerationModelSelection, {
+        instanceId: enabledInstanceId,
+        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves enabled text generation selections for non-built-in drivers", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
