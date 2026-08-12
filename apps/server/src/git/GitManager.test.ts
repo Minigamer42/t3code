@@ -2605,6 +2605,80 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("create_pr fetches the pushed branch from a single-branch clone", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, [
+        "config",
+        "--replace-all",
+        "remote.origin.fetch",
+        "+refs/heads/main:refs/remotes/origin/main",
+      ]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+      yield* runGit(repoDir, ["fetch", "origin"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/single-branch-pr"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "single-branch.txt"), "single branch\n");
+      yield* runGit(repoDir, ["add", "single-branch.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Create single-branch PR"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            "[]",
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 304,
+                title: "Create single-branch PR",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/304",
+                baseRefName: "main",
+                headRefName: "feature/single-branch-pr",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      });
+
+      expect(result.push).toMatchObject({
+        status: "pushed",
+        upstreamBranch: "origin/feature/single-branch-pr",
+        setUpstream: true,
+      });
+      expect(result.pr.status).toBe("created");
+      expect(result.pr.number).toBe(304);
+      expect(
+        ghCalls.some((call) =>
+          call.includes("pr create --base main --head feature/single-branch-pr"),
+        ),
+      ).toBe(true);
+      expect(
+        yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"], true).pipe(
+          Effect.map((output) => ({ exitCode: output.exitCode, upstream: output.stdout.trim() })),
+        ),
+      ).toEqual({
+        exitCode: 0,
+        upstream: "origin/feature/single-branch-pr",
+      });
+      expect(
+        yield* runGit(repoDir, ["rev-parse", "refs/remotes/origin/feature/single-branch-pr"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toBe(
+        yield* runGit(repoDir, ["rev-parse", "HEAD"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      );
+    }),
+  );
+
   it.effect("create_pr falls back to main when source control provider detection fails", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
