@@ -1017,6 +1017,54 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
   });
 
+  const ensurePublishedBranchUpstream = Effect.fn("ensurePublishedBranchUpstream")(function* (
+    cwd: string,
+    remoteName: string,
+    branchName: string,
+  ) {
+    const currentUpstream = yield* resolveCurrentUpstream(cwd);
+    if (currentUpstream?.remoteName === remoteName && currentUpstream.branchName === branchName) {
+      return;
+    }
+
+    const fetchRefspec = `+refs/heads/${branchName}:refs/remotes/${remoteName}/${branchName}`;
+    const configuredFetchRefspecs = yield* runGitStdout(
+      "GitVcsDriver.ensurePublishedBranchUpstream.readFetchRefspecs",
+      cwd,
+      ["config", "--get-all", `remote.${remoteName}.fetch`],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.split(/\r?\n/g)));
+    if (!configuredFetchRefspecs.includes(fetchRefspec)) {
+      yield* runGit("GitVcsDriver.ensurePublishedBranchUpstream.addFetchRefspec", cwd, [
+        "config",
+        "--add",
+        `remote.${remoteName}.fetch`,
+        fetchRefspec,
+      ]);
+    }
+
+    yield* executeGit(
+      "GitVcsDriver.ensurePublishedBranchUpstream.fetch",
+      cwd,
+      ["fetch", "--quiet", "--no-tags", remoteName, fetchRefspec],
+      {
+        env: STATUS_UPSTREAM_REFRESH_ENV,
+      },
+    );
+
+    const resolvedUpstream = yield* resolveCurrentUpstream(cwd);
+    if (resolvedUpstream?.remoteName !== remoteName || resolvedUpstream.branchName !== branchName) {
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: "GitVcsDriver.ensurePublishedBranchUpstream",
+          cwd,
+          args: ["fetch", remoteName],
+        }),
+        detail: "The pushed branch could not be resolved as the local upstream.",
+      });
+    }
+  });
+
   const fetchRemoteForStatus = (
     gitCommonDir: string,
     remoteName: string,
@@ -1974,6 +2022,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ["push", "-u", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
+      yield* ensurePublishedBranchUpstream(cwd, requestedRemoteName, publishBranch);
       return {
         status: "pushed" as const,
         branch,
@@ -2039,6 +2088,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ["push", "-u", publishRemoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
+      yield* ensurePublishedBranchUpstream(cwd, publishRemoteName, publishBranch);
       return {
         status: "pushed" as const,
         branch,
