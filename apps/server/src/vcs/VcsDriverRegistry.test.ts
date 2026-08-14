@@ -29,6 +29,7 @@ describe("VcsDriverRegistry", () => {
         Layer.mock(VcsProjectConfig.VcsProjectConfig)({
           resolveKind: (input) => Effect.succeed(input.requestedKind ?? "auto"),
           resolveBranchNaming: () => Effect.succeed(VcsProjectConfig.defaultBranchNamingConfig),
+          resolveHooks: () => Effect.succeed(VcsProjectConfig.defaultHooksConfig),
         }),
       ),
       Layer.provide(
@@ -55,6 +56,7 @@ describe("VcsDriverRegistry", () => {
         Layer.mock(VcsProjectConfig.VcsProjectConfig)({
           resolveKind: (input) => Effect.succeed(input.requestedKind ?? "auto"),
           resolveBranchNaming: () => Effect.succeed(VcsProjectConfig.defaultBranchNamingConfig),
+          resolveHooks: () => Effect.succeed(VcsProjectConfig.defaultHooksConfig),
         }),
       ),
       Layer.provide(
