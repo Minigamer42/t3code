@@ -327,6 +327,7 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
 const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(ProjectSetupScriptRunner.layer.pipe(Layer.provide(ServerSettingsLayerLive))),
   Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(VcsProjectConfig.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(TextGeneration.layer),
