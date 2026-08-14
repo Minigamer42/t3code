@@ -35,6 +35,24 @@ T3 Code works with the platforms your team already uses:
 - T3 Code can suggest titles and descriptions based on your commits
 - Supports GitHub Pull Requests, GitLab Merge Requests, Bitbucket Pull Requests, and Azure DevOps Pull Requests
 
+### Run a command after pushing
+
+Add a `hooks.afterPush` command to `.t3code/vcs.json` to run a project-specific command after a
+successful push:
+
+```json
+{
+  "hooks": {
+    "afterPush": "./scripts/populate-ci-cache"
+  }
+}
+```
+
+The command runs in the repository working directory through the host shell. T3 Code waits for it
+to finish and reports a non-zero exit status as an action failure. When the action also creates a
+pull or merge request, change-request creation runs concurrently with the command. The hook is not
+run when the branch is already up to date and no push occurs.
+
 **Stay on top of open reviews**
 
 - See if your current branch already has an open PR/MR
