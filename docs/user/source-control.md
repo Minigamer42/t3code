@@ -190,6 +190,24 @@ Choose how commit messages and pull request titles and descriptions are written 
 project's instructions and recent commit subjects. **Custom instructions** applies your own
 instructions to commits and pull requests.
 
+### Run a command after pushing
+
+Add a `hooks.afterPush` command to `.t3code/vcs.json` to run a project-specific command after a
+successful push:
+
+```json
+{
+  "hooks": {
+    "afterPush": "./scripts/populate-ci-cache"
+  }
+}
+```
+
+The command runs in the repository working directory through the host shell. T3 Code waits for it
+to finish and reports a non-zero exit status as an action failure. When the action also creates a
+pull or merge request, change-request creation runs concurrently with the command. The hook does not
+run when the branch is already up to date and no push occurs.
+
 ## Review and merge
 
 Open **Pull requests** to review changes and comments, request reviewers, check out a branch,
