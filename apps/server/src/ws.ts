@@ -73,6 +73,7 @@ import {
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ThreadLiveOutputDisabled } from "./orchestration/Services/ThreadLiveOutput.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -375,6 +376,7 @@ const makeWsRpcLayer = (
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const threadLiveOutput = orchestrationEngine.liveOutput ?? ThreadLiveOutputDisabled;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
@@ -1341,14 +1343,24 @@ const makeWsRpcLayer = (
                   event: projectActivityEvent(event),
                 })),
               );
+              const liveOutputStream = threadLiveOutput.stream.pipe(
+                Stream.filter((output) => output.threadId === input.threadId),
+                Stream.map((output) => ({ kind: "live-output" as const, output })),
+              );
 
               // Attach live delivery before reading either replay or snapshot state.
               // Otherwise an event published while the snapshot is loading is lost.
               const liveBuffer = yield* Queue.unbounded<OrchestrationThreadStreamItem>();
               yield* Effect.forkScoped(
-                liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
+                Stream.merge(liveStream, liveOutputStream).pipe(
+                  Stream.runForEach((item) => Queue.offer(liveBuffer, item)),
+                ),
               );
               const bufferedLiveStream = Stream.fromQueue(liveBuffer);
+              const liveOutputSnapshot = yield* threadLiveOutput.snapshot(input.threadId);
+              const liveOutputSnapshotStream = Stream.fromIterable(
+                liveOutputSnapshot.map((output) => ({ kind: "live-output" as const, output })),
+              );
 
               // When the client already loaded the snapshot over HTTP it passes
               // that snapshot's sequence, and we resume the live subscription by
@@ -1403,7 +1415,10 @@ const makeWsRpcLayer = (
                           bufferedLiveStream,
                         )
                       : bufferedLiveStream;
-                  return Stream.concat(catchUpStream, afterCatchUp);
+                  return Stream.concat(
+                    liveOutputSnapshotStream,
+                    Stream.concat(catchUpStream, afterCatchUp),
+                  );
                 }
                 // Gap too large (or cursor ahead of authoritative state): fall
                 // through to the snapshot path so the client converges from a
@@ -1450,7 +1465,7 @@ const makeWsRpcLayer = (
                   kind: "snapshot" as const,
                   snapshot: projectThreadDetailSnapshot(snapshot.value),
                 }),
-                afterSnapshot,
+                Stream.concat(liveOutputSnapshotStream, afterSnapshot),
               );
             }),
             { "rpc.aggregate": "orchestration" },

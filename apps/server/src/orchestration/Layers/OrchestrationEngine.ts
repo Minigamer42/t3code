@@ -46,6 +46,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import { makeThreadLiveOutput } from "./ThreadLiveOutput.ts";
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 );
@@ -85,6 +86,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const crypto = yield* Crypto.Crypto;
+  const liveOutput = yield* makeThreadLiveOutput;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
@@ -341,6 +343,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     });
 
   return {
+    liveOutput,
     readEvents,
     dispatch,
     // Each access creates a fresh PubSub subscription so that multiple

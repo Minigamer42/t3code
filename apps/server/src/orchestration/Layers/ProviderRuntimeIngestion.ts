@@ -18,6 +18,7 @@ import {
   type OrchestrationProposedPlan,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
+  ProviderItemId,
   type ProviderRuntimeEvent,
   type ToolLifecycleItemType,
 } from "@t3tools/contracts";
@@ -46,6 +47,7 @@ import {
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import { forkParked } from "../../serverActivation.ts";
+import { ThreadLiveOutputDisabled } from "../Services/ThreadLiveOutput.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
 

@@ -17,11 +17,13 @@ import type * as Stream from "effect/Stream";
 
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
+import type { ThreadLiveOutputShape } from "./ThreadLiveOutput.ts";
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
 export interface OrchestrationEngineShape {
+  readonly liveOutput?: ThreadLiveOutputShape;
   /**
    * Replay persisted orchestration events from an exclusive sequence cursor.
    *
