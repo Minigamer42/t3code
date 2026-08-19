@@ -1,6 +1,7 @@
 import type {
   OrchestrationEvent,
   OrchestrationGetSnapshotError,
+  OrchestrationThreadLiveOutput,
   OrchestrationThreadStreamItem,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -20,6 +21,7 @@ const MAX_PENDING_UPDATES = 512;
 
 export type ThreadLiveInput =
   | { readonly kind: "event"; readonly event: OrchestrationEvent }
+  | { readonly kind: "live-output"; readonly output: OrchestrationThreadLiveOutput }
   | { readonly kind: "synchronized" };
 
 function isToolUpdated(event: OrchestrationEvent): boolean {
@@ -191,6 +193,12 @@ export const makeThreadLiveEventCoalescer = Effect.fn("makeThreadLiveEventCoales
               // A non-update event closes the run immediately. The coalescer keeps
               // that boundary after the final update from the run.
               yield* flushPending();
+              if (input.kind === "live-output") {
+                yield* budget.retain(input).pipe(
+                  Effect.flatMap((item) => Queue.offer(output, item)),
+                  Effect.uninterruptible,
+                );
+              }
               if (input.kind === "synchronized") {
                 yield* budget.retain({ kind: "synchronized" as const }).pipe(
                   Effect.flatMap((marker) => Queue.offer(output, marker)),

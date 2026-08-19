@@ -1398,6 +1398,7 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
+  text: Schema.String,
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });
@@ -2038,8 +2039,36 @@ export const OrchestrationThreadStreamItem = Schema.Union([
     kind: Schema.Literal("event"),
     event: OrchestrationEvent,
   }),
+  Schema.Struct({
+    kind: Schema.Literal("live-output"),
+    output: Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("assistant"),
+        threadId: ThreadId,
+        messageId: MessageId,
+        turnId: Schema.NullOr(TurnId),
+        offset: NonNegativeInt,
+        delta: Schema.String,
+        createdAt: IsoDateTime,
+      }),
+      Schema.Struct({
+        type: Schema.Literal("tool"),
+        threadId: ThreadId,
+        itemId: ProviderItemId,
+        itemType: Schema.Literals(["command_execution", "file_change"]),
+        turnId: Schema.NullOr(TurnId),
+        offset: NonNegativeInt,
+        delta: Schema.String,
+        createdAt: IsoDateTime,
+      }),
+    ]),
+  }),
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
+export type OrchestrationThreadLiveOutput = Extract<
+  OrchestrationThreadStreamItem,
+  { readonly kind: "live-output" }
+>["output"];
 
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;

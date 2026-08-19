@@ -96,6 +96,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
+import { ThreadLiveOutputDisabled } from "./orchestration/Services/ThreadLiveOutput.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -540,6 +541,7 @@ const makeWsRpcLayer = (
             return Effect.void;
         }
       };
+      const threadLiveOutput = orchestrationEngine.liveOutput ?? ThreadLiveOutputDisabled;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
@@ -1650,12 +1652,16 @@ const makeWsRpcLayer = (
                   event,
                 })),
               );
+              const liveOutputStream = threadLiveOutput.stream.pipe(
+                Stream.filter((output) => output.threadId === input.threadId),
+                Stream.map((output) => ({ kind: "live-output" as const, output })),
+              );
 
               // Attach live delivery before reading either replay or snapshot state.
               // Otherwise an event published while the snapshot is loading is lost.
               const liveBuffer = yield* makeThreadLiveEventCoalescer();
               yield* Effect.forkScoped(
-                liveStream.pipe(
+                Stream.merge(liveStream, liveOutputStream).pipe(
                   Stream.runForEachArray(liveBuffer.offerAll),
                   Effect.raceFirst(liveBuffer.failed),
                   Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
@@ -1664,6 +1670,10 @@ const makeWsRpcLayer = (
               );
               const bufferedLiveStream = liveBuffer.stream;
               let replayOnMissingSnapshot: typeof bufferedLiveStream | undefined;
+              const liveOutputSnapshot = yield* threadLiveOutput.snapshot(input.threadId);
+              const liveOutputSnapshotStream = Stream.fromIterable(
+                liveOutputSnapshot.map((output) => ({ kind: "live-output" as const, output })),
+              );
 
               // When the client already loaded the snapshot over HTTP it passes
               // that snapshot's sequence, and we resume the live subscription by
@@ -1736,7 +1746,10 @@ const makeWsRpcLayer = (
                             .pipe(Effect.as(bufferedLiveStream)),
                         )
                       : bufferedLiveStream;
-                  const replay = Stream.concat(catchUpStream, afterCatchUp);
+                  const replay = Stream.concat(
+                    liveOutputSnapshotStream,
+                    Stream.concat(catchUpStream, afterCatchUp),
+                  );
                   if (!replayStats.hasCreateEvent) {
                     return replay;
                   }
@@ -1791,7 +1804,7 @@ const makeWsRpcLayer = (
                   kind: "snapshot" as const,
                   snapshot: projectThreadDetailSnapshot(snapshot.value),
                 }),
-                afterSnapshot,
+                Stream.concat(liveOutputSnapshotStream, afterSnapshot),
               );
             }),
             { "rpc.aggregate": "orchestration" },
