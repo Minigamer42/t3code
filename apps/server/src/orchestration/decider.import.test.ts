@@ -497,6 +497,7 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
                 commandId: CommandId.make("command-live-assistant-complete-import-id"),
                 threadId,
                 messageId: MessageId.make("import:forged-live-assistant-message"),
+                text: "Live work",
                 createdAt,
               };
         const error = yield* Effect.flip(decideOrchestrationCommand({ command, readModel }));

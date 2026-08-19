@@ -98,6 +98,12 @@ type LegacyTurnCompletedEvent = LegacyProviderRuntimeEvent & {
   readonly errorMessage?: string | undefined;
 };
 
+function activityItemIdForTest(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const itemId = (payload as { readonly itemId?: unknown }).itemId;
+  return typeof itemId === "string" ? itemId : undefined;
+}
+
 function isLegacyTurnCompletedEvent(
   event: LegacyProviderRuntimeEvent,
 ): event is LegacyTurnCompletedEvent {
@@ -409,6 +415,8 @@ describe("ProviderRuntimeIngestion", () => {
             Effect.andThen(Effect.yieldNow),
           ),
         ),
+      liveOutputSnapshot: (threadId = ThreadId.make("thread-1")) =>
+        Effect.runPromise(engine.liveOutput!.snapshot(threadId)),
     };
   }
 
@@ -791,13 +799,14 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
     expect(thread?.session).toMatchObject({ status: "running", activeTurnId: nextTurnId });
     expect(thread?.latestTurn).toMatchObject({ turnId: nextTurnId, state: "running" });
-    expect(thread?.messages).toEqual([
+    expect(thread?.messages).toEqual([]);
+    expect(await harness.liveOutputSnapshot(threadId)).toContainEqual(
       expect.objectContaining({
+        type: "assistant",
         turnId: nextTurnId,
-        text: "The next turn is running.",
-        streaming: true,
+        delta: "The next turn is running.",
       }),
-    ]);
+    );
 
     harness.emit({
       ...base,
@@ -2890,7 +2899,10 @@ describe("ProviderRuntimeIngestion", () => {
     await harness.drain();
     const thread = (await harness.readModel()).threads[0];
     expect(thread?.session?.status).toBe("running");
-    expect(thread?.messages).toMatchObject([{ text: "Before. After.", streaming: true }]);
+    expect(thread?.messages).toEqual([]);
+    expect(await harness.liveOutputSnapshot()).toContainEqual(
+      expect.objectContaining({ type: "assistant", delta: "Before. After." }),
+    );
     expect(
       thread?.activities.find((activity) => activity.kind === "user-input.requested")?.payload,
     ).toMatchObject({ responseMode: "message", requestId: "codex-async:question-1" });
@@ -3071,21 +3083,14 @@ describe("ProviderRuntimeIngestion", () => {
         event.type === "thread.message-sent" &&
         event.payload.messageId.startsWith("assistant:item-buffered-request-append"),
     );
-    expect(assistantEvents).toHaveLength(4);
-    expect(assistantEvents[0]?.payload.streaming).toBe(true);
+    expect(assistantEvents).toHaveLength(2);
+    expect(assistantEvents[0]?.payload.streaming).toBe(false);
     expect(assistantEvents[0]?.payload.text).toBe("first half");
+    expect(assistantEvents[1]?.payload.messageId).toBe(
+      "assistant:item-buffered-request-append:segment:1",
+    );
     expect(assistantEvents[1]?.payload.streaming).toBe(false);
-    expect(assistantEvents[1]?.payload.text).toBe("");
-    expect(assistantEvents[2]?.payload.messageId).toBe(
-      "assistant:item-buffered-request-append:segment:1",
-    );
-    expect(assistantEvents[2]?.payload.streaming).toBe(true);
-    expect(assistantEvents[2]?.payload.text).toBe(" second half");
-    expect(assistantEvents[3]?.payload.messageId).toBe(
-      "assistant:item-buffered-request-append:segment:1",
-    );
-    expect(assistantEvents[3]?.payload.streaming).toBe(false);
-    expect(assistantEvents[3]?.payload.text).toBe("");
+    expect(assistantEvents[1]?.payload.text).toBe(" second half");
   });
 
   it("starts a new streaming assistant message segment after approval", async () => {
@@ -3246,18 +3251,21 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    const liveThread = await waitForThread(harness.readModel, (entry) =>
-      entry.messages.some(
-        (message: ProviderRuntimeTestMessage) =>
-          message.id === "assistant:item-streaming-mode" &&
-          message.streaming &&
-          message.text === "hello live",
+    await harness.drain();
+    const projectedBeforeCompletion = await harness.readModel();
+    expect(
+      projectedBeforeCompletion.threads[0]?.messages.some(
+        (message: ProviderRuntimeTestMessage) => message.id === "assistant:item-streaming-mode",
       ),
+    ).toBe(false);
+    expect(await harness.liveOutputSnapshot()).toContainEqual(
+      expect.objectContaining({
+        type: "assistant",
+        messageId: "assistant:item-streaming-mode",
+        offset: 0,
+        delta: "hello live",
+      }),
     );
-    const liveMessage = liveThread.messages.find(
-      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-streaming-mode",
-    );
-    expect(liveMessage?.streaming).toBe(true);
 
     harness.emit({
       type: "item.completed",
@@ -3346,6 +3354,111 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.text.length).toBe(oversizedText.length);
     expect(message?.text).toBe(oversizedText);
     expect(message?.streaming).toBe(false);
+  });
+
+  it("persists one assistant event for a high-volume streamed response", async () => {
+    const harness = await createHarness({
+      serverSettings: { enableLegacyTokenStreaming: true },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const chunks = Array.from({ length: 500 }, (_, index) => `chunk-${index};`);
+
+    for (const [index, delta] of chunks.entries()) {
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(`evt-high-volume-assistant-${index}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-high-volume-assistant"),
+        itemId: asItemId("item-high-volume-assistant"),
+        payload: { streamKind: "assistant_text", delta },
+      });
+    }
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-high-volume-assistant-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-high-volume-assistant"),
+      itemId: asItemId("item-high-volume-assistant"),
+      payload: { itemType: "assistant_message", status: "completed" },
+    });
+    await harness.drain();
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const assistantEvents = events.filter(
+      (event): event is Extract<(typeof events)[number], { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-high-volume-assistant",
+    );
+    expect(assistantEvents).toHaveLength(1);
+    expect(assistantEvents[0]?.payload.text).toBe(chunks.join(""));
+    expect(assistantEvents[0]?.payload.streaming).toBe(false);
+  });
+
+  it("keeps streamed tool output transient and persists it once on completion", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const chunks = Array.from({ length: 500 }, (_, index) => `line ${index}\n`);
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-high-volume-tool-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-high-volume-tool"),
+      itemId: asItemId("item-high-volume-tool"),
+      payload: { itemType: "command_execution", status: "in_progress", title: "Long command" },
+    });
+    for (const [index, delta] of chunks.entries()) {
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(`evt-high-volume-tool-output-${index}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-high-volume-tool"),
+        itemId: asItemId("item-high-volume-tool"),
+        payload: { streamKind: "command_output", delta },
+      });
+    }
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-high-volume-tool-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-high-volume-tool"),
+      itemId: asItemId("item-high-volume-tool"),
+      payload: { itemType: "command_execution", status: "completed", title: "Long command" },
+    });
+    await harness.drain();
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const toolActivities = events.filter(
+      (event): event is Extract<(typeof events)[number], { type: "thread.activity-appended" }> =>
+        event.type === "thread.activity-appended" &&
+        activityItemIdForTest(event.payload.activity.payload) === "item-high-volume-tool",
+    );
+    expect(toolActivities.map((event) => event.payload.activity.kind)).toEqual([
+      "tool.started",
+      "tool.completed",
+    ]);
+    const completion = toolActivities[1]?.payload.activity.payload as {
+      data?: { rawOutput?: { stdout?: string } };
+    };
+    expect(completion.data?.rawOutput?.stdout).toBe(chunks.join(""));
   });
 
   it("does not duplicate assistant completion when item.completed is followed by turn.completed", async () => {

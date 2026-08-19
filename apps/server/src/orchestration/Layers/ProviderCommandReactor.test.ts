@@ -1499,6 +1499,7 @@ describe("ProviderCommandReactor", () => {
         commandId: CommandId.make("cmd-assistant-complete-before-title-regeneration"),
         threadId: ThreadId.make("thread-1"),
         messageId: asMessageId("assistant-message-before-title-regeneration"),
+        text: "The remaining issue is stale reconnect state.",
         createdAt: "2026-01-01T00:00:02.000Z",
       }),
     );
@@ -1907,6 +1908,7 @@ describe("ProviderCommandReactor", () => {
         commandId: CommandId.make("cmd-assistant-truncated-regeneration-context-complete"),
         threadId: ThreadId.make("thread-1"),
         messageId: asMessageId("assistant-truncated-regeneration-context"),
+        text: `content before retained tail${"x".repeat(8_100)}`,
         createdAt: "2026-01-01T00:00:02.000Z",
       }),
     );

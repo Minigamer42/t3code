@@ -1661,7 +1661,15 @@ const makeWsRpcLayer = (
               // Otherwise an event published while the snapshot is loading is lost.
               const liveBuffer = yield* makeThreadLiveEventCoalescer();
               yield* Effect.forkScoped(
-                Stream.merge(liveStream, liveOutputStream).pipe(
+                liveStream.pipe(
+                  Stream.runForEachArray(liveBuffer.offerAll),
+                  Effect.raceFirst(liveBuffer.failed),
+                  Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
+                ),
+                { startImmediately: true },
+              );
+              yield* Effect.forkScoped(
+                liveOutputStream.pipe(
                   Stream.runForEachArray(liveBuffer.offerAll),
                   Effect.raceFirst(liveBuffer.failed),
                   Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
