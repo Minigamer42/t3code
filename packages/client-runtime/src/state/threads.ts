@@ -1,6 +1,8 @@
 import {
   ORCHESTRATION_WS_METHODS,
+  EventId,
   type EnvironmentId as EnvironmentIdType,
+  type OrchestrationThreadLiveOutput,
   type OrchestrationThread,
   type OrchestrationThreadDetailPage,
   type OrchestrationThreadDetailSnapshot,
@@ -129,6 +131,96 @@ function formatThreadError(cause: Cause.Cause<unknown>): string {
 function shouldPersistThread(thread: OrchestrationThread): boolean {
   const status = thread.session?.status;
   return status !== "starting" && status !== "running";
+}
+
+function applyOutputDelta(current: string, offset: number, delta: string): string | undefined {
+  if (offset > current.length) return undefined;
+  if (offset === current.length) return `${current}${delta}`;
+  if (current.slice(offset, offset + delta.length) === delta) return current;
+  return `${current.slice(0, offset)}${delta}`;
+}
+
+function activityItemId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const itemId = (payload as { readonly itemId?: unknown }).itemId;
+  return typeof itemId === "string" ? itemId : undefined;
+}
+
+function applyLiveOutput(
+  thread: OrchestrationThread,
+  output: OrchestrationThreadLiveOutput,
+): OrchestrationThread {
+  if (output.type === "assistant") {
+    const existing = thread.messages.find((message) => message.id === output.messageId);
+    if (existing && !existing.streaming) return thread;
+    const text = applyOutputDelta(existing?.text ?? "", output.offset, output.delta);
+    if (text === undefined) return thread;
+    const message = {
+      id: output.messageId,
+      role: "assistant" as const,
+      text,
+      turnId: output.turnId,
+      streaming: true,
+      createdAt: existing?.createdAt ?? output.createdAt,
+      updatedAt: output.createdAt,
+    };
+    return {
+      ...thread,
+      messages: existing
+        ? thread.messages.map((entry) => (entry.id === output.messageId ? message : entry))
+        : [...thread.messages, message],
+      updatedAt: output.createdAt,
+    };
+  }
+
+  if (
+    thread.activities.some(
+      (activity) =>
+        activity.kind === "tool.completed" && activityItemId(activity.payload) === output.itemId,
+    )
+  ) {
+    return thread;
+  }
+  const activityId = EventId.make(`live-output:${output.threadId}:${output.itemId}`);
+  const existing = thread.activities.find((activity) => activity.id === activityId);
+  const existingData =
+    existing?.payload && typeof existing.payload === "object"
+      ? (existing.payload as { readonly data?: { readonly rawOutput?: Record<string, unknown> } })
+          .data
+      : undefined;
+  const currentOutput =
+    output.itemType === "command_execution"
+      ? existingData?.rawOutput?.stdout
+      : existingData?.rawOutput?.content;
+  const text = applyOutputDelta(
+    typeof currentOutput === "string" ? currentOutput : "",
+    output.offset,
+    output.delta,
+  );
+  if (text === undefined) return thread;
+  const activity = {
+    id: activityId,
+    tone: "tool" as const,
+    kind: "tool.updated",
+    summary: output.itemType === "command_execution" ? "Command output" : "File change output",
+    payload: {
+      itemId: output.itemId,
+      itemType: output.itemType,
+      status: "inProgress",
+      data: {
+        rawOutput: output.itemType === "command_execution" ? { stdout: text } : { content: text },
+      },
+    },
+    turnId: output.turnId,
+    createdAt: existing?.createdAt ?? output.createdAt,
+  };
+  return {
+    ...thread,
+    activities: existing
+      ? thread.activities.map((entry) => (entry.id === activityId ? activity : entry))
+      : [...thread.activities, activity],
+    updatedAt: output.createdAt,
+  };
 }
 
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
@@ -338,6 +430,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       return;
     }
 
+    if (item.kind === "live-output") {
+      const current = yield* SubscriptionRef.get(state);
+      if (Option.isSome(current.data)) {
+        yield* setThread(applyLiveOutput(current.data.value, item.output));
+      }
+      return;
+    }
+
     const sequence = yield* SubscriptionRef.get(lastSequence);
     if (item.event.sequence <= sequence) {
       return;
@@ -360,7 +460,23 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       // revert reducer's turn filtering fully handles loaded history.
       yield* Ref.update(historyEpoch, (epoch) => epoch + 1);
     }
-    const result = applyThreadDetailEvent(current.data.value, item.event);
+    const completedToolItemId =
+      item.event.type === "thread.activity-appended" &&
+      item.event.payload.activity.kind === "tool.completed"
+        ? activityItemId(item.event.payload.activity.payload)
+        : undefined;
+    const baseThread =
+      completedToolItemId !== undefined
+        ? {
+            ...current.data.value,
+            activities: current.data.value.activities.filter(
+              (activity) =>
+                activity.id !==
+                EventId.make(`live-output:${item.event.aggregateId}:${completedToolItemId}`),
+            ),
+          }
+        : current.data.value;
+    const result = applyThreadDetailEvent(baseThread, item.event);
     if (result.kind === "updated") {
       yield* setThread(result.thread, "keep");
     } else if (result.kind === "deleted") {

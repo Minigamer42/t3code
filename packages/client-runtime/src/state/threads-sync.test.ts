@@ -1,9 +1,11 @@
 import {
   EnvironmentId,
   EventId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ProviderInstanceId,
+  ProviderItemId,
   ThreadId,
   TurnId,
   type OrchestrationThread,
@@ -314,6 +316,33 @@ const deleted = (): OrchestrationThreadStreamItem => ({
   },
 });
 
+const assistantOutput = (offset: number, delta: string): OrchestrationThreadStreamItem => ({
+  kind: "live-output",
+  output: {
+    type: "assistant",
+    threadId: THREAD_ID,
+    messageId: MessageId.make("assistant:live"),
+    turnId: TurnId.make("turn-live"),
+    offset,
+    delta,
+    createdAt: "2026-04-01T00:30:00.000Z",
+  },
+});
+
+const toolOutput = (offset: number, delta: string): OrchestrationThreadStreamItem => ({
+  kind: "live-output",
+  output: {
+    type: "tool",
+    threadId: THREAD_ID,
+    itemId: ProviderItemId.make("tool-live"),
+    itemType: "command_execution",
+    turnId: TurnId.make("turn-live"),
+    offset,
+    delta,
+    createdAt: "2026-04-01T00:30:00.000Z",
+  },
+});
+
 describe("EnvironmentThreads", () => {
   it.effect("publishes cached data immediately from a warm cache", () =>
     Effect.gen(function* () {
@@ -367,6 +396,39 @@ describe("EnvironmentThreads", () => {
       expect((yield* Ref.get(harness.savedThreads)).at(-1)?.thread.title).toBe("Live title");
       expect((yield* Ref.get(harness.savedThreads)).at(-1)?.snapshotSequence).toBe(2);
     }),
+  );
+
+  it.effect(
+    "applies offset-aware assistant and tool output without advancing the event cursor",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({ cached: BASE_THREAD });
+        yield* Queue.offer(harness.inputs, snapshot(BASE_THREAD));
+        yield* Queue.offer(harness.inputs, assistantOutput(0, "hello "));
+        yield* Queue.offer(harness.inputs, assistantOutput(6, "world"));
+        yield* Queue.offer(harness.inputs, assistantOutput(0, "hello world"));
+        yield* Queue.offer(harness.inputs, toolOutput(0, "line 1\n"));
+        yield* Queue.offer(harness.inputs, toolOutput(7, "line 2\n"));
+        yield* Queue.offer(harness.inputs, titleUpdated("Cursor still accepts sequence two", 2));
+
+        const state = yield* awaitThreadState(
+          harness.observed,
+          (value) =>
+            Option.isSome(value.data) &&
+            value.data.value.title === "Cursor still accepts sequence two" &&
+            value.data.value.messages.some((message) => message.text === "hello world") &&
+            value.data.value.activities.some((activity) =>
+              JSON.stringify(activity.payload).includes("line 2"),
+            ),
+        );
+        const thread = Option.getOrThrow(state.data);
+        expect(thread.messages.find((message) => message.id === "assistant:live")?.streaming).toBe(
+          true,
+        );
+        expect(thread.activities.find((activity) => activity.id.includes("tool-live"))?.kind).toBe(
+          "tool.updated",
+        );
+      }),
   );
 
   it.effect("does not persist active thread snapshots during streaming or teardown", () =>
