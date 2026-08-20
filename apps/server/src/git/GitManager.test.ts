@@ -4819,7 +4819,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".t3code", "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({ hooks: { afterPush: hookCommand } }),
       );
       NodeFS.writeFileSync(NodePath.join(repoDir, "after-push.txt"), "after push\n");
@@ -4831,7 +4830,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           onPrCreate: () => NodeFS.writeFileSync(prStartedMarker, "started\n"),
           prListSequence: [
             "[]",
-            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify([
               {
                 number: 305,
@@ -4866,7 +4864,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".t3code", "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({ hooks: { afterPush: "exit 7" } }),
       );
       yield* runGit(repoDir, ["add", ".t3code/vcs.json"]);
@@ -4901,7 +4898,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".t3code", "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({ hooks: { afterPush: `touch ${shellQuote(marker)}` } }),
       );
       yield* runGit(repoDir, ["add", ".t3code/vcs.json"]);
@@ -4942,7 +4938,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         ghScenario: {
           prListSequence: [
             "[]",
-            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify([
               {
                 number: 304,
