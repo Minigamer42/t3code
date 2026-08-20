@@ -43,6 +43,7 @@ import { cn } from "~/lib/utils";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import {
   buildMenuItems,
+  canRewriteCommitMessages,
   formatGitActionElapsed,
   GIT_ACTION_SUCCESS_VISIBLE_MS,
   type GitActionProgressPresentation,
@@ -121,6 +122,7 @@ import { getSourceControlPresentation, sourceControlIcon } from "~/sourceControl
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useOpenLink } from "~/browser/useOpenLink";
+import { RewriteCommitMessagesDialog } from "./RewriteCommitMessagesDialog";
 
 interface GitActionsControlProps {
   presentation?: "toolbar" | "menu";
@@ -1174,6 +1176,7 @@ export default function GitActionsControl({
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [isRewriteCommitMessagesDialogOpen, setIsRewriteCommitMessagesDialogOpen] = useState(false);
   const [inlineSuccess, setInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
@@ -1850,6 +1853,18 @@ export default function GitActionsControl({
         <GitCommitIcon />
         <MenuItemLabel>Split into logical commits...</MenuItemLabel>
       </MenuItem>
+      <MenuItem
+        density={presentation === "menu" ? "touch" : "default"}
+        disabled={
+          !canWriteSourceControl ||
+          isGitActionRunning ||
+          !canRewriteCommitMessages(gitStatusForActions)
+        }
+        onClick={() => setIsRewriteCommitMessagesDialogOpen(true)}
+      >
+        <GitCommitIcon />
+        <MenuItemLabel>Regenerate commit messages...</MenuItemLabel>
+      </MenuItem>
       {canPublishRepository ? (
         <MenuItem
           density={presentation === "menu" ? "touch" : "default"}
@@ -2182,6 +2197,12 @@ export default function GitActionsControl({
         </DialogPopup>
       </Dialog>
 
+      <RewriteCommitMessagesDialog
+        open={isRewriteCommitMessagesDialogOpen}
+        environmentId={activeEnvironmentId}
+        cwd={gitCwd}
+        onOpenChange={setIsRewriteCommitMessagesDialogOpen}
+      />
       <Dialog
         open={isSplitCommitDialogOpen}
         onOpenChange={(open) => {

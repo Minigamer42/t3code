@@ -10,6 +10,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
+  AuthSourceControlWriteScope,
   ThreadId,
   EnvironmentId,
   ScheduledTaskId,
@@ -60,6 +61,30 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("requires the destination source-control grant to rewrite commit messages", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const rewrite = createCommandPermissions(runtime, WS_METHODS.gitRewriteCommitMessages);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(rewrite.permissionAtom(env))).toBe(false);
+        expect((yield* rewrite.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(true),
+            permissions: [AuthSourceControlWriteScope],
+            scopes: [AuthSourceControlWriteScope],
+          }),
+        );
+        expect(registry.get(rewrite.permissionAtom(env))).toBe(true);
+        yield* rewrite.authorize(registry, env);
+      }),
+    ),
+  );
+
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {
