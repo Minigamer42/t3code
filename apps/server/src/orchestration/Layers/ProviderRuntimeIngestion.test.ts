@@ -2541,7 +2541,9 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("persists one assistant event for a high-volume streamed response", async () => {
-    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const harness = await createHarness({
+      serverSettings: { enableLegacyTokenStreaming: true },
+    });
     const now = "2026-01-01T00:00:00.000Z";
     const chunks = Array.from({ length: 500 }, (_, index) => `chunk-${index};`);
 

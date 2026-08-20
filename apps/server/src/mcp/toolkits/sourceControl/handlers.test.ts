@@ -18,13 +18,13 @@ const invocation: McpInvocationContext.McpInvocationScope = {
   cwd: "/projects/jobagent-worktree",
   capabilities: new Set(["preview", "source-control"]),
   issuedAt: 1,
-  expiresAt: Number.MAX_SAFE_INTEGER,
 };
 
 const client = McpSchema.McpServerClient.of({
   clientId: 1,
+  protocolVersion: "2025-06-18",
   initializePayload: {
-    protocolVersion: "2025-03-26",
+    protocolVersion: "2025-06-18",
     capabilities: {},
     clientInfo: { name: "source-control-test", version: "1.0.0" },
   },

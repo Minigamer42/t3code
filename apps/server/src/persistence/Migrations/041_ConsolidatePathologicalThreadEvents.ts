@@ -25,8 +25,9 @@ interface CompactionGroup {
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
-const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
+const decodeJson = Schema.decodeUnknownOption(UnknownFromJsonString);
+const encodeJson = Schema.encodeSync(UnknownFromJsonString);
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

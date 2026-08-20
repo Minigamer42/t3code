@@ -19,7 +19,6 @@ export interface CommitMessageGenerationInput {
   policy?: TextGenerationPolicy | undefined;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
-  policy?: TextGenerationPolicy | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
 }

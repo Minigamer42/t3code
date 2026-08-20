@@ -215,6 +215,7 @@ describe("buildTurnStartParams", () => {
       const params = yield* buildTurnStartParams({
         threadId: "provider-thread-1",
         runtimeMode: "auto",
+        serverMode: "web",
         prompt: "Ship it",
       });
 

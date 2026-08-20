@@ -78,7 +78,6 @@ export interface WorkLogEntry {
   toolData?: unknown;
   itemType?: ToolLifecycleItemType;
   itemId?: string;
-  toolCallId?: string;
   requestKind?: PendingApproval["requestKind"];
   /** From runtime item / task payload `status` when present (e.g. tool.updated). */
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
@@ -2278,7 +2277,7 @@ function extractToolDetail(
       return null;
     }
 
-    const output = extractToolOutput(payload);
+    const output = extractToolOutput(payload, "command_execution");
     const normalizedOutput = normalizePreviewForComparison(output);
     if (
       output &&

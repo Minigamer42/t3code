@@ -433,7 +433,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     if (item.kind === "live-output") {
       const current = yield* SubscriptionRef.get(state);
       if (Option.isSome(current.data)) {
-        yield* setThread(applyLiveOutput(current.data.value, item.output));
+        yield* setThread(applyLiveOutput(current.data.value, item.output), "keep");
       }
       return;
     }

@@ -3920,6 +3920,14 @@ function ChatViewContent(props: ChatViewProps) {
       void legendListRef.current?.scrollToEnd?.({ animated });
     });
   }, []);
+  const continueFollowingTimelineForNewTurn = useCallback(() => {
+    if (!isAtEndRef.current) return;
+    timelineScrollModeRef.current = "following-end";
+    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+    setTimelineLiveFollowEnabled(true);
+    showScrollDebouncer.current.cancel();
+    setShowScrollToBottom(false);
+  }, []);
   useEffect(() => {
     let removeListeners: (() => void) | null = null;
     let frame: number | null = null;
