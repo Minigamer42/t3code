@@ -14,6 +14,8 @@ import {
   type VcsListRefsInput,
   type VcsListRefsResult,
   type GitManagerServiceError,
+  type GitListRewriteableCommitsInput,
+  type GitListRewriteableCommitsResult,
   type GitPreparePullRequestThreadInput,
   type GitPreparePullRequestThreadResult,
   type GitPullRequestRefInput,
@@ -22,6 +24,8 @@ import {
   type GitResolvePullRequestResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
+  type GitRewriteCommitMessagesInput,
+  type GitRewriteCommitMessagesResult,
   type VcsStatusInput,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
@@ -53,6 +57,12 @@ export class GitWorkflowService extends Context.Service<
       input: GitRunStackedActionInput,
       options?: GitManager.GitRunStackedActionOptions,
     ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+    readonly listRewriteableCommits: (
+      input: GitListRewriteableCommitsInput,
+    ) => Effect.Effect<GitListRewriteableCommitsResult, GitManagerServiceError>;
+    readonly rewriteCommitMessages: (
+      input: GitRewriteCommitMessagesInput,
+    ) => Effect.Effect<GitRewriteCommitMessagesResult, GitManagerServiceError>;
     readonly resolvePullRequest: (
       input: GitPullRequestRefInput,
     ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
@@ -285,6 +295,14 @@ export const make = Effect.gen(function* () {
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),
       ),
+    listRewriteableCommits: routeGitManager(
+      "GitWorkflowService.listRewriteableCommits",
+      gitManager.listRewriteableCommits,
+    ),
+    rewriteCommitMessages: routeGitManager(
+      "GitWorkflowService.rewriteCommitMessages",
+      gitManager.rewriteCommitMessages,
+    ),
     resolvePullRequest: routeGitManager(
       "GitWorkflowService.resolvePullRequest",
       gitManager.resolvePullRequest,

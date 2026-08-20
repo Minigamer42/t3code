@@ -19,5 +19,17 @@ export function createGitEnvironmentAtoms<R, E>(
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
     }),
+    listRewriteableCommits: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:list-rewriteable-commits",
+      tag: WS_METHODS.gitListRewriteableCommits,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    rewriteCommitMessages: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:rewrite-commit-messages",
+      tag: WS_METHODS.gitRewriteCommitMessages,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
   };
 }
