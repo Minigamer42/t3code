@@ -413,6 +413,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: NodeOS.tmpdir(),
         runtimeMode: "full-access",
+        serverMode: "web",
         environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
       });
 
@@ -555,6 +556,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: NodeOS.tmpdir(),
         runtimeMode: "full-access",
+        serverMode: "web",
         environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
       });
 
@@ -638,6 +640,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: NodeOS.tmpdir(),
         runtimeMode: "full-access",
+        serverMode: "web",
         environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
       });
 

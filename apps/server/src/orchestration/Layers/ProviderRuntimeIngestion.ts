@@ -7,7 +7,6 @@ import {
   OrchestrationProposedPlanId,
   CheckpointRef,
   classifyTaskAgentKind,
-  EventId,
   isToolLifecycleItemType,
   ThreadId,
   type ThreadTokenUsageSnapshot,

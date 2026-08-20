@@ -1438,6 +1438,41 @@ describe("MessagesTimeline", () => {
     );
   });
 
+  it("resolves duplicate lifecycle file paths for live summaries", () => {
+    const turnId = TurnId.make("turn-1");
+    const timelineEntries = [
+      {
+        id: "entry-1",
+        kind: "work" as const,
+        createdAt: "2026-03-17T19:12:28.000Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          label: "Changed files",
+          tone: "tool" as const,
+          itemType: "file_change" as const,
+          changedFiles: [
+            "/home/me/projects/jobagent/individuell/target.php",
+            "jobagent/individuell/target.php",
+          ],
+          detail: "/home/me/projects/jobagent/individuell/target.php",
+          turnId,
+          toolLifecycleStatus: "inProgress" as const,
+        },
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={timelineEntries}
+        isWorking
+        runningTurnId={turnId}
+      />,
+    );
+    expect(markup).toContain('aria-label="jobagent/individuell/target.php, tool call running"');
+    expect(markup).not.toContain("+1 more");
+  });
+
   it("keeps mixed-success tool groups neutral", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
