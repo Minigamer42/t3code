@@ -196,6 +196,9 @@ export function resolveQuickAction(
   const terminology = resolveChangeRequestTerminology(gitStatus);
 
   if (!hasBranch) {
+    if (hasChanges) {
+      return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
+    }
     return {
       label: "Commit",
       disabled: true,

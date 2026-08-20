@@ -624,6 +624,22 @@ describe("when: HEAD is detached and there are no local changes", () => {
   });
 });
 
+describe("when: HEAD is detached and there are local changes", () => {
+  it("resolveQuickAction makes commit available", () => {
+    const quick = resolveQuickAction(
+      status({ refName: null, hasWorkingTreeChanges: true, hasUpstream: false }),
+      false,
+    );
+
+    assert.deepEqual(quick, {
+      label: "Commit",
+      disabled: false,
+      kind: "run_action",
+      action: "commit",
+    });
+  });
+});
+
 describe("when: ref has no upstream configured", () => {
   it("resolveQuickAction is disabled when clean, no upstream, and no local commits are ahead", () => {
     const quick = resolveQuickAction(
