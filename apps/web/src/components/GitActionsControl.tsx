@@ -47,6 +47,7 @@ import { cn } from "~/lib/utils";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
+  canRewriteCommitMessages,
   isDuplicatePendingThreadBranchSync,
   type PendingThreadBranchSync,
   type GitActionIconName,
@@ -102,6 +103,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { useOpenLink } from "~/browser/useOpenLink";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
+import { RewriteCommitMessagesDialog } from "./RewriteCommitMessagesDialog";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -1076,6 +1078,7 @@ export default function GitActionsControl({
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [isSplitCommitDialogOpen, setIsSplitCommitDialogOpen] = useState(false);
+  const [isRewriteCommitMessagesDialogOpen, setIsRewriteCommitMessagesDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
@@ -1765,6 +1768,7 @@ export default function GitActionsControl({
   );
 
   const canPublishRepository = isRepo && gitStatusForActions !== null && !hasPrimaryRemote;
+  const canRewriteMessages = canRewriteCommitMessages(gitStatusForActions);
 
   if (!gitCwd) return null;
 
@@ -1907,6 +1911,15 @@ export default function GitActionsControl({
               >
                 <GitCommitIcon />
                 Split into logical commits...
+              </MenuItem>
+              <MenuItem
+                disabled={isGitActionRunning || !canRewriteMessages}
+                onClick={() => {
+                  setIsRewriteCommitMessagesDialogOpen(true);
+                }}
+              >
+                <GitCommitIcon />
+                Regenerate commit messages...
               </MenuItem>
               {canPublishRepository ? (
                 <MenuItem
@@ -2083,6 +2096,13 @@ export default function GitActionsControl({
           </DialogFooter>
         </DialogPopup>
       </Dialog>
+
+      <RewriteCommitMessagesDialog
+        open={isRewriteCommitMessagesDialogOpen}
+        environmentId={activeEnvironmentId}
+        cwd={gitCwd}
+        onOpenChange={setIsRewriteCommitMessagesDialogOpen}
+      />
 
       <PublishRepositoryDialog
         open={isPublishDialogOpen}

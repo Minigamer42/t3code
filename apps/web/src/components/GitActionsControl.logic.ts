@@ -43,6 +43,15 @@ export type DefaultBranchConfirmableAction =
   | "commit_push"
   | "commit_push_pr";
 
+export function canRewriteCommitMessages(gitStatus: VcsStatusResult | null): boolean {
+  if (!gitStatus || gitStatus.refName === null) {
+    return false;
+  }
+  return gitStatus.hasUpstream
+    ? gitStatus.aheadCount > 0
+    : Math.max(gitStatus.aheadCount, gitStatus.aheadOfDefaultCount ?? 0) > 0;
+}
+
 function resolveChangeRequestTerminology(
   gitStatus: VcsStatusResult | null,
 ): ChangeRequestTerminology {
