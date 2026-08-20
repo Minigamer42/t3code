@@ -138,6 +138,8 @@ import {
   VcsListRefsInput,
   VcsListRefsResult,
   GitManagerServiceError,
+  GitListRewriteableCommitsInput,
+  GitListRewriteableCommitsResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   VcsPullInput,
@@ -146,6 +148,8 @@ import {
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
+  GitRewriteCommitMessagesInput,
+  GitRewriteCommitMessagesResult,
   VcsStatusInput,
   VcsBranchStatus,
   VcsStatusSubscriptionInput,
@@ -470,6 +474,8 @@ export const WS_METHODS = {
   vcsInit: "vcs.init",
 
   gitRunStackedAction: "git.runStackedAction",
+  gitListRewriteableCommits: "git.listRewriteableCommits",
+  gitRewriteCommitMessages: "git.rewriteCommitMessages",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -1574,6 +1580,18 @@ const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   stream: true,
 });
 
+const WsGitListRewriteableCommitsRpc = Rpc.make(WS_METHODS.gitListRewriteableCommits, {
+  payload: GitListRewriteableCommitsInput,
+  success: GitListRewriteableCommitsResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
+const WsGitRewriteCommitMessagesRpc = Rpc.make(WS_METHODS.gitRewriteCommitMessages, {
+  payload: GitRewriteCommitMessagesInput,
+  success: GitRewriteCommitMessagesResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
 const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
   payload: GitPullRequestRefInput,
   success: GitResolvePullRequestResult,
@@ -2270,6 +2288,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
+  WsGitListRewriteableCommitsRpc,
+  WsGitRewriteCommitMessagesRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,
