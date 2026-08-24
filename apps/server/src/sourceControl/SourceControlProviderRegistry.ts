@@ -16,6 +16,7 @@ import * as BuiltInDrivers from "./builtInDrivers.ts";
 import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import {
   probeSourceControlProvider,
+  probeSourceControlProviderAvailability,
   refineUnknownRemoteProvider,
   type SourceControlProviderDiscoverySpec,
 } from "@t3tools/source-control-core/server/discovery";
@@ -26,6 +27,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 const PROVIDER_DETECTION_CACHE_CAPACITY = 2_048;
 const PROVIDER_DETECTION_CACHE_TTL = Duration.seconds(5);
+const PROVIDER_AVAILABILITY_CACHE_TTL = Duration.seconds(30);
 
 export interface SourceControlProviderRegistration {
   readonly kind: SourceControlProviderKind;
@@ -58,6 +60,8 @@ export class SourceControlProviderRegistry extends Context.Service<
       SourceControlProvider.SourceControlProvider["Service"],
       SourceControlProviderError
     >;
+    /** Whether the provider's local executable is available; cached for 30 seconds, auth aside. */
+    readonly isAvailable: (kind: SourceControlProviderKind) => Effect.Effect<boolean>;
     readonly discover: Effect.Effect<ReadonlyArray<SourceControlProviderDiscoveryItem>>;
   }
 >()("t3/sourceControl/SourceControlProviderRegistry") {}
@@ -205,9 +209,33 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       SourceControlProvider.SourceControlProvider["Service"]
     >(registrations.map((registration) => [registration.kind, registration.provider]));
     const discoverySpecs = registrations.map((registration) => registration.discovery);
+    const discoverySpecsByKind = new Map(discoverySpecs.map((spec) => [spec.kind, spec] as const));
+    const providerAvailabilityByKind = new Map<SourceControlProviderKind, Effect.Effect<boolean>>();
+    for (const [kind, spec] of discoverySpecsByKind) {
+      providerAvailabilityByKind.set(
+        kind,
+        yield* Effect.cachedWithTTL(
+          Effect.suspend(() =>
+            probeSourceControlProviderAvailability({
+              spec,
+              process,
+              cwd: config.cwd,
+            }),
+          ),
+          PROVIDER_AVAILABILITY_CACHE_TTL,
+        ),
+      );
+    }
 
     const get: SourceControlProviderRegistry["Service"]["get"] = (kind) =>
       Effect.succeed(providers.get(kind) ?? unsupportedProvider(kind));
+
+    const isAvailable = Effect.fn("SourceControlProviderRegistry.isAvailable")(function* (
+      kind: SourceControlProviderKind,
+    ) {
+      const availability = providerAvailabilityByKind.get(kind);
+      return availability === undefined ? false : yield* availability;
+    });
 
     const detectProviderContext = Effect.fn("SourceControlProviderRegistry.detectProviderContext")(
       function* (cwd: string) {
@@ -286,6 +314,7 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       get,
       resolveHandle,
       resolve: (input) => resolveHandle(input).pipe(Effect.map((handle) => handle.provider)),
+      isAvailable,
       discover: Effect.forEach(
         discoverySpecs,
         (spec) =>

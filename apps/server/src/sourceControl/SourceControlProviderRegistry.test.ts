@@ -7,7 +7,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import { ChildProcessSpawner } from "effect/process";
-import { VcsRepositoryDetectionError } from "@t3tools/contracts";
+import * as TestClock from "effect/testing/TestClock";
+import { VcsProcessSpawnError, VcsRepositoryDetectionError } from "@t3tools/contracts";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as ServerConfig from "../config.ts";
@@ -162,6 +163,45 @@ it.effect("routes directly by provider kind for remote-first workflows", () =>
     const provider = yield* registry.get(SourceControlProviderKind.make("github"));
 
     assert.strictEqual(provider.kind, "github");
+  }),
+);
+
+it.effect("caches missing provider executables across availability checks", () =>
+  Effect.gen(function* () {
+    const ghProbes: string[] = [];
+    const registry = yield* makeRegistry({
+      remotes: [{ name: "origin", url: "git@github.com:pingdotgg/t3code.git" }],
+      process: {
+        run: (input) => {
+          if (input.command !== "gh") {
+            return Effect.succeed(processOutput(""));
+          }
+          return Effect.sync(() => {
+            ghProbes.push(`${input.operation} ${input.args.join(" ")}`);
+          }).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new VcsProcessSpawnError({
+                  operation: input.operation,
+                  command: input.command,
+                  cwd: input.cwd,
+                  cause: new Error("gh not found"),
+                }),
+              ),
+            ),
+          );
+        },
+      },
+    });
+
+    assert.strictEqual(yield* registry.isAvailable("github"), false);
+    assert.strictEqual(yield* registry.isAvailable("github"), false);
+    yield* TestClock.adjust("31 seconds");
+    assert.strictEqual(yield* registry.isAvailable("github"), false);
+    assert.deepStrictEqual(ghProbes, [
+      "source-control.discovery.probe --version",
+      "source-control.discovery.probe --version",
+    ]);
   }),
 );
 
