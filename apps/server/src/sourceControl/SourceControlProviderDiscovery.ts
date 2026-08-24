@@ -276,6 +276,24 @@ export function probeSourceControlProvider(input: {
   );
 }
 
+export const probeSourceControlProviderAvailability = Effect.fn(
+  "probeSourceControlProviderAvailability",
+)(function* (input: {
+  readonly spec: SourceControlProviderDiscoverySpec;
+  readonly process: VcsProcess.VcsProcess["Service"];
+  readonly cwd: string;
+}) {
+  if (input.spec.type === "api") {
+    return true;
+  }
+
+  return yield* probeCli({
+    spec: input.spec,
+    process: input.process,
+    cwd: input.cwd,
+  }).pipe(Effect.map((item) => item.status === "available"));
+});
+
 export const refineUnknownRemoteProvider = Effect.fn("refineUnknownRemoteProvider")(
   function* (input: {
     readonly specs: ReadonlyArray<SourceControlProviderDiscoverySpec>;

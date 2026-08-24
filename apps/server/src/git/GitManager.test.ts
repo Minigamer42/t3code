@@ -29,6 +29,7 @@ import {
   GitCommandError,
   ProviderDriverKind,
   ProviderInstanceId,
+  SourceControlProviderError,
   TextGenerationError,
 } from "@t3tools/contracts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
@@ -39,9 +40,9 @@ import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
 import * as GitLabSourceControlProvider from "../sourceControl/GitLabSourceControlProvider.ts";
-import type {
+import {
   SourceControlProvider,
-  SourceControlProviderContext,
+  type SourceControlProviderContext,
 } from "../sourceControl/SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
@@ -661,6 +662,8 @@ function makeManager(input?: {
   sourceControlProvider?: SourceControlProvider["Service"];
   resolvedSourceControlContext?: SourceControlProviderContext | null;
   sourceControlResolveCalls?: string[];
+  sourceControlProviderAvailable?: boolean;
+  sourceControlProviderKind?: "github" | "unknown";
   textGeneration?: Partial<FakeGitTextGeneration>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
@@ -704,18 +707,38 @@ function makeManager(input?: {
       ? GitHubSourceControlProvider.make
       : Effect.succeed(input.sourceControlProvider)
     ).pipe(
-      Effect.map((provider) =>
-        SourceControlProviderRegistry.SourceControlProviderRegistry.of({
+      Effect.map((provider) => {
+        const resolvedProvider =
+          input?.sourceControlProviderKind === "unknown"
+            ? SourceControlProvider.of({
+                ...provider,
+                kind: "unknown",
+                listChangeRequests: (request) =>
+                  Effect.fail(
+                    new SourceControlProviderError({
+                      provider: "unknown",
+                      operation: "listChangeRequests",
+                      cwd: request.cwd,
+                      detail: "No unknown source control provider is registered.",
+                    }),
+                  ),
+              })
+            : provider;
+        return SourceControlProviderRegistry.SourceControlProviderRegistry.of({
           get: () => Effect.succeed(provider),
           resolveHandle: ({ cwd }) =>
             Effect.sync(() => {
               input?.sourceControlResolveCalls?.push(cwd);
-              return { provider, context: input?.resolvedSourceControlContext ?? null };
+              return {
+                provider: resolvedProvider,
+                context: input?.resolvedSourceControlContext ?? null,
+              };
             }),
-          resolve: () => Effect.succeed(provider),
+          resolve: () => Effect.succeed(resolvedProvider),
+          isAvailable: () => Effect.succeed(input?.sourceControlProviderAvailable ?? true),
           discover: Effect.succeed([]),
-        }),
-      ),
+        });
+      }),
       Effect.provide(Layer.succeed(GitHubCli.GitHubCli, gitHubCli)),
     ),
   );
@@ -2571,6 +2594,56 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("status skips PR inspection when the provider executable is unavailable", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/status-no-gh-probe"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/status-no-gh-probe"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderAvailable: false,
+      });
+      const logs: string[] = [];
+      const logger = Logger.make<unknown, void>(({ message }) => {
+        logs.push(String(message));
+      });
+
+      const status = yield* manager
+        .status({ cwd: repoDir })
+        .pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+
+      expect(status.pr).toBeNull();
+      expect(ghCalls).toHaveLength(0);
+      expect(logs.some((message) => message.includes("PR lookup failed"))).toBe(false);
+    }),
+  );
+
+  it.effect("status quietly skips PR inspection when no hosting provider is resolved", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderKind: "unknown",
+      });
+      const logs: string[] = [];
+      const logger = Logger.make<unknown, void>(({ message }) => {
+        logs.push(String(message));
+      });
+
+      const status = yield* manager
+        .status({ cwd: repoDir })
+        .pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+
+      expect(status.hasPrimaryRemote).toBe(false);
+      expect(status.pr).toBeNull();
+      expect(ghCalls).toHaveLength(0);
+      expect(logs.some((message) => message.includes("PR lookup failed"))).toBe(false);
+    }),
+  );
+
   it.effect("status logs actionable provider detail without exposing the upstream cause", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -2606,6 +2679,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const warning = logs.find((entry) => entry.message.includes("PR lookup failed"));
       expect(warning?.annotations).toMatchObject({
         operation: "lookupStatusPr",
+        cwd: repoDir,
         branch: "feature/status-rate-limited",
         errorTag: "SourceControlProviderError",
         provider: "github",
