@@ -734,6 +734,15 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
+  const sourceControlProviderForStatus = Effect.fn("GitManager.sourceControlProviderForStatus")(
+    function* (cwd: string) {
+      const provider = yield* sourceControlProvider(cwd);
+      if (provider.kind === "unknown") {
+        return null;
+      }
+      return (yield* sourceControlProviders.isAvailable(provider.kind)) ? provider : null;
+    },
+  );
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
 
   const readRecentCommitSubjects = (cwd: string) =>
@@ -1242,6 +1251,7 @@ export const make = Effect.gen(function* () {
         Effect.logWarning("PR lookup failed; keeping last known PR state.").pipe(
           Effect.annotateLogs({
             operation: "lookupStatusPr",
+            cwd,
             branch: details.branch,
             errorTag:
               typeof error === "object" && error !== null && "_tag" in error
@@ -1513,10 +1523,14 @@ export const make = Effect.gen(function* () {
     cwd: string,
     headContext: BranchHeadContext,
   ) {
+    const provider = yield* sourceControlProviderForStatus(cwd);
+    if (provider === null) {
+      return null;
+    }
     const parsedByNumber = new Map<number, PullRequestInfo>();
 
     for (const headSelector of headContext.headSelectors) {
-      const pullRequests = yield* (yield* sourceControlProvider(cwd)).listChangeRequests({
+      const pullRequests = yield* provider.listChangeRequests({
         cwd,
         headSelector,
         state: "all",
