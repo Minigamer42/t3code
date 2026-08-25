@@ -1439,12 +1439,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return remoteName;
   });
 
-  const resolveBaseBranchForNoUpstream = Effect.fn("resolveBaseBranchForNoUpstream")(function* (
-    cwd: string,
-    refName: string,
-  ) {
+  const resolveBaseRef: GitVcsDriver.GitVcsDriver["Service"]["resolveBaseRef"] = Effect.fn(
+    "resolveBaseRef",
+  )(function* (cwd, refName) {
     const configuredBaseBranch = yield* runGitStdout(
-      "GitVcsDriver.resolveBaseBranchForNoUpstream.config",
+      "GitVcsDriver.resolveBaseRef.config",
       cwd,
       ["config", "--get", `branch.${refName}.gh-merge-base`],
       true,
@@ -1496,7 +1495,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     cwd: string,
     refName: string,
   ) {
-    const baseRef = yield* resolveBaseBranchForNoUpstream(cwd, refName);
+    const baseRef = yield* resolveBaseRef(cwd, refName);
     if (!baseRef) {
       return 0;
     }
@@ -1984,7 +1983,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         };
       }
 
-      const comparableBaseBranch = yield* resolveBaseBranchForNoUpstream(cwd, branch).pipe(
+      const comparableBaseBranch = yield* resolveBaseRef(cwd, branch).pipe(
         Effect.orElseSucceed(() => null),
       );
       if (comparableBaseBranch) {
@@ -2226,9 +2225,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const baseRef =
       input.baseRef ??
       (branch
-        ? yield* resolveBaseBranchForNoUpstream(input.cwd, branch).pipe(
-            Effect.orElseSucceed(() => null),
-          )
+        ? yield* resolveBaseRef(input.cwd, branch).pipe(Effect.orElseSucceed(() => null))
         : null);
 
     const dirtyTrackedResult = yield* executeGit(
@@ -3214,6 +3211,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     status,
     statusDetails,
     statusDetailsLocal,
+    resolveBaseRef,
     statusDetailsRemote,
     prepareCommitContext,
     commit: (cwd, subject, body, options) =>
