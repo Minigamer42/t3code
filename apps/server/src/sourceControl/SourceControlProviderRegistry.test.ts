@@ -168,16 +168,16 @@ it.effect("routes directly by provider kind for remote-first workflows", () =>
 
 it.effect("caches missing provider executables across availability checks", () =>
   Effect.gen(function* () {
-    const ghProbes: string[] = [];
+    const glabProbes: string[] = [];
     const registry = yield* makeRegistry({
       remotes: [{ name: "origin", url: "git@github.com:pingdotgg/t3code.git" }],
       process: {
         run: (input) => {
-          if (input.command !== "gh") {
+          if (input.command !== "glab") {
             return Effect.succeed(processOutput(""));
           }
           return Effect.sync(() => {
-            ghProbes.push(`${input.operation} ${input.args.join(" ")}`);
+            glabProbes.push(`${input.operation} ${input.args.join(" ")}`);
           }).pipe(
             Effect.andThen(
               Effect.fail(
@@ -185,7 +185,7 @@ it.effect("caches missing provider executables across availability checks", () =
                   operation: input.operation,
                   command: input.command,
                   cwd: input.cwd,
-                  cause: new Error("gh not found"),
+                  cause: new Error("glab not found"),
                 }),
               ),
             ),
@@ -194,11 +194,12 @@ it.effect("caches missing provider executables across availability checks", () =
       },
     });
 
-    assert.strictEqual(yield* registry.isAvailable("github"), false);
-    assert.strictEqual(yield* registry.isAvailable("github"), false);
+    assert.strictEqual(yield* registry.isAvailable("gitlab"), false);
+    assert.strictEqual(yield* registry.isAvailable("gitlab"), false);
     yield* TestClock.adjust("31 seconds");
-    assert.strictEqual(yield* registry.isAvailable("github"), false);
-    assert.deepStrictEqual(ghProbes, [
+    assert.strictEqual(yield* registry.isAvailable("gitlab"), false);
+    assert.strictEqual(yield* registry.isAvailable("github"), true);
+    assert.deepStrictEqual(glabProbes, [
       "source-control.discovery.probe --version",
       "source-control.discovery.probe --version",
     ]);
