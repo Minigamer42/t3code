@@ -3228,6 +3228,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.previousHeadSha).toBe(beforeHead);
       expect(result.headSha).not.toBe(beforeHead);
       expect(result.rewrittenCount).toBe(2);
+      expect(result.subjects).toEqual(["Describe alpha source", "Describe beta source"]);
       expect(generatedPatches).toHaveLength(2);
       expect(generatedPatches[0]).toContain("alpha source");
       expect(generatedPatches[0]).not.toContain("beta source");
