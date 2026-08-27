@@ -2841,7 +2841,7 @@ export const make = Effect.gen(function* () {
         ),
       );
     const generatedMessages = yield* Effect.gen(function* () {
-      const messages = new Map<string, string>();
+      const messages = new Map<string, { readonly message: string; readonly subject: string }>();
       for (const commit of resolved.commits) {
         if (!selectedShas.has(commit.sha)) {
           continue;
@@ -2857,7 +2857,10 @@ export const make = Effect.gen(function* () {
             modelSelection,
           })
           .pipe(Effect.map(sanitizeCommitMessage));
-        messages.set(commit.sha, formatCommitMessage(generated.subject, generated.body));
+        messages.set(commit.sha, {
+          message: formatCommitMessage(generated.subject, generated.body),
+          subject: generated.subject,
+        });
       }
       return messages;
     }).pipe(
@@ -2897,7 +2900,7 @@ export const make = Effect.gen(function* () {
       if (previousNewSha !== null && parents.length > 0) {
         parents[0] = previousNewSha;
       }
-      const message = generatedMessages.get(commit.sha) ?? commit.message;
+      const message = generatedMessages.get(commit.sha)?.message ?? commit.message;
       const result = yield* gitCore.execute({
         operation: "GitManager.rewriteCommitMessages.commitTree",
         cwd: input.cwd,
@@ -2978,6 +2981,10 @@ export const make = Effect.gen(function* () {
       previousHeadSha: input.expectedHeadSha,
       headSha: newHeadSha,
       rewrittenCount: selectedShas.size,
+      subjects: resolved.commits.flatMap((commit) => {
+        const subject = generatedMessages.get(commit.sha)?.subject;
+        return subject === undefined ? [] : [subject];
+      }),
     };
   });
 

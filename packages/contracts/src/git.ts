@@ -363,6 +363,7 @@ export const GitRewriteCommitMessagesResult = Schema.Struct({
   previousHeadSha: GitCommitSha,
   headSha: GitCommitSha,
   rewrittenCount: PositiveInt,
+  subjects: Schema.Array(TrimmedNonEmptyStringSchema),
 });
 export type GitRewriteCommitMessagesResult = typeof GitRewriteCommitMessagesResult.Type;
 
