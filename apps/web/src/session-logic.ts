@@ -479,6 +479,8 @@ export function deriveWorkLogEntries(
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.kind === "turn.plan.updated") continue;
+    if (activity.kind === "provider.turn.started") continue;
+    if (activity.kind === "provider.turn.completed") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isNoContentRuntimeWarning(activity)) continue;
     if (isPlanBoundaryToolActivity(activity)) continue;

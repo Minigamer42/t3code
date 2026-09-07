@@ -477,6 +477,25 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("omits provider turn lifecycle entries", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "provider-turn-start",
+        kind: "provider.turn.started",
+        summary: "Provider turn started",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "provider-turn-complete",
+        kind: "provider.turn.completed",
+        summary: "Provider turn completed",
+        tone: "info",
+      }),
+    ];
+
+    expect(deriveWorkLogEntries(activities)).toEqual([]);
+  });
+
   it("keeps tool started and completed entries separate", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
