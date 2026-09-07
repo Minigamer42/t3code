@@ -1246,8 +1246,7 @@ function deriveThreadFeedRunFolds(
       group.entries
         .filter(
           (entry) =>
-            entry.id !== terminalAssistantId &&
-            !(entry.type === "message" && retainedAnswerIds.has(entry.message.id)) &&
+            entry.type !== "message" &&
             entry.type !== "html-render" &&
             entry.type !== "sent-message" &&
             entry.type !== "mcp-app" &&

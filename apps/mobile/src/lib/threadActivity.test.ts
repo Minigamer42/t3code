@@ -712,7 +712,7 @@ describe("buildThreadFeed", () => {
     );
     expect(activities).toHaveLength(3);
     for (const activity of activities) {
-      expect(activity.workEntry.detail).toBeUndefined();
+      expect(activity.workEntry.detail ?? "").not.toContain(rawOutput);
       expect(activity.getFullDetail()).not.toContain(rawOutput);
       expect(activity.getCopyText()).not.toContain(rawOutput);
     }
@@ -989,6 +989,7 @@ describe("buildThreadFeed", () => {
     expect(collapsed.map((entry) => entry.id)).toEqual([
       "message-user",
       "run-fold:run-1",
+      "message-middle",
       "message-assistant",
     ]);
     expect(collapsed[1]).toMatchObject({

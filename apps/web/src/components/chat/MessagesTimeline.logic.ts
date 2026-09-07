@@ -1171,7 +1171,7 @@ function deriveTurnFolds(input: {
     // Folded dividers lose their place in the turn, so only the latest stays visible.
     const visibleCompactionId = group.entries.findLast(timelineEntryIsCompaction)?.id;
     for (const [index, entry] of group.entries.entries()) {
-      if (entry.id === group.terminalEntry?.id) {
+      if (entry.kind === "message") {
         continue;
       }
       const isCompaction = timelineEntryIsCompaction(entry);
