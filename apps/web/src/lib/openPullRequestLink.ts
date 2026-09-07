@@ -124,9 +124,9 @@ export function findProjectOnChangeRequestHost(
  * own, since the panel is told which one to show.
  */
 export function shouldOpenPullRequestExternally(
-  event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey">,
+  event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey"> & { readonly button?: number },
 ): boolean {
-  return event.metaKey || event.ctrlKey;
+  return event.metaKey || event.ctrlKey || event.button === 1;
 }
 
 export function useOpenChangeRequestLink(
@@ -266,7 +266,10 @@ export function useOpenPrLink(threadRef?: ScopedThreadRef) {
 
       // No project to show it in, so it is an ordinary link and follows the
       // "Open links in" setting; the modifier still forces the system browser.
-      void openLink(prUrl, { event, threadRef: targetThreadRef }).catch((error: unknown) => {
+      void openLink(prUrl, {
+        event: { metaKey: event.metaKey, ctrlKey: event.ctrlKey || event.button === 1 },
+        threadRef: targetThreadRef,
+      }).catch((error: unknown) => {
         console.error(error);
         toastManager.add(
           stackedThreadToast({

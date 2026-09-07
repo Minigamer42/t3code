@@ -395,6 +395,9 @@ export function ThreadDetailsPrRow({
             part={part}
             aria-label={openAriaLabel}
             onClick={onOpen}
+            onAuxClick={(event) => {
+              if (event.button === 1) onOpen(event);
+            }}
           />
         }
       >
