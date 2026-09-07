@@ -665,6 +665,42 @@ describe("resolveAssistantMessageCopyState", () => {
 });
 
 describe("deriveMessagesTimelineRows", () => {
+  it("keeps each tool in its own main-list row when tools are inline", () => {
+    const runId = RunId.make("inline-run");
+    const at = "2026-10-01T06:19:10Z";
+    const timelineEntries: TimelineEntry[] = ["completed", "inProgress"].map((status, index) => ({
+      kind: "work",
+      id: `tool-${index}`,
+      createdAt: at,
+      entry: {
+        id: `tool-${index}`,
+        runId,
+        createdAt: at,
+        label: "Command",
+        tone: "tool",
+        command: "echo test",
+        toolLifecycleStatus: status as "completed" | "inProgress",
+      },
+    }));
+    for (const isWorking of [true, false]) {
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries,
+        runningRunId: runId,
+        isWorking,
+        toolCallsInline: true,
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
+      expect(
+        rows
+          .filter((row) => row.kind === "work")
+          .map((row) => row.groupedEntries.map((entry) => entry.id)),
+      ).toEqual([["tool-0"], ["tool-1"]]);
+      expect(rows.some((row) => row.kind === "work-toggle" || row.kind === "work-live")).toBe(
+        false,
+      );
+    }
+  });
   it("stops stranded thinking after a steer and follows the next thought or tool", () => {
     const runId = RunId.make("steered-run");
     const at = "2026-10-01T06:19:10Z";

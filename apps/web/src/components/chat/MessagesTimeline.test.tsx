@@ -2216,7 +2216,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("Work Log");
   });
 
-  it("keeps the collapsed summary icon neutral when the group ends in a failure", () => {
+  it("keeps completed and failed tools individually visible", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -2251,10 +2251,10 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran 2 commands");
+    expect(markup).toContain("Run tests");
+    expect(markup).toContain("Run lint");
     expect(markup).toContain("lucide-terminal");
     expect(markup).not.toContain("lucide-x");
-    expect(markup).not.toContain("text-destructive");
     // The failure stays discoverable for screen readers.
     expect(markup).toContain("tool call failed");
   });
@@ -2305,7 +2305,9 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran 2 commands and received 1 update");
+    expect(markup).toContain("Run search");
+    expect(markup).toContain("Status updated");
+    expect(markup).toContain("Run tests");
     expect(markup).not.toContain('aria-label="Hidden work includes a failure"');
   });
 
@@ -2593,7 +2595,8 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain('data-v2-item-type="command_execution"');
     expect(markup).toContain('data-v2-item-visibility="inherited"');
-    expect(markup).toContain("Received 1 update and ran 1 command");
+    expect(markup).toContain("Session started");
+    expect(markup).toContain("pwd");
   });
 
   it("renders T3 MCP dynamic tools with the product logo and pretty name", async () => {
@@ -2787,7 +2790,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('data-testid="file-diff"');
   });
 
-  it("collapses settled tool runs behind a generated summary toggle", () => {
+  it("keeps settled commands visible without a group toggle", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -2824,10 +2827,10 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran 2 commands");
+    expect(markup).not.toContain("Ran 2 commands");
     expect(markup).toContain('aria-expanded="false"');
-    // Entries stay hidden until the toggle expands the group.
-    expect(markup).not.toContain("vp lint");
+    expect(markup).toContain("vp lint");
+    expect(markup).toContain("vp test run");
   });
 
   it("renders a muted failure marker for failed tool lifecycle entries", () => {

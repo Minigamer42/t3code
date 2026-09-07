@@ -929,6 +929,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         expandedRunIds: visibleExpandedRunIds,
         expandedAttemptIds: visibleExpandedAttemptIds,
         expandedWorkGroupIds,
+        toolCallsInline: true,
         isWorking,
         runlessWorkActive,
         activeTurnStartedAt,
@@ -3548,7 +3549,13 @@ const WorkGroupSection = memo(function WorkGroupSection({
     [disclosureAnchorKey, onToggleWorkEntry],
   );
   const nonEmptyEntries = useMemo(
-    () => groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry, isExpandedToolGroup)),
+    () =>
+      groupedEntries.filter((entry) =>
+        workEntryIsVisibleInGroup(
+          entry,
+          isExpandedToolGroup || entry.toolLifecycleStatus === "inProgress",
+        ),
+      ),
     [groupedEntries, isExpandedToolGroup],
   );
 

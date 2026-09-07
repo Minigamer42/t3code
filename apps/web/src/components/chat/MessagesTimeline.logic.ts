@@ -1411,6 +1411,8 @@ export function deriveMessagesTimelineRows(input: {
   expandedRunIds?: ReadonlySet<RunId>;
   expandedAttemptIds?: ReadonlySet<RunAttemptId>;
   expandedWorkGroupIds?: ReadonlySet<string>;
+  /** Put each tool in the main virtualized list instead of a nested group. */
+  toolCallsInline?: boolean;
   isWorking: boolean;
   /**
    * The live work has no app run (a provider-native subagent thread), so
@@ -1502,7 +1504,7 @@ export function deriveMessagesTimelineRows(input: {
   // and once everything settles it keeps the latest tool in past tense
   // instead of vanishing (#8984).
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
-  if (input.isWorking && (unsettledRunId !== null || runlessWorkActive)) {
+  if (!input.toolCallsInline && input.isWorking && (unsettledRunId !== null || runlessWorkActive)) {
     let tailAttemptId: string | null | undefined;
     for (let index = timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
       const entry = timelineEntries[index]!;
@@ -1674,6 +1676,25 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (timelineEntry.kind === "work") {
+      if (input.toolCallsInline) {
+        const entry = timelineEntry.entry;
+        if (
+          workEntryIsVisibleInGroup(
+            entry,
+            workEntryIsInActiveRun(entry) || entry.toolLifecycleStatus === "inProgress",
+          )
+        ) {
+          nextRows.push({
+            kind: "work",
+            id: timelineEntry.id,
+            createdAt: timelineEntry.createdAt,
+            groupedEntries: [entry],
+            isExpandedToolGroup: false,
+          });
+          hasActivityRow ||= workEntryIsInActiveRun(entry);
+        }
+        continue;
+      }
       if (
         (timelineEntry.entry.runId != null && failedRunIds.has(timelineEntry.entry.runId)) ||
         (timelineEntry.entry.itemType === "error" &&
