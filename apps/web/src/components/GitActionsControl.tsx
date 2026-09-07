@@ -1634,6 +1634,12 @@ export default function GitActionsControl({
       void openExistingPr();
       return;
     }
+    if (quickAction.kind === "open_commit_dialog") {
+      setExcludedFiles(new Set());
+      setIsEditingFiles(false);
+      setIsCommitDialogOpen(true);
+      return;
+    }
     if (quickAction.kind === "open_publish") {
       setIsPublishDialogOpen(true);
       return;

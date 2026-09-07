@@ -26,7 +26,7 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_pr" | "open_publish" | "show_hint";
+  kind: "run_action" | "run_pull" | "open_pr" | "open_publish" | "open_commit_dialog" | "show_hint";
   action?: GitStackedAction;
   hint?: string;
 }
@@ -217,6 +217,9 @@ export function resolveQuickAction(
   }
 
   if (hasChanges) {
+    if (isDefaultRef) {
+      return { label: "Commit", disabled: false, kind: "open_commit_dialog" };
+    }
     return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
   }
 
