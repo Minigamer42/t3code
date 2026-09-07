@@ -1736,7 +1736,7 @@ describe("buildThreadFeed", () => {
     expect(serializedToolOutputs).toBe(1);
   });
 
-  it("keeps the first and terminal assistant messages visible around settled work", () => {
+  it("folds settled turn work while keeping assistant messages visible", () => {
     const turnId = TurnId.make("turn-1");
     const thread = makeThread({
       id: ThreadId.make("thread-3"),
@@ -1833,7 +1833,7 @@ describe("buildThreadFeed", () => {
     expect(collapsed[1]).toMatchObject({ type: "turn-fold", label: "Worked for 17s" });
   });
 
-  it("folds assistant messages between the first and terminal messages", () => {
+  it("keeps assistant messages between the first and terminal messages visible", () => {
     const turnId = TurnId.make("turn-1");
     const thread = makeThread({
       id: ThreadId.make("thread-middle-message"),
@@ -1883,7 +1883,7 @@ describe("buildThreadFeed", () => {
 
     expect(rows.map((entry) => entry.id)).toEqual([
       "assistant-first",
-      "turn-fold:turn-1",
+      "assistant-middle",
       "assistant-final",
     ]);
   });
