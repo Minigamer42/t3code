@@ -44,7 +44,8 @@ describe("projectActivityPayload", () => {
     expect(data.somethingClientNeverReads).toBeUndefined();
   });
 
-  it("keeps a bounded Codex command output summary", () => {
+  it("keeps complete Codex command output", () => {
+    const output = `hello from codex\n${"x".repeat(5000)}`;
     const projected = projectActivityPayload(
       activity({
         itemType: "command_execution",
@@ -52,7 +53,7 @@ describe("projectActivityPayload", () => {
           item: {
             command: "/bin/zsh -lc 'printf hello'",
             processId: "18604",
-            aggregatedOutput: `hello from codex\n${"x".repeat(5000)}`,
+            aggregatedOutput: output,
           },
         },
       }),
@@ -61,40 +62,19 @@ describe("projectActivityPayload", () => {
     expect(data.item).toEqual({
       command: "/bin/zsh -lc 'printf hello'",
       processId: "18604",
-      aggregatedOutput: "hello from codex",
-    });
-    expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
-  });
-
-  it("keeps preview normalization and fence-only fallback while scanning lines", () => {
-    const preview = projectActivityPayload(
-      activity({
-        itemType: "command_execution",
-        data: { rawOutput: `\`\`\`\n  actual\tresult  \n${"x".repeat(5000)}` },
-      }),
-    );
-    const fences = projectActivityPayload(
-      activity({
-        itemType: "command_execution",
-        data: { rawOutput: "```\r\n \t \n```\n" },
-      }),
-    );
-
-    expect((preview.payload as { data: { rawOutput: unknown } }).data.rawOutput).toEqual({
-      content: "actual result",
-    });
-    expect((fences.payload as { data: { rawOutput: unknown } }).data.rawOutput).toEqual({
-      content: "2 lines",
+      aggregatedOutput: output,
     });
   });
 
-  it("keeps bounded Claude and ACP command output summaries", () => {
+  it("keeps complete Claude and ACP command output", () => {
+    const claudeOutput = `hello from claude\n${"y".repeat(5000)}`;
+    const acpOutput = `hello from acp\n${"z".repeat(5000)}`;
     const claude = projectActivityPayload(
       activity({
         itemType: "command_execution",
         data: {
           command: "printf hello",
-          rawOutput: { stdout: `hello from claude\n${"y".repeat(5000)}` },
+          rawOutput: { stdout: claudeOutput },
         },
       }),
     );
@@ -106,7 +86,7 @@ describe("projectActivityPayload", () => {
           content: [
             {
               type: "content",
-              content: { type: "text", text: `hello from acp\n${"z".repeat(5000)}` },
+              content: { type: "text", text: acpOutput },
             },
           ],
         },
@@ -115,13 +95,12 @@ describe("projectActivityPayload", () => {
 
     const claudeData = (claude.payload as Record<string, unknown>).data as Record<string, unknown>;
     const acpData = (acp.payload as Record<string, unknown>).data as Record<string, unknown>;
-    expect(claudeData.rawOutput).toEqual({ content: "hello from claude" });
-    expect(acpData.rawOutput).toEqual({ content: "hello from acp" });
-    expect(JSON.stringify(claude.payload).length).toBeLessThan(500);
-    expect(JSON.stringify(acp.payload).length).toBeLessThan(500);
+    expect(claudeData.rawOutput).toEqual({ content: claudeOutput });
+    expect(acpData.rawOutput).toEqual({ content: acpOutput });
   });
 
-  it("keeps bounded Claude command input and result summaries", () => {
+  it("keeps Claude command input and complete result output", () => {
+    const output = `tests passed\n${"x".repeat(5_000)}`;
     const claude = projectActivityPayload(
       activity({
         itemType: "command_execution",
@@ -159,14 +138,13 @@ describe("projectActivityPayload", () => {
       data: {
         toolName: "Bash",
         command: "vp test run",
-        rawOutput: { content: "tests passed" },
+        rawOutput: { content: output },
       },
     });
     expect(openCode.payload).toMatchObject({
       toolCallId: "opencode-call-1",
       data: { command: "vp lint" },
     });
-    expect(JSON.stringify(claude.payload).length).toBeLessThan(250);
     expect(JSON.stringify(openCode.payload).length).toBeLessThan(200);
   });
 
@@ -197,7 +175,8 @@ describe("projectActivityPayload", () => {
     expect(textRead.payload).not.toMatchObject({ data: { imagePath: expect.anything() } });
   });
 
-  it("slims Codex-shaped mcp_tool_call items to rendered fields plus a result summary", () => {
+  it("slims Codex-shaped mcp_tool_call items to rendered fields with complete result text", () => {
+    const output = `PR body line one\n${"x".repeat(5000)}`;
     const projected = projectActivityPayload(
       activity({
         itemType: "mcp_tool_call",
@@ -211,7 +190,7 @@ describe("projectActivityPayload", () => {
             arguments: { pr: 42 },
             durationMs: 1200,
             result: {
-              content: [{ type: "text", text: `PR body line one\n${"x".repeat(5000)}` }],
+              content: [{ type: "text", text: output }],
               structuredContent: { huge: "y".repeat(5000) },
             },
             _meta: { internal: true },
@@ -225,11 +204,11 @@ describe("projectActivityPayload", () => {
     expect(item.server).toBe("github");
     expect(item.arguments).toEqual({ pr: 42 });
     expect(item._meta).toBeUndefined();
-    expect(item.result).toEqual({ content: "PR body line one" });
-    expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
+    expect(item.result).toEqual({ content: output });
   });
 
   it("slims Claude-shaped mcp_tool_call data (toolName/input/result block)", () => {
+    const output = `first line of output\n${"z".repeat(5000)}`;
     const projected = projectActivityPayload(
       activity({
         itemType: "mcp_tool_call",
@@ -239,7 +218,7 @@ describe("projectActivityPayload", () => {
           result: {
             type: "tool_result",
             tool_use_id: "toolu_1",
-            content: [{ type: "text", text: `first line of output\n${"z".repeat(5000)}` }],
+            content: [{ type: "text", text: output }],
           },
         },
       }),
@@ -247,8 +226,7 @@ describe("projectActivityPayload", () => {
     const data = (projected.payload as Record<string, unknown>).data as Record<string, unknown>;
     expect(data.toolName).toBe("mcp__github__fetch_pr");
     expect(data.input).toEqual({ pr: 42 });
-    expect(data.result).toEqual({ content: "first line of output" });
-    expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
+    expect(data.result).toEqual({ content: output });
   });
 
   it("passes task lifecycle payloads (no data field) through untouched", () => {

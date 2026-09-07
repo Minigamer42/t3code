@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   OrchestrationProposedPlanId,
@@ -818,42 +819,40 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
-      // A streaming update's `data` carries the full tool output accumulated
-      // so far (adapters merge state forward), and a new activity is emitted
-      // per chunk, so persisting `data` verbatim writes O(N²) bytes per tool
-      // call into both the event store and the projection table. No reader
-      // needs it: ws.ts and http.ts apply `projectActivityPayload` before any
-      // payload reaches a client. Persist the projected form for non-terminal
-      // updates; `item.completed` below still persists the full payload.
+      // Output deltas live in ThreadLiveOutput until completion. Keeping the
+      // accumulated output on every update would persist O(N²) bytes.
       const presentation = toolLifecyclePresentation(event, "Tool updated");
       return [
-        projectActivityPayload({
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "tool",
-          kind: "tool.updated",
-          summary: presentation.summary,
-          payload: {
-            ...(event.itemId ? { itemId: event.itemId } : {}),
-            itemType: event.payload.itemType,
-            ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
-            ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.title ? { title: event.payload.title } : {}),
-            ...((presentation.detail ?? event.payload.detail)
-              ? { detail: presentation.detail ?? truncateDetail(event.payload.detail ?? "") }
-              : {}),
-            ...(event.payload.toolSurface ? { toolSurface: event.payload.toolSurface } : {}),
-            ...(event.payload.toolIcon ? { toolIcon: event.payload.toolIcon } : {}),
-            ...(event.payload.toolSource ? { toolSource: event.payload.toolSource } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
-            ...(event.payload.parentToolUseId
-              ? { parentToolUseId: event.payload.parentToolUseId }
-              : {}),
+        projectActivityPayload(
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "tool",
+            kind: "tool.updated",
+            summary: presentation.summary,
+            payload: {
+              ...(event.itemId ? { itemId: event.itemId } : {}),
+              itemType: event.payload.itemType,
+              ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
+              ...(event.payload.status ? { status: event.payload.status } : {}),
+              ...(event.payload.title ? { title: event.payload.title } : {}),
+              ...((presentation.detail ?? event.payload.detail)
+                ? { detail: presentation.detail ?? truncateDetail(event.payload.detail ?? "") }
+                : {}),
+              ...(event.payload.toolSurface ? { toolSurface: event.payload.toolSurface } : {}),
+              ...(event.payload.toolIcon ? { toolIcon: event.payload.toolIcon } : {}),
+              ...(event.payload.toolSource ? { toolSource: event.payload.toolSource } : {}),
+              ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+              ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+              ...(event.payload.parentToolUseId
+                ? { parentToolUseId: event.payload.parentToolUseId }
+                : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
           },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        }),
+          { includeOutput: false },
+        ),
       ];
     }
 

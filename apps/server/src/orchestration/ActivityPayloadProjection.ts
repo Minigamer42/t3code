@@ -19,6 +19,10 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function asNonEmptyRawString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown): void {
   const normalized = asTrimmedString(value);
   if (!normalized || seen.has(normalized)) {
@@ -81,7 +85,10 @@ function collectChangedFiles(
   }
 }
 
-function projectCommandData(data: Record<string, unknown>): Record<string, unknown> | undefined {
+function projectCommandData(
+  data: Record<string, unknown>,
+  includeOutput: boolean,
+): Record<string, unknown> | undefined {
   const item = asRecord(data.item);
   if (!item) {
     return undefined;
@@ -95,11 +102,10 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
     projectedItem.processId = item.processId;
   }
 
-  const aggregatedOutput = asTrimmedString(item.aggregatedOutput);
-  if (aggregatedOutput) {
-    const summary = summarizeToolTextOutput(aggregatedOutput);
-    if (summary) {
-      projectedItem.aggregatedOutput = summary;
+  if (includeOutput) {
+    const aggregatedOutput = asNonEmptyRawString(item.aggregatedOutput);
+    if (aggregatedOutput) {
+      projectedItem.aggregatedOutput = aggregatedOutput;
     }
   }
 
@@ -108,18 +114,15 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
     projectedItem.input = { command: input.command };
   }
 
-  const result = asRecord(item.result);
+  const result = includeOutput ? asRecord(item.result) : null;
   if (result) {
     const projectedResult: Record<string, unknown> = {};
     if ("command" in result) {
       projectedResult.command = result.command;
     }
-    const content = asTrimmedString(result.content);
+    const content = asNonEmptyRawString(result.content);
     if (content) {
-      const summary = summarizeToolTextOutput(content);
-      if (summary) {
-        projectedResult.content = summary;
-      }
+      projectedResult.content = content;
     }
     if (Object.keys(projectedResult).length > 0) {
       projectedItem.result = projectedResult;
@@ -161,38 +164,10 @@ function projectViewedImagePath(data: Record<string, unknown>): string | undefin
   const inputPath = asTrimmedString(input?.file_path) ?? asTrimmedString(input?.path);
   return inputPath && isWorkspaceImagePreviewPath(inputPath) ? inputPath : undefined;
 }
-
-function summarizeToolTextOutput(value: string): string | null {
-  let meaningfulLineCount = 0;
-  let offset = 0;
-
-  while (offset <= value.length) {
-    const newlineIndex = value.indexOf("\n", offset);
-    const lineEnd = newlineIndex === -1 ? value.length : newlineIndex;
-    const line = value.slice(offset, lineEnd).replace(/\s+/g, " ").trim();
-    if (line.length > 0) {
-      meaningfulLineCount += 1;
-      if (line !== "```") {
-        const summary = line.length <= 84 ? line : `${line.slice(0, 83).trimEnd()}…`;
-        // V8 can retain the full tool output behind a short sliced string.
-        // Join a tiny character array so the returned preview owns its bytes.
-        return Array.from(summary).join("");
-      }
-    }
-    if (newlineIndex === -1) {
-      break;
-    }
-    offset = newlineIndex + 1;
-  }
-
-  return meaningfulLineCount > 1 ? `${meaningfulLineCount.toLocaleString()} lines` : null;
-}
-
 /**
  * Fields of an MCP tool-call item both clients render in the expanded
- * work-log row. Everything else — notably `result`, which carries the full
- * tool output and dominates wire size on MCP-heavy threads — is summarized
- * or dropped. Full payloads remain in persistence.
+ * work-log row. Provider-only fields are dropped while renderable result text
+ * remains complete.
  */
 const MCP_ITEM_KEPT_FIELDS = [
   "type",
@@ -234,22 +209,24 @@ function extractMcpResultText(result: unknown): string | null {
   return null;
 }
 
-function summarizeMcpResult(result: unknown): Record<string, unknown> | undefined {
+function projectMcpResult(result: unknown): Record<string, unknown> | undefined {
   if (result === undefined || result === null) {
     return undefined;
   }
   const text = extractMcpResultText(result);
-  const summary = text ? summarizeToolTextOutput(text) : null;
-  return summary ? { content: summary } : undefined;
+  return text ? { content: text } : undefined;
 }
 
 /**
  * MCP tool calls carry full tool results (`data.item.result` on Codex,
  * `data.result` on Claude/OpenCode) that used to bypass slimming entirely to
  * keep the expanded-row UI working. Keep the fields the UI actually renders
- * and summarize the result like regular tool output.
+ * and retain the complete textual result.
  */
-function projectMcpToolCallData(data: Record<string, unknown>): Record<string, unknown> {
+function projectMcpToolCallData(
+  data: Record<string, unknown>,
+  includeOutput: boolean,
+): Record<string, unknown> {
   const projectedData: Record<string, unknown> = {};
 
   const item = asRecord(data.item);
@@ -260,7 +237,7 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
         projectedItem[key] = item[key];
       }
     }
-    const result = summarizeMcpResult(item.result);
+    const result = includeOutput ? projectMcpResult(item.result) : undefined;
     if (result) {
       projectedItem.result = result;
     }
@@ -273,8 +250,8 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
   if ("input" in data) {
     projectedData.input = data.input;
   }
-  if (!item) {
-    const result = summarizeMcpResult(data.result);
+  if (!item && includeOutput) {
+    const result = projectMcpResult(data.result);
     if (result) {
       projectedData.result = result;
     }
@@ -297,10 +274,9 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
 }
 
 function projectRawOutput(value: unknown): Record<string, unknown> | undefined {
-  const direct = asTrimmedString(value);
+  const direct = asNonEmptyRawString(value);
   if (direct) {
-    const summary = summarizeToolTextOutput(direct);
-    return summary ? { content: summary } : undefined;
+    return { content: direct };
   }
 
   const rawOutput = asRecord(value);
@@ -315,22 +291,17 @@ function projectRawOutput(value: unknown): Record<string, unknown> | undefined {
     };
   }
 
-  const content = asTrimmedString(rawOutput.content);
+  const content = asNonEmptyRawString(rawOutput.content);
   if (content) {
-    const summary = summarizeToolTextOutput(content);
-    return summary ? { content: summary } : undefined;
+    return { content };
   }
 
-  const stdout = asTrimmedString(rawOutput.stdout);
-  if (stdout) {
-    const summary = summarizeToolTextOutput(stdout);
-    return summary ? { content: summary } : undefined;
-  }
-
-  const stderr = asTrimmedString(rawOutput.stderr);
-  if (stderr) {
-    const summary = summarizeToolTextOutput(stderr);
-    return summary ? { content: summary } : undefined;
+  const stdout = asNonEmptyRawString(rawOutput.stdout);
+  const stderr = asNonEmptyRawString(rawOutput.stderr);
+  if (stdout || stderr) {
+    const combined =
+      stdout && stderr ? `stdout\n${stdout}\n\nstderr\n${stderr}` : (stdout ?? stderr);
+    return combined ? { content: combined } : undefined;
   }
 
   return undefined;
@@ -351,16 +322,17 @@ function projectAcpContent(value: unknown): Record<string, unknown> | undefined 
     })
     .filter((entry): entry is string => entry !== null)
     .join("\n");
-  const summary = summarizeToolTextOutput(text);
-  return summary ? { content: summary } : undefined;
+  const output = asNonEmptyRawString(text);
+  return output ? { content: output } : undefined;
 }
 
 /**
  * Removes activity payload fields that no current client reads while retaining
- * the full payload in persistence and the event store.
+ * complete textual tool output.
  */
 export function projectActivityPayload(
   activity: OrchestrationThreadActivity,
+  options: { readonly includeOutput?: boolean } = {},
 ): OrchestrationThreadActivity {
   const payload = asRecord(activity.payload);
   const data = asRecord(payload?.data);
@@ -369,6 +341,7 @@ export function projectActivityPayload(
   }
 
   const itemStatus = asRecord(data.item)?.status;
+  const includeOutput = options.includeOutput ?? true;
   const projectedPayload =
     payload.status === "completed" && (itemStatus === "failed" || itemStatus === "declined")
       ? { ...payload, status: itemStatus }
@@ -379,13 +352,13 @@ export function projectActivityPayload(
       ...activity,
       payload: {
         ...projectedPayload,
-        data: projectMcpToolCallData(data),
+        data: projectMcpToolCallData(data, includeOutput),
       },
     };
   }
 
   const projectedData: Record<string, unknown> = {};
-  const item = projectCommandData(data);
+  const item = projectCommandData(data, includeOutput);
   if (item) {
     projectedData.item = item;
   }
@@ -415,10 +388,11 @@ export function projectActivityPayload(
     projectedData.toolName = data.toolName;
   }
 
-  const rawOutput =
-    projectRawOutput(data.rawOutput) ??
-    projectAcpContent(data.content) ??
-    (payload.itemType === "command_execution" ? summarizeMcpResult(data.result) : undefined);
+  const rawOutput = includeOutput
+    ? (projectRawOutput(data.rawOutput) ??
+      projectAcpContent(data.content) ??
+      (payload.itemType === "command_execution" ? projectMcpResult(data.result) : undefined))
+    : undefined;
   if (rawOutput) {
     projectedData.rawOutput = rawOutput;
   }

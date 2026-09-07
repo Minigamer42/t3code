@@ -95,7 +95,7 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     content: [{ type: "content", content: { type: "text", text: accumulatedStdout } }],
   };
 
-  it("persists tool.updated with the wire projection of data, not the accumulated stream", () => {
+  it("does not persist accumulated output in tool.updated activities", () => {
     const event = {
       ...base,
       type: "item.updated",
@@ -117,7 +117,7 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     expect(payload.status).toBe("inProgress");
     expect(data.toolCallId).toBe("tool-call-1");
     expect(data.command).toBe("blender --render");
-    expect(data.rawOutput).toEqual({ content: "first line of output" });
+    expect(data.rawOutput).toBeUndefined();
     expect(data.content).toBeUndefined();
     expect(JSON.stringify(data).length).toBeLessThan(1_000);
   });
