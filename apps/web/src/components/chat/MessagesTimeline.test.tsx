@@ -370,7 +370,6 @@ describe("MessagesTimeline", () => {
           />,
         );
       });
-      await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
       const stopButton = renderer!.root.findByProps({ "aria-label": "Stop sleep 60" });
       await act(() => stopButton.props.onClick());
       expect(onStopTool).toHaveBeenCalledWith({
@@ -489,8 +488,6 @@ describe("MessagesTimeline", () => {
             />,
           );
         });
-        const toggle = renderer!.root.findByProps({ "aria-expanded": false });
-        await act(() => toggle.props.onClick());
         const markup = JSON.stringify(renderer!.toJSON());
         expect(markup.match(/Provide a spec/g)).toHaveLength(1);
         expect(markup.match(/spec\.txt/g)).toHaveLength(1);
@@ -1438,7 +1435,7 @@ describe("MessagesTimeline", () => {
     );
   });
 
-  it("resolves duplicate lifecycle file paths for live summaries", () => {
+  it("resolves duplicate lifecycle file paths for running tool rows", () => {
     const turnId = TurnId.make("turn-1");
     const timelineEntries = [
       {
@@ -1465,6 +1462,7 @@ describe("MessagesTimeline", () => {
       <MessagesTimeline
         {...buildProps()}
         timelineEntries={timelineEntries}
+        workspaceRoot="/home/me/projects/jobagent"
         isWorking
         runningTurnId={turnId}
       />,
@@ -1473,7 +1471,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("+1 more");
   });
 
-  it("keeps mixed-success tool groups neutral", () => {
+  it("keeps failed and successful tool calls independently visible", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -1508,11 +1506,12 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran 2 commands");
-    expect(markup).not.toContain('aria-label="Tool call failed"');
+    expect(markup).toContain("Run search");
+    expect(markup).toContain("Run tests");
+    expect(markup).toContain("tool call failed");
   });
 
-  it("keeps the collapsed summary icon neutral when the group ends in a failure", () => {
+  it("shows a failed tool without making the whole activity block destructive", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -1547,7 +1546,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran 2 commands");
+    expect(markup).toContain("Run tests");
+    expect(markup).toContain("Run lint");
     expect(markup).toContain("lucide-terminal");
     expect(markup).not.toContain("lucide-x");
     expect(markup).not.toContain("text-destructive");
@@ -1611,7 +1611,7 @@ describe("MessagesTimeline", () => {
     expect(markup.match(/I’ll search for it now\./gu)).toHaveLength(1);
   });
 
-  it("keeps mixed work logs neutral after a later tool call succeeds", () => {
+  it("shows every mixed work-log entry after a later tool call succeeds", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -1657,11 +1657,12 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Ran 2 commands and received 1 update");
-    expect(markup).not.toContain('aria-label="Hidden work includes a failure"');
+    expect(markup).toContain("Run search");
+    expect(markup).toContain("Status updated");
+    expect(markup).toContain("Run tests");
   });
 
-  it("shows the one-line label for a live tool group", () => {
+  it("shows the command label for a running tool row", () => {
     const turnId = TurnId.make("turn-live");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1697,10 +1698,11 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Working for");
-    expect(markup).toContain("Running pnpm");
+    expect(markup).toContain("pnpm test");
+    expect(markup).toContain('aria-label="Tool call running"');
   });
 
-  it("scopes a live row failure to the tool named by the row", () => {
+  it("shows failure state on only the failed tool row", () => {
     const turnId = TurnId.make("turn-live");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1751,8 +1753,9 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Running pnpm");
-    expect(markup).not.toContain("tool call failed");
+    expect(markup).toContain("pnpm test");
+    expect(markup).toContain('aria-label="pnpm lint, tool call failed"');
+    expect(markup).toContain('aria-label="Tool call running"');
   });
 
   it("renders initial thinking as the shared live activity row", () => {
@@ -1778,7 +1781,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-timeline-row-id="live-activity-row"');
   });
 
-  it("keeps the completed command in the shared activity row with a present-tense label", () => {
+  it("keeps the completed command visible without a fallback thinking row", () => {
     const turnId = TurnId.make("turn-live");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1813,9 +1816,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Running pnpm");
+    expect(markup).toContain("pnpm lint");
     expect(markup).toContain("lucide-terminal");
-    expect(markup).not.toContain("Ran pnpm");
     expect(markup).not.toContain("Thinking");
     expect(markup).not.toContain('data-timeline-row-kind="thinking"');
   });
@@ -1897,7 +1899,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('data-testid="file-diff"');
   });
 
-  it("keeps failed lifecycle entries discoverable in mixed activity summaries", () => {
+  it("keeps failed lifecycle entries discoverable in mixed activity", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -1930,7 +1932,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Received 1 update and used 1 tool, tool call failed"');
+    expect(markup).toContain("Status updated");
+    expect(markup).toContain('aria-label="No files found, tool call failed"');
     // Ordinary tool failures do not use destructive row styling.
     expect(markup).not.toContain("text-destructive");
   });
