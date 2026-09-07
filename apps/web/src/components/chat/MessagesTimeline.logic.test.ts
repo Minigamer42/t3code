@@ -1447,6 +1447,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(collapsedRows.map((row) => row.id)).toEqual([
       "user-entry",
       "turn-fold:turn-1",
+      "assistant-first-entry",
       "assistant-final-entry",
     ]);
 
@@ -1572,7 +1573,7 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBe(true);
   });
 
-  it("folds all assistant messages before the terminal message", () => {
+  it("keeps all assistant messages visible without a redundant fold", () => {
     const timelineEntries = [
       {
         id: "assistant-first-entry",
@@ -1626,7 +1627,11 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
     });
 
-    expect(rows.map((row) => row.id)).toEqual(["turn-fold:turn-1", "assistant-final-entry"]);
+    expect(rows.map((row) => row.id)).toEqual([
+      "assistant-first-entry",
+      "assistant-middle-entry",
+      "assistant-final-entry",
+    ]);
   });
 
   it("derives a sane duration for a steer-superseded turn with one instant commentary message", () => {
@@ -2469,42 +2474,16 @@ describe("deriveMessagesTimelineRows", () => {
       );
 
     // V2 work starts from a sent prompt, or with no new prompt (a wake or a resume).
-    expect(rows([message("new-prompt", "user", 20, "run-1")]).slice(0, 4)).toEqual([
+    expect(rows([message("new-prompt", "user", 20, "run-1")]).slice(0, 5)).toEqual([
       "user:imported-prompt",
       "turn-fold",
+      "assistant:imported-update",
       "assistant:imported-answer",
       "user:new-prompt",
     ]);
     const withoutPrompt = rows([]);
     expect(withoutPrompt).toContain("turn-fold");
-    expect(withoutPrompt).not.toContain("assistant:imported-update");
-
-    // Find must open the fold holding a folded imported message by its synthetic key.
-    const timelineEntries = [
-      message("imported-prompt", "user", 0),
-      message("imported-update", "assistant", 4),
-      message("imported-answer", "assistant", 8),
-    ];
-    const foldInput = { timelineEntries, latestRun: null, isWorking: false };
-    const foldRunId = timelineEntryTurnFoldRunId(foldInput, "imported-update");
-    expect(foldRunId).not.toBeNull();
-    // The rendered turn-fold row carries the same key, so find can map it back.
-    const foldRow = deriveMessagesTimelineRows({
-      ...foldInput,
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    }).find((row) => row.kind === "turn-fold");
-    expect(foldRow?.kind === "turn-fold" ? foldRow.runId : null).toBe(foldRunId);
-    expect(timelineEntryTurnFoldRunId(foldInput, "imported-answer")).toBeNull();
-    const expanded = deriveMessagesTimelineRows({
-      ...foldInput,
-      expandedRunIds: new Set([foldRunId!]),
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    });
-    expect(
-      expanded.some((row) => row.kind === "message" && row.message.id === "imported-update"),
-    ).toBe(true);
+    expect(withoutPrompt).toContain("assistant:imported-update");
   });
 
   it("shows a provider-native subagent's runless tools as live work while it works", () => {
@@ -3774,6 +3753,7 @@ describe("v2 run and attempt history", () => {
     expect(collapsedRows.map((row) => row.id)).toEqual([
       "user-entry",
       "turn-fold:turn-1",
+      "assistant-thought-entry",
       "thread-created-entry",
       "assistant-final-entry",
     ]);
@@ -3879,6 +3859,7 @@ describe("v2 run and attempt history", () => {
     expect(collapsedRows.map((row) => row.id)).toEqual([
       "user-entry",
       "turn-fold:turn-1",
+      "assistant-commentary-entry",
       "assistant-final-entry",
     ]);
   });
@@ -4790,7 +4771,8 @@ describe("linked timeline resources", () => {
     ];
     const collapsed = deriveMessagesTimelineRows({ ...common, timelineEntries });
     expect(collapsed.map((row) => row.id)).toEqual([
-      "turn-fold:resource-run",
+      "intro",
+      "created",
       "final",
       "summary:created",
       "assistant-meta:final",
@@ -4804,7 +4786,6 @@ describe("linked timeline resources", () => {
       expandedRunIds: new Set([runId]),
     });
     expect(expanded.map((row) => row.id)).toEqual([
-      "turn-fold:resource-run",
       "intro",
       "created",
       "final",
