@@ -950,8 +950,9 @@ export const make = Effect.gen(function* () {
   const pushCurrentBranch = Effect.fn("GitManager.pushCurrentBranch")(function* (
     cwd: string,
     branch: string | null,
+    options?: { readonly forceWithLease?: boolean },
   ) {
-    const result = yield* gitCore.pushCurrentBranch(cwd, branch);
+    const result = yield* gitCore.pushCurrentBranch(cwd, branch, options);
     if (result.status === "pushed" && result.branch) {
       yield* shareBranchBase(cwd, result.branch);
     }
@@ -4278,7 +4279,11 @@ export const make = Effect.gen(function* () {
         GitRunStackedActionResult,
         GitManagerServiceError
       > {
-        const initialStatus = yield* gitCore.statusDetails(input.cwd);
+        // Preserve the tracking ref the user reviewed for force-with-lease. Fetching here could
+        // advance that ref immediately before the push and weaken the lease protection.
+        const initialStatus = yield* input.forceWithLease
+          ? gitCore.statusDetailsLocal(input.cwd)
+          : gitCore.statusDetails(input.cwd);
         const wantsCommit = isCommitAction(input.action);
         const upToDateBranch =
           input.action === "create_pr" &&
@@ -4301,6 +4306,14 @@ export const make = Effect.gen(function* () {
               initialStatus.aheadCount > 0 ||
               pushTarget?.viaPushRemote === true));
         const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
+
+        if (input.forceWithLease && input.action !== "push") {
+          return yield* new GitManagerError({
+            operation: "runStackedAction",
+            cwd: input.cwd,
+            detail: "Force push with lease is only supported for push actions.",
+          });
+        }
 
         if (
           input.splitCommits &&
@@ -4454,11 +4467,17 @@ export const make = Effect.gen(function* () {
               .emit({
                 kind: "phase_started",
                 phase: "push",
-                label: "Pushing...",
+                label: input.forceWithLease ? "Force pushing with lease..." : "Pushing...",
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),
-                Effect.flatMap(() => pushCurrentBranch(input.cwd, currentBranch)),
+                Effect.flatMap(() =>
+                  pushCurrentBranch(
+                    input.cwd,
+                    currentBranch,
+                    input.forceWithLease ? { forceWithLease: true } : undefined,
+                  ),
+                ),
               )
           : { status: "skipped_not_requested" as const };
 

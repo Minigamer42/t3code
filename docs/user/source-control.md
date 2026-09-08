@@ -190,6 +190,9 @@ Choose how commit messages and pull request titles and descriptions are written 
 project's instructions and recent commit subjects. **Custom instructions** applies your own
 instructions to commits and pull requests.
 
+After rebasing a published branch, use **Push** and confirm **Force push with lease**. The push
+stops if the upstream changed since T3 Code last fetched it.
+
 ### Run a command after pushing
 
 Add a `hooks.afterPush` command to `.t3code/vcs.json` to run a project-specific command after a

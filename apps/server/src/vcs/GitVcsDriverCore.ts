@@ -3289,8 +3289,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const pushCurrentBranch: GitVcsDriver.GitVcsDriver["Service"]["pushCurrentBranch"] = Effect.fn(
     "pushCurrentBranch",
   )(function* (cwd, fallbackBranch, options) {
-    const details = yield* statusDetails(cwd);
+    // A push must not fetch first: an implicit fetch can advance the remote-tracking ref and
+    // silently weaken --force-with-lease by leasing against work the user has not reviewed.
+    const details = yield* statusDetailsLocal(cwd);
     const branch = details.branch ?? fallbackBranch;
+    const forceArgs = options?.forceWithLease ? (["--force-with-lease"] as const) : [];
     if (!branch) {
       return yield* new GitCommandError({
         ...gitCommandContext({
@@ -3308,7 +3311,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       yield* executeGitWithStableDiagnostics(
         "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
         cwd,
-        ["push", "--", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
+        ["push", ...forceArgs, "--", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
       yield* ensurePublishedBranchUpstream(cwd, requestedRemoteName, publishBranch);
@@ -3422,10 +3425,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ? "GitVcsDriver.pushCurrentBranch.pushOwnBranch"
           : "GitVcsDriver.pushCurrentBranch.pushWithUpstream",
         cwd,
-        ["push", "--", remoteName, `HEAD:refs/heads/${publishBranch}`],
+        ["push", ...forceArgs, "--", remoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
-      yield* ensurePublishedBranchUpstream(cwd, publishRemoteName, publishBranch);
+      yield* ensurePublishedBranchUpstream(cwd, remoteName, publishBranch);
       return {
         status: "pushed" as const,
         branch,
@@ -3438,7 +3441,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       yield* executeGitWithStableDiagnostics(
         "GitVcsDriver.pushCurrentBranch.pushUpstream",
         cwd,
-        ["push", "--", destination.remoteName, `HEAD:refs/heads/${destination.branchName}`],
+        ["push", ...forceArgs, "--", destination.remoteName, `HEAD:refs/heads/${destination.branchName}`],
         { timeoutMs: null },
       );
       return {
@@ -3454,7 +3457,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* executeGitWithStableDiagnostics("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"], {
+    yield* executeGitWithStableDiagnostics("GitVcsDriver.pushCurrentBranch.push", cwd, ["push", ...forceArgs], {
       timeoutMs: null,
     });
     return {
