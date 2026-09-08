@@ -135,6 +135,13 @@ describe("GitRunStackedActionInput", () => {
     expect(parsed.splitCommits).toBe(true);
   });
 
+  it("accepts a force-with-lease push", () => {
+    const parsed = decodeRunStackedActionInput({
+      actionId: "action-force-push", cwd: "/repo", action: "push", forceWithLease: true,
+    });
+    expect(parsed.forceWithLease).toBe(true);
+  });
+
   it("preserves leading and trailing whitespace in file paths", () => {
     const parsed = decodeRunStackedActionInput({
       actionId: "action-1",

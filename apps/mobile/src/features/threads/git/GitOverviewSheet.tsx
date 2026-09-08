@@ -4,6 +4,7 @@ import {
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
+  requiresForcePushConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
 import {
   resolveThreadPullRequestChains,
@@ -210,6 +211,30 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         return;
       }
       if (item.dialogAction === "push") {
+        const status = gitStatus.data;
+        if (status && requiresForcePushConfirmation(status)) {
+          Alert.alert(
+            "Force push with lease?",
+            `${status.refName} is ${status.aheadCount} ahead and ${status.behindCount} behind its upstream. This rewrites the upstream branch, but stops if it changed since this environment last fetched it.`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Force Push with Lease",
+                style: "destructive",
+                onPress: () => {
+                  if (!isInspector) {
+                    navigation.goBack();
+                  }
+                  void gitActions.onRunSelectedThreadGitAction({
+                    action: "push",
+                    forceWithLease: true,
+                  });
+                },
+              },
+            ],
+          );
+          return;
+        }
         await runActionWithPrompt({ action: "push" });
         return;
       }
@@ -220,6 +245,9 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     [
       canWriteSourceControl,
       environmentId,
+      gitActions,
+      gitStatus.data,
+      isInspector,
       openExistingPr,
       navigation,
       runActionWithPrompt,
