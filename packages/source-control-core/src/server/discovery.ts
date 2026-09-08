@@ -304,6 +304,11 @@ export const probeSourceControlProviderAvailability = Effect.fn(
   if (input.spec.type === "api") {
     return true;
   }
+  if (input.spec.type === "managed-cli") {
+    return yield* input.spec
+      .probe(input.cwd)
+      .pipe(Effect.map((item) => item.status === "available"));
+  }
 
   return yield* probeCli({
     spec: input.spec,

@@ -236,14 +236,14 @@ const makeLiveServerClient = (origin: string) =>
     baseUrl: origin,
   });
 
-const normalizeWorkspaceRootForProjectCommand = Effect.fn(
+export const normalizeWorkspaceRootForProjectCommand = Effect.fn(
   "normalizeWorkspaceRootForProjectCommand",
 )(function* (workspaceRoot: string) {
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   return yield* workspacePaths.normalizeWorkspaceRoot(workspaceRoot);
 });
 
-const resolveProjectTitle = Effect.fn("resolveProjectTitle")(function* (
+export const resolveProjectTitle = Effect.fn("resolveProjectTitle")(function* (
   workspaceRoot: string,
   explicitTitle?: string,
 ) {
