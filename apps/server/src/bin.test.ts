@@ -49,6 +49,7 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import { ThreadCliRunningServerRequiredError } from "./cli/thread.ts";
 
 import packageJson from "../package.json" with { type: "json" };
 
@@ -822,6 +823,176 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
           assert.equal(addedProject?.title, "Live Project");
         }),
       );
+    }),
+  );
+
+  it.effect("creates and starts a thread in the running server from a workspace path", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-live-test-"),
+      );
+      const workspaceRoot = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-live-workspace-"),
+      );
+
+      yield* withLiveProjectCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          const { output } = yield* captureStdout(
+            runCli([
+              "thread",
+              "create",
+              workspaceRoot,
+              "--prompt",
+              "Implement the CLI flow",
+              "--base-dir",
+              baseDir,
+              "--json",
+            ]),
+          );
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is a presentation DTO.
+          const created = JSON.parse(output) as {
+            readonly threadId: string;
+            readonly projectId: string;
+            readonly title: string;
+            readonly started: boolean;
+            readonly projectCreated: boolean;
+          };
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+          const readModel = yield* projectionSnapshotQuery.getSnapshot();
+          const project = readModel.projects.find(
+            (candidate) => candidate.id === created.projectId,
+          );
+          const thread = readModel.threads.find((candidate) => candidate.id === created.threadId);
+
+          assert.equal(project?.workspaceRoot, workspaceRoot);
+          assert.equal(thread?.projectId, project?.id);
+          assert.equal(thread?.title, "Implement the CLI flow");
+          assert.equal(thread?.messages[0]?.text, "Implement the CLI flow");
+          assert.isTrue(created.started);
+          assert.isTrue(created.projectCreated);
+        }),
+      );
+    }),
+  );
+
+  it.effect("creates an empty thread in an existing project", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-empty-test-"),
+      );
+      const workspaceRoot = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-empty-workspace-"),
+      );
+
+      yield* withLiveProjectCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          yield* runCliWithRuntime(["project", "add", workspaceRoot, "--base-dir", baseDir]);
+          const { output } = yield* captureStdout(
+            runCli([
+              "thread",
+              "create",
+              workspaceRoot,
+              "--title",
+              "Ready for later",
+              "--base-dir",
+              baseDir,
+              "--json",
+            ]),
+          );
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is a presentation DTO.
+          const created = JSON.parse(output) as {
+            readonly threadId: string;
+            readonly started: boolean;
+            readonly projectCreated: boolean;
+          };
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+          const readModel = yield* projectionSnapshotQuery.getSnapshot();
+          const thread = readModel.threads.find((candidate) => candidate.id === created.threadId);
+
+          assert.equal(thread?.title, "Ready for later");
+          assert.equal(thread?.modelSelection.instanceId, "codex");
+          assert.deepEqual(thread?.messages, []);
+          assert.isFalse(created.started);
+          assert.isFalse(created.projectCreated);
+        }),
+      );
+    }),
+  );
+
+  it.effect("replaces a disabled project provider default with the active server provider", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-provider-fallback-test-"),
+      );
+      const workspaceRoot = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-provider-fallback-workspace-"),
+      );
+      const config = yield* makeCliTestServerConfig(baseDir);
+      NodeFS.mkdirSync(NodePath.dirname(config.settingsPath), { recursive: true });
+      NodeFS.writeFileSync(
+        config.settingsPath,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - Test fixture matches persisted settings JSON.
+        JSON.stringify({
+          textGenerationModelSelection: {
+            instanceId: "codex_work",
+            model: "gpt-5.6-luna",
+          },
+          providerInstances: {
+            codex: { driver: "codex", enabled: false },
+            codex_work: { driver: "codex", enabled: true },
+          },
+        }),
+      );
+
+      yield* withLiveProjectCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          yield* runCliWithRuntime(["project", "add", workspaceRoot, "--base-dir", baseDir]);
+          const { output } = yield* captureStdout(
+            runCli([
+              "thread",
+              "create",
+              workspaceRoot,
+              "--prompt",
+              "Use the active provider",
+              "--base-dir",
+              baseDir,
+              "--json",
+            ]),
+          );
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is a presentation DTO.
+          const created = JSON.parse(output) as { readonly threadId: string };
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+          const readModel = yield* projectionSnapshotQuery.getSnapshot();
+          const thread = readModel.threads.find((candidate) => candidate.id === created.threadId);
+
+          assert.equal(thread?.modelSelection.instanceId, "codex_work");
+          assert.equal(thread?.modelSelection.model, "gpt-5.6-luna");
+        }),
+      );
+    }),
+  );
+
+  it.effect("requires a running server before creating a thread", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-no-server-test-"),
+      );
+      const workspaceRoot = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-no-server-workspace-"),
+      );
+
+      const error = yield* runCliWithRuntime([
+        "thread",
+        "create",
+        workspaceRoot,
+        "--base-dir",
+        baseDir,
+      ]).pipe(Effect.flip);
+      const readModel = yield* readPersistedSnapshot(baseDir);
+
+      assert.instanceOf(error, ThreadCliRunningServerRequiredError);
+      assert.deepEqual(readModel.projects, []);
+      assert.deepEqual(readModel.threads, []);
     }),
   );
 

@@ -315,7 +315,7 @@ function restoreUsedProviders(
   };
 }
 
-function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
+export function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
   return isModelSelectionProviderEnabled(settings, settings.textGenerationModelSelection)
     ? settings
     : fallbackTextGenerationProvider(settings);
@@ -362,6 +362,46 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
     } satisfies ModelSelection,
   };
 }
+
+export const readServerSettingsFromDisk = Effect.fn("readServerSettingsFromDisk")(function* (
+  settingsPath: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const exists = yield* fs.exists(settingsPath).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ServerSettingsError({
+          settingsPath,
+          operation: "check-exists",
+          cause,
+        }),
+    ),
+  );
+  if (!exists) {
+    return DEFAULT_SERVER_SETTINGS;
+  }
+
+  const raw = yield* fs.readFileString(settingsPath).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ServerSettingsError({
+          settingsPath,
+          operation: "read-file",
+          cause,
+        }),
+    ),
+  );
+  const decoded = decodeServerSettingsJsonExit(raw);
+  if (decoded._tag === "Failure") {
+    yield* Effect.logWarning("failed to parse settings.json, using defaults", {
+      path: settingsPath,
+      issues: Cause.pretty(decoded.cause),
+      cause: decoded.cause,
+    });
+    return DEFAULT_SERVER_SETTINGS;
+  }
+  return foldProviderInstanceEnabledFlags(decoded.value);
+});
 
 // Values under these keys are compared as a whole — never stripped field-by-field.
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
