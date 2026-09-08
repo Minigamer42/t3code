@@ -215,6 +215,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
     async (input: {
       actionId: string;
       action: GitStackedAction;
+      forceWithLease?: boolean;
       commitMessage?: string;
       splitCommits?: boolean;
       featureBranch?: boolean;
@@ -236,6 +237,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
       return runStackedAction({
         actionId: input.actionId,
         action: input.action,
+        ...(input.forceWithLease ? { forceWithLease: true } : {}),
         ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
         ...(input.splitCommits ? { splitCommits: true } : {}),
         ...(input.featureBranch ? { featureBranch: true } : {}),

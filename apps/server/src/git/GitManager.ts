@@ -3366,7 +3366,11 @@ export const make = Effect.gen(function* () {
         GitRunStackedActionResult,
         GitManagerServiceError
       > {
-        const initialStatus = yield* gitCore.statusDetails(input.cwd);
+        // Preserve the tracking ref the user reviewed for force-with-lease. Fetching here could
+        // advance that ref immediately before the push and weaken the lease protection.
+        const initialStatus = yield* input.forceWithLease
+          ? gitCore.statusDetailsLocal(input.cwd)
+          : gitCore.statusDetails(input.cwd);
         const wantsCommit = isCommitAction(input.action);
         const wantsPush =
           input.action === "push" ||
@@ -3375,6 +3379,14 @@ export const make = Effect.gen(function* () {
           (input.action === "create_pr" &&
             (!initialStatus.hasUpstream || initialStatus.aheadCount > 0));
         const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
+
+        if (input.forceWithLease && input.action !== "push") {
+          return yield* new GitManagerError({
+            operation: "runStackedAction",
+            cwd: input.cwd,
+            detail: "Force push with lease is only supported for push actions.",
+          });
+        }
 
         if (
           input.splitCommits &&
@@ -3529,11 +3541,17 @@ export const make = Effect.gen(function* () {
               .emit({
                 kind: "phase_started",
                 phase: "push",
-                label: "Pushing...",
+                label: input.forceWithLease ? "Force pushing with lease..." : "Pushing...",
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),
-                Effect.flatMap(() => gitCore.pushCurrentBranch(input.cwd, currentBranch)),
+                Effect.flatMap(() =>
+                  gitCore.pushCurrentBranch(
+                    input.cwd,
+                    currentBranch,
+                    input.forceWithLease ? { forceWithLease: true } : undefined,
+                  ),
+                ),
               )
           : { status: "skipped_not_requested" as const };
 

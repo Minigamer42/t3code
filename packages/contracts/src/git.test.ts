@@ -132,9 +132,22 @@ describe("GitRunStackedActionInput", () => {
       cwd: "/repo",
       action: "commit",
       splitCommits: true,
+      forceWithLease: false,
     });
 
     expect(parsed.splitCommits).toBe(true);
+    expect(parsed.forceWithLease).toBe(false);
+  });
+
+  it("accepts a force-with-lease push", () => {
+    const parsed = decodeRunStackedActionInput({
+      actionId: "action-force-push",
+      cwd: "/repo",
+      action: "push",
+      forceWithLease: true,
+    });
+
+    expect(parsed.forceWithLease).toBe(true);
   });
 });
 
