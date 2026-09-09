@@ -934,6 +934,16 @@ describe("resolveDefaultBranchActionDialogCopy", () => {
 });
 
 describe("buildGitActionProgressStages", () => {
+  it("shows planning before committing logical groups", () => {
+    const stages = buildGitActionProgressStages({
+      action: "commit",
+      hasCustomCommitMessage: false,
+      hasWorkingTreeChanges: true,
+      splitCommits: true,
+    });
+    assert.deepEqual(stages, ["Planning logical commits...", "Committing..."]);
+  });
+
   it("shows only push progress for explicit push actions", () => {
     const stages = buildGitActionProgressStages({
       action: "push",
