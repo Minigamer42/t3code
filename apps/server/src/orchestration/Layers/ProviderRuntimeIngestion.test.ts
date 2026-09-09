@@ -27,6 +27,7 @@ import {
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -36,6 +37,7 @@ import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
+import * as TestClock from "effect/testing/TestClock";
 import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -264,6 +266,7 @@ describe("ProviderRuntimeIngestion", () => {
     serverSettings?: Partial<ServerSettings>;
     threadTitle?: string;
     workspaceSubdirectory?: string;
+    useTestClock?: boolean;
   }) {
     const repositoryRoot = makeTempDir("t3-provider-project-");
     NodeChildProcess.execFileSync("git", ["init", "--initial-branch=main"], {
@@ -313,7 +316,9 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(Layer.succeed(Tracer.Tracer, sqlCounter.tracer)),
     );
-    const testRuntime = ManagedRuntime.make(layer);
+    const testRuntime = ManagedRuntime.make(
+      options?.useTestClock ? layer.pipe(Layer.provideMerge(TestClock.layer())) : layer,
+    );
     runtime = testRuntime;
     const engine = await testRuntime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await testRuntime.runPromise(Effect.service(ProjectionSnapshotQuery));
@@ -396,6 +401,13 @@ describe("ProviderRuntimeIngestion", () => {
       sqlCount: sqlCounter.count,
       setProviderSession: provider.setSession,
       drain,
+      adjustClock: (duration: Duration.Input) =>
+        testRuntime.runPromise(
+          TestClock.adjust(duration).pipe(
+            Effect.andThen(Effect.yieldNow),
+            Effect.andThen(Effect.yieldNow),
+          ),
+        ),
     };
   }
 
@@ -439,6 +451,151 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  it("stops dangling tools after the turn-completion grace period", async () => {
+    const harness = await createHarness({ useTestClock: true });
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-with-dangling-tool");
+    const provider = ProviderDriverKind.make("codex");
+    const createdAt = "2026-01-01T00:00:00.000Z";
+
+    await harness.emitAndDrain([
+      {
+        type: "turn.started",
+        eventId: asEventId("evt-dangling-turn-started"),
+        provider,
+        threadId,
+        turnId,
+        createdAt,
+      },
+      {
+        type: "item.started",
+        eventId: asEventId("evt-dangling-tool-started"),
+        provider,
+        threadId,
+        turnId,
+        itemId: asItemId("dangling-tool"),
+        createdAt,
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          title: "Long command",
+        },
+      },
+      {
+        type: "turn.completed",
+        eventId: asEventId("evt-dangling-turn-completed"),
+        provider,
+        threadId,
+        turnId,
+        createdAt,
+        payload: { state: "completed" },
+      },
+    ]);
+
+    const deferredThread = await harness.readThreadShell();
+    expect(deferredThread.session?.status).toBe("running");
+    expect(deferredThread.session?.activeTurnId).toBe(turnId);
+
+    await harness.adjustClock("5 seconds");
+    await harness.drain();
+
+    const settledThread = (await harness.readModel()).threads.find(
+      (thread) => thread.id === threadId,
+    );
+    expect(settledThread?.session?.status).toBe("ready");
+    expect(settledThread?.session?.activeTurnId).toBeNull();
+    expect(settledThread?.activities).toContainEqual(
+      expect.objectContaining({
+        kind: "tool.completed",
+        summary: "Tool stopped",
+        payload: expect.objectContaining({
+          itemId: "dangling-tool",
+          status: "stopped",
+          detail: "The turn ended before this tool reported completion.",
+        }),
+      }),
+    );
+  });
+
+  it("keeps a real tool completion that arrives during the grace period", async () => {
+    const harness = await createHarness({ useTestClock: true });
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-with-late-tool");
+    const itemId = asItemId("late-tool");
+    const provider = ProviderDriverKind.make("codex");
+    const createdAt = "2026-01-01T00:00:00.000Z";
+
+    await harness.emitAndDrain([
+      {
+        type: "turn.started",
+        eventId: asEventId("evt-late-turn-started"),
+        provider,
+        threadId,
+        turnId,
+        createdAt,
+      },
+      {
+        type: "item.started",
+        eventId: asEventId("evt-late-tool-started"),
+        provider,
+        threadId,
+        turnId,
+        itemId,
+        createdAt,
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          title: "Long command",
+        },
+      },
+      {
+        type: "turn.completed",
+        eventId: asEventId("evt-late-turn-completed"),
+        provider,
+        threadId,
+        turnId,
+        createdAt,
+        payload: { state: "completed" },
+      },
+    ]);
+
+    await harness.emitAndDrain([
+      {
+        type: "item.completed",
+        eventId: asEventId("evt-late-tool-completed"),
+        provider,
+        threadId,
+        turnId,
+        itemId,
+        createdAt,
+        payload: {
+          itemType: "command_execution",
+          status: "completed",
+          title: "Long command",
+        },
+      },
+    ]);
+    await harness.adjustClock("5 seconds");
+
+    const settledThread = (await harness.readModel()).threads.find(
+      (thread) => thread.id === threadId,
+    );
+    expect(settledThread?.session?.status).toBe("ready");
+    expect(
+      settledThread?.activities.filter(
+        (activity) =>
+          activity.kind === "tool.completed" &&
+          (activity.payload as { itemId?: string }).itemId === itemId,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        id: "evt-late-tool-completed",
+        summary: "Ran command",
+        payload: expect.objectContaining({ status: "completed" }),
+      }),
+    ]);
   });
 
   it.each([

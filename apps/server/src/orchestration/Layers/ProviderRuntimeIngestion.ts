@@ -108,6 +108,7 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000;
 const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const DANGLING_TOOL_COMPLETION_GRACE = Duration.seconds(5);
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -950,8 +951,9 @@ const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   // Provider runtimes can report turn completion while an asynchronously
-  // yielded tool process is still running. Keep the projected turn alive until
-  // every tool item that belongs to it has reached a terminal lifecycle event.
+  // yielded tool process is still running. Briefly keep the projected turn
+  // alive for terminal tool events, then reconcile tools whose host process
+  // exited without emitting one so the chat cannot remain running forever.
   const openToolItemIdsByTurnKey = new Map<string, Set<string>>();
   const deferredTurnCompletionByTurnKey = new Map<string, RuntimeTurnCompletedEvent>();
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
@@ -1444,6 +1446,84 @@ const make = Effect.gen(function* () {
       }
     });
 
+  const settleDeferredTurnCompletion = Effect.fn("settleDeferredTurnCompletion")(function* (
+    key: string,
+    completion: RuntimeTurnCompletedEvent,
+    options: {
+      readonly closeDanglingTools: boolean;
+      readonly createdAt: string;
+      readonly commandEvent: ProviderRuntimeEvent;
+    },
+  ) {
+    const deferredCompletion = deferredTurnCompletionByTurnKey.get(key);
+    if (!deferredCompletion || deferredCompletion.eventId !== completion.eventId) {
+      return;
+    }
+
+    deferredTurnCompletionByTurnKey.delete(key);
+    const danglingToolItemIds = openToolItemIdsByTurnKey.get(key);
+    if (options.closeDanglingTools) {
+      openToolItemIdsByTurnKey.delete(key);
+      yield* Effect.forEach(
+        danglingToolItemIds ?? [],
+        (itemId) =>
+          Effect.gen(function* () {
+            const activityId = EventId.make(yield* crypto.randomUUIDv4);
+            yield* orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId: yield* providerCommandId(
+                options.commandEvent,
+                "tool-stopped-on-turn-completion",
+              ),
+              threadId: completion.threadId,
+              activity: {
+                id: activityId,
+                createdAt: options.createdAt,
+                tone: "tool",
+                kind: "tool.completed",
+                summary: "Tool stopped",
+                payload: {
+                  itemId,
+                  status: "stopped",
+                  detail: "The turn ended before this tool reported completion.",
+                },
+                turnId: toTurnId(completion.turnId) ?? null,
+              },
+              createdAt: options.createdAt,
+            });
+          }),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+    }
+
+    const refreshedThread = yield* resolveThreadRuntimeContext(completion.threadId);
+    const completionTurnId = toTurnId(completion.turnId);
+    if (
+      completionTurnId &&
+      refreshedThread?.session?.status === "running" &&
+      sameId(refreshedThread.session.activeTurnId, completionTurnId)
+    ) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.session.set",
+        commandId: yield* providerCommandId(options.commandEvent, "thread-session-set-after-tools"),
+        threadId: completion.threadId,
+        session: {
+          threadId: completion.threadId,
+          status: "ready",
+          providerName: completion.provider,
+          ...(completion.providerInstanceId !== undefined
+            ? { providerInstanceId: completion.providerInstanceId }
+            : {}),
+          runtimeMode: refreshedThread.session.runtimeMode,
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: options.createdAt,
+        },
+        createdAt: options.createdAt,
+      });
+    }
+  });
+
   const getSourceProposedPlanReferenceForPendingTurnStart = Effect.fn(
     "getSourceProposedPlanReferenceForPendingTurnStart",
   )(function* (threadId: ThreadId) {
@@ -1650,8 +1730,22 @@ const make = Effect.gen(function* () {
         normalizeRuntimeTurnState(event.payload.state) === "completed" &&
         turnCompletionKey !== undefined &&
         (openToolItemIdsByTurnKey.get(turnCompletionKey)?.size ?? 0) > 0;
-      if (shouldDeferTurnCompletion && turnCompletionKey !== undefined) {
+      if (
+        shouldDeferTurnCompletion &&
+        turnCompletionKey !== undefined &&
+        event.type === "turn.completed"
+      ) {
         deferredTurnCompletionByTurnKey.set(turnCompletionKey, event);
+        yield* Effect.sleep(DANGLING_TOOL_COMPLETION_GRACE).pipe(
+          Effect.andThen(
+            settleDeferredTurnCompletion(turnCompletionKey, event, {
+              closeDanglingTools: true,
+              createdAt: event.createdAt,
+              commandEvent: event,
+            }),
+          ),
+          Effect.forkScoped,
+        );
       } else if (event.type === "turn.completed" && turnCompletionKey !== undefined) {
         openToolItemIdsByTurnKey.delete(turnCompletionKey);
         deferredTurnCompletionByTurnKey.delete(turnCompletionKey);
@@ -2322,31 +2416,11 @@ const make = Effect.gen(function* () {
         const key = providerTurnKey(thread.id, toolLifecycleTurnId);
         const deferredCompletion = deferredTurnCompletionByTurnKey.get(key);
         if (deferredCompletion) {
-          deferredTurnCompletionByTurnKey.delete(key);
-          const refreshedThread = yield* resolveThreadRuntimeContext(thread.id);
-          if (
-            refreshedThread?.session?.status === "running" &&
-            sameId(refreshedThread.session.activeTurnId, toolLifecycleTurnId)
-          ) {
-            yield* orchestrationEngine.dispatch({
-              type: "thread.session.set",
-              commandId: yield* providerCommandId(event, "thread-session-set-after-tools"),
-              threadId: thread.id,
-              session: {
-                threadId: thread.id,
-                status: "ready",
-                providerName: deferredCompletion.provider,
-                ...(deferredCompletion.providerInstanceId !== undefined
-                  ? { providerInstanceId: deferredCompletion.providerInstanceId }
-                  : {}),
-                runtimeMode: refreshedThread.session.runtimeMode,
-                activeTurnId: null,
-                lastError: null,
-                updatedAt: now,
-              },
-              createdAt: now,
-            });
-          }
+          yield* settleDeferredTurnCompletion(key, deferredCompletion, {
+            closeDanglingTools: false,
+            createdAt: now,
+            commandEvent: event,
+          });
         }
       }
     });
