@@ -206,6 +206,11 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateCommitMessage(input),
         v2: v2.generateCommitMessage(input),
       }),
+    generateCommitPlan: (input) =>
+      byOpenCodeRuntime(probe.get, {
+        v1: v1.generateCommitPlan(input),
+        v2: v2.generateCommitPlan(input),
+      }),
     generatePrContent: (input) =>
       byOpenCodeRuntime(resolve, {
         v1: v1.generatePrContent(input),
