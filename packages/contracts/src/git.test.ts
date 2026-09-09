@@ -125,6 +125,17 @@ describe("GitRunStackedActionInput", () => {
     expect(parsed.actionId).toBe("action-1");
     expect(parsed.action).toBe("create_pr");
   });
+
+  it("accepts logical commit splitting", () => {
+    const parsed = decodeRunStackedActionInput({
+      actionId: "action-1",
+      cwd: "/repo",
+      action: "commit",
+      splitCommits: true,
+    });
+
+    expect(parsed.splitCommits).toBe(true);
+  });
 });
 
 describe("GitRunStackedActionResult", () => {
@@ -139,6 +150,7 @@ describe("GitRunStackedActionResult", () => {
         status: "created",
         commitSha: "89abcdef01234567",
         subject: "feat: move toast state into git manager",
+        commitCount: 2,
       },
       push: {
         status: "pushed",
@@ -165,5 +177,6 @@ describe("GitRunStackedActionResult", () => {
     if (parsed.toast.cta.kind === "run_action") {
       expect(parsed.toast.cta.action.kind).toBe("create_pr");
     }
+    expect(parsed.commit.commitCount).toBe(2);
   });
 });

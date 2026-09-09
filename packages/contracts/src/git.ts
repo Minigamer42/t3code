@@ -115,6 +115,7 @@ export const GitRunStackedActionInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   action: GitStackedAction,
   commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
+  splitCommits: Schema.optional(Schema.Boolean),
   featureBranch: Schema.optional(Schema.Boolean),
   filePaths: Schema.optional(
     Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
@@ -311,6 +312,7 @@ export const GitRunStackedActionResult = Schema.Struct({
     status: GitCommitStepStatus,
     commitSha: Schema.optional(TrimmedNonEmptyStringSchema),
     subject: Schema.optional(TrimmedNonEmptyStringSchema),
+    commitCount: Schema.optional(PositiveInt),
   }),
   push: Schema.Struct({
     status: GitPushStepStatus,
