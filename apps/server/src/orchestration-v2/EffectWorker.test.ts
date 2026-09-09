@@ -8,6 +8,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -90,6 +91,7 @@ function layerExecutorFor(input: {
       ProviderTurnControlService.ProviderTurnControlServiceV2,
       ProviderTurnControlService.ProviderTurnControlServiceV2.of({
         interrupt: input.interrupt ?? (() => Effect.void),
+        terminateCommand: () => record("terminate-command"),
         steer: () => Effect.void,
         interruptAndAwaitTerminal: (request) =>
           record(
@@ -228,6 +230,37 @@ it.effect("settles a stopped run when its adapter has already lost the native tu
       });
     }).pipe(Effect.provide(layer));
     assert.deepEqual(yield* Ref.get(events), ["thread.background-work.settle"]);
+  }),
+);
+
+it.effect("stops one command before settling its item without interrupting the turn", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const events = yield* Ref.make<ReadonlyArray<string>>([]);
+    const layer = layerExecutorFor({
+      events,
+      threads: {
+        dispatch: (command) =>
+          Ref.update(events, (current) => [...current, command.type]).pipe(
+            Effect.as({ sequence: 1, storedEvents: [] }),
+          ),
+      },
+    });
+    yield* Effect.gen(function* () {
+      const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+      yield* executor.execute({
+        ...restartEffect(now, { type: "detach" }),
+        request: {
+          type: "provider-command.stop",
+          providerSessionId: oldSessionId,
+          providerThreadId,
+          providerTurnId,
+          itemId: TurnItemId.make("command-item"),
+          processId: "18604",
+        },
+      });
+    }).pipe(Effect.provide(layer));
+    assert.deepEqual(yield* Ref.get(events), ["terminate-command", "thread.tool.stop.complete"]);
   }),
 );
 
