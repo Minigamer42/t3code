@@ -151,6 +151,16 @@ rl.on("line", (line) => {
     }
     return;
   }
+  if (method === "turn/steer") {
+    if (script.recordRequests) {
+      NodeFS.appendFileSync(
+        `${process.env.T3_CODEX_COLLAB_SCRIPT}.requests`,
+        `${JSON.stringify({ method, params: message.params })}\n`,
+      );
+    }
+    write({ id, result: { turnId: activeTurn?.id } });
+    return;
+  }
   if (method === "turn/interrupt") {
     // Record which thread/turn was interrupted (append-only sidecar file the
     // test reads) so Stop coverage can assert every live child was reached.

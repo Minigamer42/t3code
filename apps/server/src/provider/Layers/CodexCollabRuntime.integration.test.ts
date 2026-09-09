@@ -605,26 +605,28 @@ describe("CodexSessionRuntime collab integration", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.live("Stop targets the active turn when Codex has accepted a queued follow-up", () =>
+  it.live("steers a running Codex turn and keeps Stop targeted at that turn", () =>
     Effect.gen(function* () {
       const activeTurnId = "019fe3e8-f908-7f31-8d51-283f4a47897a";
-      const queuedTurnId = "019fe3eb-8faf-7de3-a85b-ac64c7f9c8c3";
       const script = {
         rootThreadId: ROOT,
         holdTurnOpen: true,
-        onlyFirstTurnStarts: true,
-        turnIds: [activeTurnId, queuedTurnId],
+        turnIds: [activeTurnId],
         expectedActiveTurnId: activeTurnId,
+        recordRequests: true,
         notifications: [],
       };
       // @effect-diagnostics-next-line preferSchemaOverJson:off
       NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
       const interruptsPath = `${scriptPath}.interrupts`;
+      const requestsPath = `${scriptPath}.requests`;
       NodeFS.rmSync(interruptsPath, { force: true });
+      NodeFS.rmSync(requestsPath, { force: true });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           NodeFS.rmSync(scriptPath, { force: true });
           NodeFS.rmSync(interruptsPath, { force: true });
+          NodeFS.rmSync(requestsPath, { force: true });
         }),
       );
 
@@ -640,6 +642,19 @@ describe("CodexSessionRuntime collab integration", () => {
       yield* runtime.sendTurn({ input: "keep working" });
       yield* runtime.sendTurn({ input: "queued follow-up" });
       yield* runtime.interruptTurn();
+
+      const requests = NodeFS.readFileSync(requestsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { method?: string; params?: unknown });
+      assert.deepInclude(requests.at(-1), {
+        method: "turn/steer",
+        params: {
+          threadId: ROOT,
+          expectedTurnId: activeTurnId,
+          input: [{ type: "text", text: "queued follow-up" }],
+        },
+      });
 
       const interrupts = NodeFS.readFileSync(interruptsPath, "utf8")
         .trim()

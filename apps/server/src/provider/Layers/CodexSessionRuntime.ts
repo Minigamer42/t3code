@@ -187,6 +187,19 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly interactionMode?: ProviderInteractionMode;
 }
 
+function buildTurnUserInput(
+  input: Pick<CodexSessionRuntimeSendTurnInput, "input" | "attachments">,
+): Array<EffectCodexSchema.V2TurnStartParams__UserInput> {
+  const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
+  if (input.input) {
+    turnInput.push({ type: "text", text: input.input });
+  }
+  for (const attachment of input.attachments ?? []) {
+    turnInput.push(attachment);
+  }
+  return turnInput;
+}
+
 export interface CodexThreadTurnSnapshot {
   readonly id: TurnId;
   readonly items: ReadonlyArray<CodexThreadItem>;
@@ -615,16 +628,10 @@ export function buildTurnStartParams(input: {
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
 > {
-  const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
-  if (input.prompt) {
-    turnInput.push({
-      type: "text",
-      text: input.prompt,
-    });
-  }
-  for (const attachment of input.attachments ?? []) {
-    turnInput.push(attachment);
-  }
+  const turnInput = buildTurnUserInput({
+    ...(input.prompt ? { input: input.prompt } : {}),
+    ...(input.attachments ? { attachments: input.attachments } : {}),
+  });
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   const collaborationMode = buildCodexCollaborationMode({
@@ -2335,6 +2342,22 @@ export const makeCodexSessionRuntime = (
       sendTurn: (input) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
+          const currentSession = yield* Ref.get(sessionRef);
+          if (currentSession.status === "running" && currentSession.activeTurnId) {
+            const response = yield* client.request("turn/steer", {
+              threadId: providerThreadId,
+              expectedTurnId: currentSession.activeTurnId,
+              input: buildTurnUserInput(input),
+            });
+            const resumedProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+            return {
+              threadId: options.threadId,
+              turnId: TurnId.make(response.turnId),
+              ...(resumedProviderThreadId
+                ? { resumeCursor: { threadId: resumedProviderThreadId } }
+                : {}),
+            } satisfies ProviderTurnStartResult;
+          }
           if (hasConfiguredMcpServer(options.appServerArgs)) {
             yield* client.request("config/mcpServer/reload", undefined).pipe(
               Effect.catch((cause) =>
