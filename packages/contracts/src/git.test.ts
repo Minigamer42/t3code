@@ -128,6 +128,13 @@ describe("GitRunStackedActionInput", () => {
     expect(parsed.action).toBe("create_pr");
   });
 
+  it("accepts logical commit splitting", () => {
+    const parsed = decodeRunStackedActionInput({
+      actionId: "action-1", cwd: "/repo", action: "commit", splitCommits: true,
+    });
+    expect(parsed.splitCommits).toBe(true);
+  });
+
   it("preserves leading and trailing whitespace in file paths", () => {
     const parsed = decodeRunStackedActionInput({
       actionId: "action-1",
