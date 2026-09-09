@@ -105,6 +105,7 @@ export interface GitRemoteStatusDetails {
 export interface GitPreparedCommitContext {
   stagedSummary: string;
   stagedPatch: string;
+  stagedPatchTruncated?: boolean;
 }
 
 export interface ExecuteGitProgress {
@@ -320,6 +321,7 @@ export class GitVcsDriver extends Context.Service<
     readonly prepareCommitContext: (
       cwd: string,
       filePaths?: readonly string[],
+      options?: { readonly binaryPatch?: boolean; readonly maxOutputBytes?: number },
     ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
     readonly commit: (
       cwd: string,

@@ -2215,7 +2215,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const prepareCommitContext: GitVcsDriver.GitVcsDriver["Service"]["prepareCommitContext"] =
-    Effect.fn("prepareCommitContext")(function* (cwd, filePaths) {
+    Effect.fn("prepareCommitContext")(function* (cwd, filePaths, options) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
           const indexValue = yield* runGitStdout(
@@ -2268,20 +2268,30 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             return null;
           }
 
-          const stagedPatch = yield* runGitStdoutWithOptions(
+          const stagedPatch = yield* executeGit(
             "GitVcsDriver.prepareCommitContext.stagedPatch",
             cwd,
-            ["diff", "--no-ext-diff", "--cached", "--patch", "--minimal"],
+            [
+              "diff",
+              "--no-ext-diff",
+              "--cached",
+              "--patch",
+              "--minimal",
+              ...(options?.binaryPatch ? ["--binary", "--full-index"] : []),
+            ],
             {
               env,
-              maxOutputBytes: PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
+              maxOutputBytes: options?.maxOutputBytes ?? PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
               appendTruncationMarker: true,
             },
           );
 
           return {
             stagedSummary,
-            stagedPatch,
+            stagedPatch: stagedPatch.stdoutTruncated
+              ? `${stagedPatch.stdout}${OUTPUT_TRUNCATED_MARKER}`
+              : stagedPatch.stdout,
+            stagedPatchTruncated: stagedPatch.stdoutTruncated,
           };
         }),
       ).pipe(
