@@ -1313,7 +1313,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Compacted context 899K → 19K tokens");
   });
 
-  it("summarizes changed files in one line", () => {
+  it("resolves duplicate lifecycle file paths for summaries and details", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -1325,18 +1325,29 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Updated files",
+              label: "Changed files",
               tone: "tool",
-              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              itemType: "file_change",
+              changedFiles: [
+                "/home/me/projects/jobagent/individuell/target.php",
+                "jobagent/individuell/target.php",
+              ],
+              detail: "/home/me/projects/jobagent/individuell/target.php",
+              toolLifecycleStatus: "completed",
             },
           },
         ]}
-        workspaceRoot="C:/Users/mike/dev-stuff/t3code"
+        workspaceRoot="/home/me/projects/jobagent"
+        toolCallsExpanded
+        toolCallExpansionEpoch={1}
       />,
     );
 
-    expect(markup).toContain("Changed 1 file");
-    expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+    expect(markup).toContain('aria-label="jobagent/individuell/target.php"');
+    expect(markup).not.toContain("+1 more");
+    expect(markup.match(/\/home\/me\/projects\/jobagent\/individuell\/target\.php/g)).toHaveLength(
+      1,
+    );
   });
 
   it("keeps mixed-success tool groups neutral", () => {

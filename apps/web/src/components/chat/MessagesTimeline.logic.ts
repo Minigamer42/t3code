@@ -29,7 +29,7 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
-import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { resolveChangedFilePaths } from "../../filePathDisplay";
 
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
@@ -50,13 +50,20 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
   if (toolPresentation) return toolPresentation.displayName;
   if (entry.command) return entry.command;
+  const [firstPath, ...remainingPaths] = resolveChangedFilePaths(
+    entry.changedFiles ?? [],
+    workspaceRoot,
+  );
+  if (firstPath && toolGroupAction(entry) === "edit") {
+    return remainingPaths.length === 0
+      ? firstPath.displayPath
+      : `${firstPath.displayPath} +${remainingPaths.length} more`;
+  }
   if (entry.detail) return entry.detail;
-  const [firstPath] = entry.changedFiles ?? [];
   if (firstPath) {
-    const path = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-    return entry.changedFiles!.length === 1
-      ? path
-      : `${path} +${entry.changedFiles!.length - 1} more`;
+    return remainingPaths.length === 0
+      ? firstPath.displayPath
+      : `${firstPath.displayPath} +${remainingPaths.length} more`;
   }
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
@@ -1111,10 +1118,9 @@ export function deriveMessagesTimelineRows(input: {
             createdAt: timelineEntry.createdAt,
             groupedEntries: visibleGroupedEntries,
             isExpandedToolGroup: false,
-            displayLabel:
-              toolGroupAction(singleEntry) === "edit"
-                ? summarizeToolGroup(visibleGroupedEntries)
-                : singleToolCallLabel(singleEntry),
+            ...(toolGroupAction(singleEntry) === "edit"
+              ? {}
+              : { displayLabel: singleToolCallLabel(singleEntry) }),
           });
         } else {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
