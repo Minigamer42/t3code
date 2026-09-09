@@ -1245,6 +1245,53 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.detail).toBe("apps/web/src/Chat.tsx:42 - 1 problem");
   });
 
+  it("summarizes completed IDE reformat calls from their result message", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mcp-reformat-done",
+        kind: "tool.completed",
+        summary: "phpstorm-index · ide_reformat_code",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "phpstorm-index · ide_reformat_code",
+          data: {
+            item: {
+              type: "mcpToolCall",
+              server: "phpstorm-index",
+              tool: "ide_reformat_code",
+              arguments: {
+                file: "framework/core/Core_DATATABLEFUNCTION.php",
+                startLine: 562,
+                endLine: 577,
+              },
+              status: "completed",
+              result: {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      success: true,
+                      affectedFiles: ["framework/core/Core_DATATABLEFUNCTION.php"],
+                      changesCount: 1,
+                      message:
+                        "Reformatted framework/core/Core_DATATABLEFUNCTION.php (lines 562-577)",
+                    }),
+                  },
+                ],
+                structuredContent: null,
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.detail).toBe(
+      "Reformatted framework/core/Core_DATATABLEFUNCTION.php (lines 562-577)",
+    );
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

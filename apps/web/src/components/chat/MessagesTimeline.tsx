@@ -3452,13 +3452,15 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     "flex size-6 shrink-0 items-center justify-center",
     showWarningIndicator
       ? "text-warning"
-      : showDestructiveRowStyle
-        ? "text-destructive"
-        : showFailedIndicator
-          ? failedToolIconClassName
-          : workEntry.tone === "tool"
-            ? "text-icon-muted"
-            : iconConfig.className,
+      : workEntry.toolLifecycleStatus === "inProgress"
+        ? "text-sky-500 dark:text-sky-300/80"
+        : showDestructiveRowStyle
+          ? "text-destructive"
+          : showFailedIndicator
+            ? failedToolIconClassName
+            : workEntry.tone === "tool"
+              ? "text-icon-muted"
+              : iconConfig.className,
   );
   const headingClass = showWarningIndicator
     ? "font-medium text-warning"
@@ -3467,9 +3469,12 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : workLogEntryIsToolLike(workEntry)
         ? "text-secondary-label"
         : "text-foreground/80";
+  const showRunningIndicator = workEntry.toolLifecycleStatus === "inProgress";
   const accessibleDisplayText = showFailedIndicator
     ? `${previewText}, tool call failed`
-    : previewText;
+    : showRunningIndicator
+      ? `${previewText}, tool call running`
+      : previewText;
   const rowToggleProps = canExpand
     ? {
         role: "button" as const,
@@ -3499,13 +3504,22 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
         <span
           className={iconWrapperClass}
-          role={showFailedIndicator ? "img" : undefined}
-          aria-label={showFailedIndicator ? "Tool call failed" : undefined}
+          role={showFailedIndicator || showRunningIndicator ? "img" : undefined}
+          aria-label={
+            showFailedIndicator
+              ? "Tool call failed"
+              : showRunningIndicator
+                ? "Tool call running"
+                : undefined
+          }
         >
           <ToolActivityIconView
             icon={entryToolIcon}
             fallbackName={entryIconName}
-            className="block size-4 shrink-0 stroke-[1.8]"
+            className={cn(
+              "block size-4 shrink-0 stroke-[1.8]",
+              showRunningIndicator && "animate-status-pulse",
+            )}
             muted
           />
         </span>

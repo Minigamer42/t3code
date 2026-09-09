@@ -1270,6 +1270,23 @@ function parseJsonRecord(value: unknown): Record<string, unknown> | null {
   }
 }
 
+function extractMcpToolResultRecord(
+  item: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const result = asRecord(item?.result);
+  const structuredContent = asRecord(result?.structuredContent);
+  if (structuredContent) {
+    return structuredContent;
+  }
+
+  const content = Array.isArray(result?.content) ? result.content : [];
+  return (
+    content
+      .map((entry) => parseJsonRecord(asRecord(entry)?.text))
+      .find((entry) => entry !== null) ?? null
+  );
+}
+
 function extractIdeDiagnosticsPreview(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
@@ -1287,13 +1304,7 @@ function extractIdeDiagnosticsPreview(payload: Record<string, unknown> | null): 
       : file
     : null;
 
-  const result = asRecord(item?.result);
-  const structuredContent = asRecord(result?.structuredContent);
-  const content = Array.isArray(result?.content) ? result.content : [];
-  const textResult = content
-    .map((entry) => parseJsonRecord(asRecord(entry)?.text))
-    .find((entry) => entry !== null);
-  const diagnostics = structuredContent ?? textResult;
+  const diagnostics = extractMcpToolResultRecord(item);
   const problemCount = asNumber(diagnostics?.problemCount);
   const problemSummary =
     problemCount === null
@@ -1304,6 +1315,18 @@ function extractIdeDiagnosticsPreview(payload: Record<string, unknown> | null): 
     return `${location} - ${problemSummary}`;
   }
   return location ?? problemSummary;
+}
+
+function extractIdeReformatPreview(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  if (asTrimmedString(item?.tool)?.toLowerCase() !== "ide_reformat_code") {
+    return null;
+  }
+
+  const result = extractMcpToolResultRecord(item);
+  const message = asTrimmedString(result?.message);
+  return message ? truncateInlinePreview(normalizeInlinePreview(message)) : null;
 }
 
 function extractToolResultPreview(payload: Record<string, unknown> | null): string | null {
@@ -1388,6 +1411,11 @@ function extractToolDetail(
   const diagnosticsPreview = extractIdeDiagnosticsPreview(payload);
   if (diagnosticsPreview) {
     return diagnosticsPreview;
+  }
+
+  const reformatPreview = extractIdeReformatPreview(payload);
+  if (reformatPreview) {
+    return reformatPreview;
   }
 
   if (commandTool && command) {
