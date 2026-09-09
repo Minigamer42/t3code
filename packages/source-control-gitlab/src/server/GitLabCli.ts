@@ -320,6 +320,7 @@ export class GitLabCli extends Context.Service<
       readonly target?: SourceControlProvider.SourceControlRefSelector;
       readonly title: string;
       readonly bodyFile: string;
+      readonly body?: string;
     }) => Effect.Effect<void, GitLabCliError>;
 
     readonly getDefaultBranch: (input: {
@@ -724,8 +725,9 @@ export const make = Effect.gen(function* () {
           "--raw-field",
           `title=${input.title}`,
           "--field",
-          `description=@${input.bodyFile}`,
+          input.body === undefined ? `description=@${input.bodyFile}` : "description=@-",
         ],
+        ...(input.body !== undefined ? { stdin: input.body } : {}),
       });
     }),
     getDefaultBranch: Effect.fn("GitLabCli.getDefaultBranch")(function (input) {
