@@ -377,16 +377,16 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
-function stateArgs(state: "open" | "closed" | "merged" | "all"): ReadonlyArray<string> {
+function gitLabApiState(state: "open" | "closed" | "merged" | "all"): string {
   switch (state) {
     case "open":
-      return [];
+      return "opened";
     case "closed":
-      return ["--closed"];
+      return "closed";
     case "merged":
-      return ["--merged"];
+      return "merged";
     case "all":
-      return ["--all"];
+      return "all";
   }
 }
 
@@ -523,16 +523,21 @@ export const make = Effect.gen(function* () {
         const result = yield* execute({
           cwd: input.cwd,
           args: [
-            "mr",
-            "list",
-            "--source-branch",
-            sourceRefName(input),
-            ...stateArgs(input.state),
-            "--per-page",
-            String(pageSize),
-            ...(page > 1 ? ["--page", String(page)] : []),
-            "--output",
-            "json",
+            "api",
+            "--method",
+            "GET",
+            "projects/:fullpath/merge_requests",
+            "--raw-field",
+            `source_branch=${sourceRefName(input)}`,
+            "--raw-field",
+            `state=${gitLabApiState(input.state)}`,
+            "--raw-field",
+            `per_page=${String(pageSize)}`,
+            ...(page > 1 ? ["--raw-field", `page=${String(page)}`] : []),
+            "--raw-field",
+            "order_by=updated_at",
+            "--raw-field",
+            "sort=desc",
           ],
           maxOutputBytes: MERGE_REQUEST_LIST_MAX_BYTES,
         });
