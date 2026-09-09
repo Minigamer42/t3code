@@ -15,6 +15,8 @@ export type {
   BranchNameGenerationResult,
   CommitMessageGenerationInput,
   CommitMessageGenerationResult,
+  CommitPlanGenerationInput,
+  CommitPlanGenerationResult,
   PrContentGenerationInput,
   PrContentGenerationResult,
   ReviewGuideGenerationInput,
@@ -32,6 +34,7 @@ export class TextGeneration extends Context.Service<TextGeneration, ProviderText
 
 type TextGenerationOp =
   | "generateCommitMessage"
+  | "generateCommitPlan"
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
@@ -63,6 +66,10 @@ export const make = Effect.gen(function* () {
     generateCommitMessage: (input) =>
       resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
+      ),
+    generateCommitPlan: (input) =>
+      resolveInstance(registry, "generateCommitPlan", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateCommitPlan(input)),
       ),
     generatePrContent: (input) =>
       resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
