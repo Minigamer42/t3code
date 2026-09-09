@@ -1763,6 +1763,31 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.include(status, "?? selected1.txt");
       }),
     );
+
+    it.effect("builds diff context from the merge base when the base branch has advanced", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["branch", "feature"]);
+        yield* writeTextFile(cwd, "base-only.txt", "base change\n");
+        yield* git(cwd, ["add", "base-only.txt"]);
+        yield* git(cwd, ["commit", "-m", "Advance base"]);
+        yield* git(cwd, ["checkout", "feature"]);
+        yield* writeTextFile(cwd, "feature-only.txt", "feature change\n");
+        yield* git(cwd, ["add", "feature-only.txt"]);
+        yield* git(cwd, ["commit", "-m", "Add feature"]);
+
+        const context = yield* driver.readRangeContext(cwd, initialBranch);
+
+        assert.include(context.commitSummary, "Add feature");
+        assert.notInclude(context.commitSummary, "Advance base");
+        assert.include(context.diffSummary, "feature-only.txt");
+        assert.notInclude(context.diffSummary, "base-only.txt");
+        assert.include(context.diffPatch, "feature change");
+        assert.notInclude(context.diffPatch, "base change");
+      }),
+    );
   });
 
   describe("remote operations", () => {
