@@ -64,7 +64,7 @@ import {
   ForgejoPullRequestSchema,
   toForgejoChangeRequest,
 } from "@t3tools/source-control-forgejo/server/forgejoPullRequests";
-import type { SourceControlProvider } from "@t3tools/source-control-core/server/SourceControlProvider";
+import type { SourceControlProvider, SourceControlProviderContext } from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -725,6 +725,8 @@ function preparePullRequestThread(
 function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   sourceControlProvider?: SourceControlProvider["Service"];
+  resolvedSourceControlContext?: SourceControlProviderContext | null;
+  sourceControlResolveCalls?: string[];
   textGeneration?: Partial<FakeGitTextGeneration>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
@@ -828,7 +830,11 @@ function makeManager(input?: {
         SourceControlProviderRegistry.SourceControlProviderRegistry.of({
           resolveLink: (input) => provider.resolveLink?.(input),
           get: () => Effect.succeed(provider),
-          resolveHandle: () => Effect.succeed({ provider, context: null }),
+          resolveHandle: ({ cwd }) =>
+            Effect.sync(() => {
+              input?.sourceControlResolveCalls?.push(cwd);
+              return { provider, context: input?.resolvedSourceControlContext ?? null };
+            }),
           resolve: () => Effect.succeed(provider),
           discover: Effect.succeed([]),
         }),
@@ -1533,6 +1539,39 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.refName).toBe("feature/never-pushed");
       expect(status.pr).toBeNull();
       expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(0);
+    }),
+  );
+
+  it.effect("local status refines an unknown remote through the provider registry", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      const remoteUrl = "git@code.example.com:team/repository.git";
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* configureVisibleRemoteUrlWithLocalRewrite(repoDir, "origin", remoteUrl, remoteDir);
+      const resolveCalls: string[] = [];
+      const { manager } = yield* makeManager({
+        resolvedSourceControlContext: {
+          provider: {
+            kind: "gitlab",
+            name: "Company GitLab",
+            baseUrl: "https://code.example.com",
+          },
+          remoteName: "origin",
+          remoteUrl,
+        },
+        sourceControlResolveCalls: resolveCalls,
+      });
+
+      const status = yield* manager.localStatus({ cwd: repoDir });
+
+      expect(status.sourceControlProvider).toEqual({
+        kind: "gitlab",
+        name: "Company GitLab",
+        baseUrl: "https://code.example.com",
+      });
+      expect(resolveCalls).toEqual([repoDir]);
     }),
   );
 
