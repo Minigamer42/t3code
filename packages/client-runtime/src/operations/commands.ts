@@ -33,7 +33,7 @@ import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
-import { getInitialServerConfig, request } from "../rpc/client.ts";
+import { getInitialServerConfig, request, requestGuarded } from "../rpc/client.ts";
 
 interface CommandMetadata {
   readonly commandId?: CommandId;
@@ -190,6 +190,10 @@ export interface InterruptThreadTurnInput extends ThreadCommandInput {
   /** Temporary caller compatibility while UI naming moves from turns to runs. */
   readonly turnId?: string;
 }
+export type StopThreadToolInput = Extract<
+  OrchestrationV2Command,
+  { readonly type: "thread.tool.stop" }
+>;
 
 export interface RespondToThreadApprovalInput extends ThreadCommandInput {
   readonly requestId: RuntimeRequestId;
@@ -782,6 +786,12 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
  * background work still runs. With no run to stop, it ends the thread's pull request
  * watches, the only background work that has no run.
  */
+export const stopThreadTool = Effect.fn("EnvironmentCommands.stopThreadTool")(function* (
+  input: StopThreadToolInput,
+) {
+  return yield* requestGuarded(ORCHESTRATION_V2_WS_METHODS.stopTool, input);
+});
+
 export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThreadTurn")(function* (
   input: InterruptThreadTurnInput,
 ) {

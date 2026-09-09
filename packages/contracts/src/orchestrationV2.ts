@@ -2714,6 +2714,13 @@ export const OrchestrationV2StoredEventJson = Schema.Struct({
 });
 export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJson.Type;
 
+export const OrchestrationV2StopToolInput = Schema.Struct({
+  type: Schema.Literal("thread.tool.stop"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  itemId: TurnItemId,
+});
+
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
@@ -3034,12 +3041,7 @@ export const OrchestrationV2Command = Schema.Union([
      */
     holdQueue: Schema.optional(Schema.Boolean),
   }),
-  Schema.Struct({
-    type: Schema.Literal("thread.tool.stop"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    itemId: TurnItemId,
-  }),
+  OrchestrationV2StopToolInput,
   Schema.Struct({
     type: Schema.Literal("queued-message.promote-to-steer"),
     commandId: CommandId,
@@ -3283,6 +3285,7 @@ export type OrchestrationV2ServerCommand = OrchestrationV2Command | Orchestratio
 
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
+  stopTool: "orchestration.stopTool",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",

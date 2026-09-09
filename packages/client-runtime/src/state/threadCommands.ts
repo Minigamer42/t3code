@@ -7,6 +7,7 @@ import {
   WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
+  ORCHESTRATION_V2_WS_METHODS,
 } from "@t3tools/contracts";
 
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
@@ -26,6 +27,7 @@ import {
   type DeleteThreadInput,
   type EditQueuedRunInput,
   type InterruptThreadTurnInput,
+  type StopThreadToolInput,
   type MarkThreadUnreadInput,
   type ForkThreadFromRunInput,
   type MergeThreadBackInput,
@@ -60,6 +62,7 @@ import {
   deleteThread,
   editQueuedRun,
   interruptThreadTurn,
+  stopThreadTool,
   forkThreadFromRun,
   markThreadUnread,
   mergeThreadBack,
@@ -107,6 +110,7 @@ export type {
   DeleteThreadInput,
   EditQueuedRunInput,
   InterruptThreadTurnInput,
+  StopThreadToolInput,
   MarkThreadUnreadInput,
   ForkThreadFromRunInput,
   MergeThreadBackInput,
@@ -284,6 +288,13 @@ export function createThreadEnvironmentAtoms<R, E>(
     interruptTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:interrupt-turn",
       execute: (input: InterruptThreadTurnInput) => interruptThreadTurn(input),
+      scheduler,
+      concurrency,
+    }),
+    stopTool: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:stop-tool",
+      tag: ORCHESTRATION_V2_WS_METHODS.stopTool,
+      execute: (input: StopThreadToolInput) => stopThreadTool(input),
       scheduler,
       concurrency,
     }),

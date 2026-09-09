@@ -1,3 +1,7 @@
+import { CommandId } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { threadEnvironment } from "../../state/threads";
 import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
@@ -6,6 +10,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   toolCallLines,
+  turnItemCanStopCommand,
   turnItemDetailRevision,
   turnItemNeedsDetailFetch,
   turnItemOutputImages,
@@ -14,10 +19,10 @@ import {
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
-import { memo, Suspense, use, useMemo } from "react";
+import { memo, Suspense, use, useMemo, useState } from "react";
 
 import { useTheme } from "../../hooks/useTheme";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { resolveDiffThemeName } from "../../lib/diffRendering";
 import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { useTurnItemDetail } from "../../state/queries";
@@ -238,6 +243,10 @@ function ToolCallBody(
 }
 
 export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspectorProps) {
+  const stopTool = useOrchestrationCommand(threadEnvironment.stopTool, "stop command");
+  const canStopTool = useAtomValue(threadEnvironment.stopTool.permissionAtom(props.environmentId));
+  const [stopBusy, setStopBusy] = useState(false);
+  const wireItem = props.projectedItem.item;
   const fetched = useFetchedTurnItem(props.projectedItem, props.environmentId);
   const item = fetched.item;
   const outputState = fetched.output;
@@ -263,12 +272,40 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "command_execution" ? (
-        <ToolCallBody
-          command={item.input}
-          exitCode={item.exitCode}
-          {...outputState}
-          onImageExpand={props.onImageExpand}
-        />
+        <>
+          {wireItem.type === "command_execution" && turnItemCanStopCommand(wireItem) ? (
+            <div className="flex justify-end">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!canStopTool || stopBusy || wireItem.stopRequested}
+                aria-label={
+                  wireItem.stopRequested ? "Command stop requested" : `Stop ${wireItem.input}`
+                }
+                onClick={() => {
+                  setStopBusy(true);
+                  void stopTool({
+                    environmentId: props.environmentId,
+                    input: {
+                      type: "thread.tool.stop",
+                      commandId: CommandId.make(randomUUID()),
+                      threadId: props.projectedItem.sourceThreadId,
+                      itemId: props.projectedItem.sourceItemId,
+                    },
+                  }).finally(() => setStopBusy(false));
+                }}
+              >
+                {wireItem.stopRequested ? "Stop requested" : "Stop command"}
+              </Button>
+            </div>
+          ) : null}
+          <ToolCallBody
+            command={item.input}
+            exitCode={item.exitCode}
+            {...outputState}
+            onImageExpand={props.onImageExpand}
+          />
+        </>
       ) : null}
 
       {item.type === "file_change" ? (

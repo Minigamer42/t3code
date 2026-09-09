@@ -1,8 +1,8 @@
-import { ThreadId, TurnItemId } from "@t3tools/contracts";
+import { ThreadId, TurnItemId, ProviderDriverKind } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { turnItemOutputImages, turnItemOutputText } from "./itemDetail.ts";
+import { turnItemCanStopCommand, turnItemOutputImages, turnItemOutputText } from "./itemDetail.ts";
 
 const screenshot = {
   id: TurnItemId.make("tool-screenshot"),
@@ -32,6 +32,38 @@ const screenshot = {
 };
 
 describe("tool output images", () => {
+  it("offers per-command Stop only for active Codex process handles", () => {
+    const {
+      type: _type,
+      toolName: _toolName,
+      input: _input,
+      output: _output,
+      ...base
+    } = screenshot;
+    const item = {
+      ...base,
+      type: "command_execution" as const,
+      input: "sleep 60",
+      processId: "18604",
+      nativeItemRef: {
+        driver: ProviderDriverKind.make("codex"),
+        nativeId: "command-1",
+        strength: "strong" as const,
+      },
+    };
+    for (const status of ["pending", "running", "waiting"] as const)
+      expect(turnItemCanStopCommand({ ...item, status })).toBe(true);
+    for (const status of ["completed", "failed", "interrupted", "cancelled", "idle"] as const)
+      expect(turnItemCanStopCommand({ ...item, status })).toBe(false);
+    expect(turnItemCanStopCommand({ ...item, status: "running", processId: "" })).toBe(false);
+    expect(
+      turnItemCanStopCommand({
+        ...item,
+        status: "running",
+        nativeItemRef: { ...item.nativeItemRef, driver: ProviderDriverKind.make("claude-code") },
+      }),
+    ).toBe(false);
+  });
   it("shows a screenshot as an image asset, not as text", () => {
     expect(turnItemOutputImages(screenshot)).toEqual([
       {

@@ -14,6 +14,7 @@ import {
   EnvironmentId,
   ScheduledTaskId,
   WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
   type AuthSessionState,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -106,6 +107,25 @@ describe("command permissions", () => {
     ),
   );
 
+  it.effect("requires the destination operate grant for per-command Stop dispatch", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const stopPermissions = createCommandPermissions(
+          runtime,
+          ORCHESTRATION_V2_WS_METHODS.stopTool,
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(stopPermissions.permissionAtom(env))).toBe(false);
+        expect((yield* stopPermissions.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(stopPermissions.permissionAtom(env))).toBe(true);
+        yield* stopPermissions.authorize(registry, env);
+      }),
+    ),
+  );
   it.effect("uses the target grant for both availability and execution", () =>
     Effect.scoped(
       Effect.gen(function* () {
