@@ -23,11 +23,13 @@ import type { AcpSessionRuntime } from "../provider/acp/AcpSessionRuntime.ts";
 import type * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
+  buildCommitPlanPrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
+  sanitizeCommitPlan,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -359,6 +361,21 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateCommitPlan: TextGeneration.TextGeneration["Service"]["generateCommitPlan"] =
+    Effect.fn("AntigravityTextGeneration.generateCommitPlan")(function* (input) {
+      const generated = yield* runAntigravityJson({
+        operation: "generateCommitPlan",
+        ...buildCommitPlanPrompt({
+          branch: input.branch,
+          changeUnitSummary: input.changeUnitSummary,
+          annotatedPatch: input.annotatedPatch,
+          policy: input.policy,
+        }),
+        modelSelection: input.modelSelection,
+      });
+      return { commits: sanitizeCommitPlan(generated.commits) };
+    });
+
   const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
     Effect.fn("AntigravityTextGeneration.generatePrContent")(function* (input) {
       const generated = yield* runAntigravityJson({
@@ -403,6 +420,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
 
   return {
     generateCommitMessage,
+    generateCommitPlan,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,

@@ -16,12 +16,14 @@ import * as ServerConfig from "../config.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import {
   buildBranchNamePrompt,
+  buildCommitPlanPrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
+  sanitizeCommitPlan,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -31,6 +33,7 @@ import * as OpenCodeServerOwner from "../provider/OpenCodeServerOwner.ts";
 
 const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateCommitMessage",
+  "generateCommitPlan",
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
@@ -385,6 +388,25 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateCommitPlan: TextGeneration.TextGeneration["Service"]["generateCommitPlan"] =
+    Effect.fn("OpenCodeTextGeneration.generateCommitPlan")(function* (input) {
+      const { prompt, outputSchema } = buildCommitPlanPrompt({
+        branch: input.branch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
+        policy: input.policy,
+      });
+      const generated = yield* runOpenCodeJson({
+        operation: "generateCommitPlan",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return { commits: sanitizeCommitPlan(generated.commits) };
+    });
+
   const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
     Effect.fn("OpenCodeTextGeneration.generatePrContent")(function* (input) {
       const { prompt, outputSchema } = buildPrContentPrompt({
@@ -453,6 +475,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
 
   return {
     generateCommitMessage,
+    generateCommitPlan,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,

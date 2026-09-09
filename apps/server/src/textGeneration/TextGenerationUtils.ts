@@ -37,6 +37,20 @@ export function sanitizeCommitSubject(raw: string): string {
   return withoutTrailingPeriod.slice(0, 72).trimEnd();
 }
 
+export function sanitizeCommitPlan(
+  commits: ReadonlyArray<{
+    subject: string;
+    body: string;
+    hunkIds: ReadonlyArray<string>;
+  }>,
+): Array<{ subject: string; body: string; hunkIds: string[] }> {
+  return commits.map((commit) => ({
+    subject: sanitizeCommitSubject(commit.subject),
+    body: commit.body.trim(),
+    hunkIds: commit.hunkIds.map((hunkId) => hunkId.trim()),
+  }));
+}
+
 /** Normalise a raw PR title to a single line with a sensible fallback. */
 export function sanitizePrTitle(raw: string): string {
   const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? "";

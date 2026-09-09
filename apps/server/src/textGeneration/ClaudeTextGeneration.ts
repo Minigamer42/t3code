@@ -22,12 +22,14 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
+  buildCommitPlanPrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
+  sanitizeCommitPlan,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -100,6 +102,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   const encodeJsonForOperation = (
     operation:
       | "generateCommitMessage"
+      | "generateCommitPlan"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle",
@@ -130,6 +133,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   }: {
     operation:
       | "generateCommitMessage"
+      | "generateCommitPlan"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle";
@@ -341,6 +345,26 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateCommitPlan: TextGeneration.TextGeneration["Service"]["generateCommitPlan"] =
+    Effect.fn("ClaudeTextGeneration.generateCommitPlan")(function* (input) {
+      const { prompt, outputSchema } = buildCommitPlanPrompt({
+        branch: input.branch,
+        changeUnitSummary: input.changeUnitSummary,
+        annotatedPatch: input.annotatedPatch,
+        policy: input.policy,
+      });
+
+      const generated = yield* runClaudeJson({
+        operation: "generateCommitPlan",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return { commits: sanitizeCommitPlan(generated.commits) };
+    });
+
   const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
     Effect.fn("ClaudeTextGeneration.generatePrContent")(function* (input) {
       const { prompt, outputSchema } = buildPrContentPrompt({
@@ -410,6 +434,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
 
   return {
     generateCommitMessage,
+    generateCommitPlan,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,

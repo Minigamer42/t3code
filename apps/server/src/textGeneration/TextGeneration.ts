@@ -29,6 +29,25 @@ export interface CommitMessageGenerationResult {
   branch?: string | undefined;
 }
 
+export interface CommitPlanGenerationInput {
+  cwd: string;
+  branch: string | null;
+  changeUnitSummary: string;
+  annotatedPatch: string;
+  /** Optional repository-specific instructions for generated commit text. */
+  policy?: TextGenerationPolicy | undefined;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface CommitPlanGenerationResult {
+  commits: Array<{
+    subject: string;
+    body: string;
+    hunkIds: string[];
+  }>;
+}
+
 export interface PrContentGenerationInput {
   cwd: string;
   baseBranch: string;
@@ -86,6 +105,11 @@ export class TextGeneration extends Context.Service<
       input: CommitMessageGenerationInput,
     ) => Effect.Effect<CommitMessageGenerationResult, TextGenerationError>;
 
+    /** Partition staged changes into ordered, logical commits. */
+    readonly generateCommitPlan: (
+      input: CommitPlanGenerationInput,
+    ) => Effect.Effect<CommitPlanGenerationResult, TextGenerationError>;
+
     /**
      * Generate change request title/body from branch and diff context.
      */
@@ -109,6 +133,7 @@ export class TextGeneration extends Context.Service<
 
 type TextGenerationOp =
   | "generateCommitMessage"
+  | "generateCommitPlan"
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle";
@@ -138,6 +163,10 @@ export const makeTextGenerationFromRegistry = (
     generateCommitMessage: (input) =>
       resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
+      ),
+    generateCommitPlan: (input) =>
+      resolveInstance(registry, "generateCommitPlan", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateCommitPlan(input)),
       ),
     generatePrContent: (input) =>
       resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
