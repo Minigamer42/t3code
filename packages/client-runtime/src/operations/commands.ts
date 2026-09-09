@@ -44,6 +44,7 @@ import {
   getInitialServerConfig,
   isRpcClientError,
   request,
+  requestGuarded,
 } from "../rpc/client.ts";
 
 interface CommandMetadata {
@@ -206,6 +207,10 @@ export interface InterruptThreadTurnInput extends ThreadCommandInput {
   readonly subagentId?: NodeId;
   readonly turnId?: string;
 }
+export type StopThreadToolInput = Extract<
+  OrchestrationV2Command,
+  { readonly type: "thread.tool.stop" }
+>;
 
 export interface RespondToThreadApprovalInput extends ThreadCommandInput {
   readonly requestId: RuntimeRequestId;
@@ -865,6 +870,12 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     },
     resendAfterSocketLoss,
   );
+});
+
+export const stopThreadTool = Effect.fn("EnvironmentCommands.stopThreadTool")(function* (
+  input: StopThreadToolInput,
+) {
+  return yield* requestGuarded(ORCHESTRATION_V2_WS_METHODS.stopTool, input);
 });
 
 export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThreadTurn")(function* (

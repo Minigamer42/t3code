@@ -7,6 +7,7 @@ import {
   WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
+  ORCHESTRATION_V2_WS_METHODS,
 } from "@t3tools/contracts";
 
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
@@ -24,6 +25,7 @@ import { waitForTitleRegenerationOutcome } from "./threadTitleRegeneration.ts";
 import {
   type InterruptThreadTurnInput,
   type UpdateThreadMetadataInput,
+  type StopThreadToolInput,
   archiveThread,
   closeGuestShare,
   resolveGuestMessage,
@@ -33,6 +35,7 @@ import {
   editQueuedRun,
   interruptThreadTurn,
   forkSideChat,
+  stopThreadTool,
   forkThreadFromRun,
   markThreadUnread,
   mergeThreadBack,
@@ -74,6 +77,7 @@ export type LoadEarlierThreadHistoryInput = {
   readonly workAnchorId?: string;
 };
 
+export type { StopThreadToolInput } from "../operations/commands.ts";
 export function createThreadEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | SecureRandom.SecureRandom | R, E>,
   snapshotAtom: (environmentId: EnvironmentId) => Atom.Atom<OrchestrationV2ShellSnapshot | null>,
@@ -314,6 +318,13 @@ export function createThreadEnvironmentAtoms<R, E>(
     interruptTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:interrupt-turn",
       execute: interruptTurn,
+      scheduler,
+      concurrency,
+    }),
+    stopTool: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:stop-tool",
+      tag: ORCHESTRATION_V2_WS_METHODS.stopTool,
+      execute: (input: StopThreadToolInput) => stopThreadTool(input),
       scheduler,
       concurrency,
     }),
