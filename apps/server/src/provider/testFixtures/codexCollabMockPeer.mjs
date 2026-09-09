@@ -196,6 +196,14 @@ rl.on("line", (line) => {
     write({ id, result: {} });
     return;
   }
+  if (method === "thread/backgroundTerminals/clean") {
+    NodeFS.appendFileSync(
+      `${process.env.T3_CODEX_COLLAB_SCRIPT}.cleanups`,
+      `${JSON.stringify({ threadId: message.params?.threadId })}\n`,
+    );
+    write({ id, result: {} });
+    return;
+  }
   if (id !== undefined) {
     write({ id, result: {} });
   }

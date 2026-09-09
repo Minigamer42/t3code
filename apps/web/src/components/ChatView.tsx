@@ -1644,6 +1644,11 @@ export default function ChatView(props: ChatViewProps) {
   const [queuedAutoDispatchBarrier, setQueuedAutoDispatchBarrier] =
     useState<QueuedAutoDispatchBarrier | null>(null);
   const autoDispatchAttemptedMessageIdsRef = useRef<Set<MessageId>>(new Set());
+  const [interruptRequestedThreadId, setInterruptRequestedThreadId] = useState<ThreadId | null>(
+    null,
+  );
+  const interruptRequestedThreadIdRef = useRef<ThreadId | null>(null);
+  const interruptAttemptedTurnKeyRef = useRef<string | null>(null);
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, LocalThreadErrorEntry>
   >({});
@@ -2984,6 +2989,11 @@ export default function ChatView(props: ChatViewProps) {
     !compactionSettled;
   const isWorking =
     phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
+  const isTurnInterruptible =
+    phase === "running" ||
+    isSendBusy ||
+    (activeLatestTurn !== null && !latestTurnSettled) ||
+    interruptRequestedThreadId === activeThread?.id;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -3610,24 +3620,84 @@ export default function ChatView(props: ChatViewProps) {
     [activeServerThread, draftId, routeThreadKey, routeThreadRef],
   );
 
-  const interruptContextRef = useRef({ activeThread, phase, setThreadError });
-  interruptContextRef.current = { activeThread, phase, setThreadError };
-  const onInterrupt = useCallback(async () => {
-    const { activeThread, phase, setThreadError } = interruptContextRef.current;
-    const input = buildRunningThreadTurnInterruptInput(activeThread, phase);
-    if (!input || !activeThread) return;
-    const result = await interruptThreadTurn({
-      environmentId: activeThread.environmentId,
-      input,
-    });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      setThreadError(
-        activeThread.id,
-        error instanceof Error ? error.message : "Failed to interrupt the current turn.",
-      );
+  const requestThreadInterrupt = useCallback(
+    async (input: { threadId: ThreadId; turnId?: TurnId }) => {
+      const result = await interruptThreadTurn({ environmentId, input });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          input.threadId,
+          error instanceof Error ? error.message : "Failed to interrupt the current turn.",
+        );
+      }
+    },
+    [environmentId, interruptThreadTurn, setThreadError],
+  );
+
+  const interruptAcceptedDispatchIfRequested = useCallback(
+    async (threadId: ThreadId) => {
+      if (interruptRequestedThreadIdRef.current !== threadId) return;
+      await requestThreadInterrupt({ threadId });
+    },
+    [requestThreadInterrupt],
+  );
+
+  useEffect(() => {
+    if (
+      interruptRequestedThreadId === null ||
+      !activeThread ||
+      activeThread.id !== interruptRequestedThreadId
+    ) {
+      return;
     }
-  }, [interruptThreadTurn]);
+
+    if (phase === "running") {
+      const activeTurnId =
+        activeThread.session?.status === "running"
+          ? activeThread.session.activeTurnId
+          : activeLatestTurn?.state === "running"
+            ? activeLatestTurn.turnId
+            : null;
+      const turnKey = activeTurnId ?? `${activeThread.id}:running`;
+      if (interruptAttemptedTurnKeyRef.current !== turnKey) {
+        interruptAttemptedTurnKeyRef.current = turnKey;
+        void requestThreadInterrupt({
+          threadId: activeThread.id,
+          ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        });
+      }
+      return;
+    }
+
+    if (!isSendBusy && queuedTurnIsSettled && !sendInFlightRef.current) {
+      interruptRequestedThreadIdRef.current = null;
+      interruptAttemptedTurnKeyRef.current = null;
+      setInterruptRequestedThreadId(null);
+    }
+  }, [
+    activeLatestTurn,
+    activeThread,
+    interruptRequestedThreadId,
+    isSendBusy,
+    phase,
+    queuedTurnIsSettled,
+    requestThreadInterrupt,
+  ]);
+
+  const onInterrupt = useCallback(async () => {
+    if (!activeThread) return;
+    const interruptInput = buildThreadTurnInterruptInput(activeThread);
+    interruptRequestedThreadIdRef.current = activeThread.id;
+    interruptAttemptedTurnKeyRef.current =
+      phase === "running" ? (interruptInput.turnId ?? `${activeThread.id}:running`) : null;
+    setInterruptRequestedThreadId(activeThread.id);
+    await requestThreadInterrupt(interruptInput);
+    if (phase !== "running" && !isSendBusy && queuedTurnIsSettled && !sendInFlightRef.current) {
+      interruptRequestedThreadIdRef.current = null;
+      interruptAttemptedTurnKeyRef.current = null;
+      setInterruptRequestedThreadId(null);
+    }
+  }, [activeThread, isSendBusy, phase, queuedTurnIsSettled, requestThreadInterrupt]);
   const canInterruptRunningThread =
     buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
 
@@ -5301,6 +5371,9 @@ export default function ChatView(props: ChatViewProps) {
     queuedDispatchInFlightRef.current = false;
     pendingQueuedSendNowMessageIdsRef.current = [];
     setQueuedAutoDispatchBarrier(null);
+    interruptRequestedThreadIdRef.current = null;
+    interruptAttemptedTurnKeyRef.current = null;
+    setInterruptRequestedThreadId(null);
     setExpandedImage(null);
   }, [draftId, resetLocalDispatch, threadId]);
 
@@ -7159,6 +7232,7 @@ export default function ChatView(props: ChatViewProps) {
             releaseDraftAttachments(composerAttachmentsSnapshot);
           }
           acknowledgeActiveThreadWoke();
+          await interruptAcceptedDispatchIfRequested(threadIdForSend);
           if (backgroundThreadRef) {
             markPromotedDraftThreadByRef(backgroundThreadRef);
             try {
@@ -7334,6 +7408,8 @@ export default function ChatView(props: ChatViewProps) {
         });
         if (startResult._tag === "Failure") {
           failure = startResult;
+        } else {
+          await interruptAcceptedDispatchIfRequested(queued.input.threadId);
         }
       }
 
@@ -7361,6 +7437,7 @@ export default function ChatView(props: ChatViewProps) {
       beginLocalDispatch,
       clearUsageLimitsFor,
       continueFollowingTimelineForNewTurn,
+      interruptAcceptedDispatchIfRequested,
       persistThreadSettingsForNextTurn,
       removeQueuedTurnSubmission,
       resetLocalDispatch,
@@ -7940,6 +8017,9 @@ export default function ChatView(props: ChatViewProps) {
           },
         });
         failure = startResult._tag === "Failure" ? startResult : null;
+        if (failure === null) {
+          await interruptAcceptedDispatchIfRequested(threadIdForSend);
+        }
       }
 
       if (failure === null) {
@@ -7970,6 +8050,7 @@ export default function ChatView(props: ChatViewProps) {
       isConnecting,
       isSendBusy,
       isServerThread,
+      interruptAcceptedDispatchIfRequested,
       localCheckoutBranchMismatch,
       persistThreadSettingsForNextTurn,
       resetLocalDispatch,
@@ -8807,6 +8888,7 @@ export default function ChatView(props: ChatViewProps) {
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
+                            isTurnInterruptible={isTurnInterruptible}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={

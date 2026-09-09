@@ -1296,6 +1296,7 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
+  isTurnInterruptible: boolean;
   isConnecting: boolean;
   isSendBusy: boolean;
   sendDisabledReason: string | null;
@@ -1449,6 +1450,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
+    isTurnInterruptible,
     isConnecting,
     isSendBusy,
     sendDisabledReason: externalSendDisabledReason,
@@ -2236,7 +2238,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (activePendingProgress) {
       return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
     }
-    if (phase === "running") {
+    if (isTurnInterruptible) {
       return "running";
     }
     if (showPlanFollowUpPrompt) {
@@ -2250,7 +2252,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isPreparingWorktree,
     isSendBusy,
-    phase,
+    isTurnInterruptible,
     prompt,
     showPlanFollowUpPrompt,
   ]);
@@ -2339,16 +2341,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       attachmentTargetKey,
     ],
   );
-  const collapsedComposerPrimaryActionDisabled =
-    phase === "running" ||
-    isSendBusy ||
-    isSendDisabled ||
-    isConnecting ||
-    noProviderAvailable ||
-    projectSelectionRequired ||
-    environmentUnavailable !== null ||
-    !composerSendState.hasSendableContent;
-  const collapsedComposerPrimaryActionLabel = "Send message";
+  const collapsedComposerPrimaryActionDisabled = isTurnInterruptible
+    ? false
+    : isSendBusy ||
+      isSendDisabled ||
+      isConnecting ||
+      noProviderAvailable ||
+      projectSelectionRequired ||
+      environmentUnavailable !== null ||
+      !composerSendState.hasSendableContent;
+  const collapsedComposerPrimaryActionLabel = isTurnInterruptible
+    ? "Stop generation"
+    : "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
@@ -5170,7 +5174,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             <ComposerPrimaryActions
                               compact
                               pendingAction={pendingPrimaryAction}
-                              isRunning={false}
+                              isRunning={isTurnInterruptible}
                               showPlanFollowUpPrompt={false}
                               promptHasText={false}
                               isSendBusy={isSendBusy}
@@ -5277,24 +5281,39 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <button
                   type="button"
                   data-chat-composer-transition-actions="true"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover disabled:opacity-30"
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-full disabled:opacity-30",
+                    isTurnInterruptible
+                      ? "bg-destructive/90 text-white"
+                      : "bg-message-action text-message-action-foreground hover:bg-message-action-hover",
+                  )}
                   disabled={collapsedComposerPrimaryActionDisabled}
                   aria-label={collapsedComposerPrimaryActionLabel}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={(event) => {
                     event.stopPropagation();
-                    submitComposer();
+                    if (isTurnInterruptible) {
+                      handleInterruptPrimaryAction();
+                    } else {
+                      submitComposer();
+                    }
                   }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path
-                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  {isTurnInterruptible ? (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+                      <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path
+                        d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
                 </button>
               </div>
             ) : null}
@@ -5808,7 +5827,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <ComposerPrimaryActions
                       compact
                       pendingAction={pendingPrimaryAction}
-                      isRunning={false}
+                      isRunning={isTurnInterruptible}
                       showPlanFollowUpPrompt={false}
                       promptHasText={false}
                       isSendBusy={isSendBusy}
@@ -5911,7 +5930,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     reserveContextWindowMeter={reserveContextWindowMeter}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
                     pendingAction={pendingPrimaryAction}
-                    isRunning={phase === "running"}
+                    isRunning={isTurnInterruptible}
                     showPlanFollowUpPrompt={
                       pendingUserInputs.length === 0 && showPlanFollowUpPrompt
                     }

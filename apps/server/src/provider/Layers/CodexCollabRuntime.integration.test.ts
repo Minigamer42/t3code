@@ -620,13 +620,16 @@ describe("CodexSessionRuntime collab integration", () => {
       NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
       const interruptsPath = `${scriptPath}.interrupts`;
       const requestsPath = `${scriptPath}.requests`;
+      const cleanupsPath = `${scriptPath}.cleanups`;
       NodeFS.rmSync(interruptsPath, { force: true });
       NodeFS.rmSync(requestsPath, { force: true });
+      NodeFS.rmSync(cleanupsPath, { force: true });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           NodeFS.rmSync(scriptPath, { force: true });
           NodeFS.rmSync(interruptsPath, { force: true });
           NodeFS.rmSync(requestsPath, { force: true });
+          NodeFS.rmSync(cleanupsPath, { force: true });
         }),
       );
 
@@ -664,6 +667,11 @@ describe("CodexSessionRuntime collab integration", () => {
         threadId: ROOT,
         turnId: activeTurnId,
       });
+      const cleanups = NodeFS.readFileSync(cleanupsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { threadId?: string });
+      assert.deepEqual(cleanups.at(-1), { threadId: ROOT });
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
