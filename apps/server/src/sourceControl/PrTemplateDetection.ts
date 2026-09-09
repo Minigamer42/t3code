@@ -23,6 +23,12 @@ const TEMPLATE_DIRECTORIES = [
   "docs/PULL_REQUEST_TEMPLATE",
 ] as const;
 
+const GITLAB_TEMPLATE_PATHS = [
+  ".gitlab/merge_request_templates/Default.md",
+  ".gitlab/merge_request_templates/default.md",
+  ".gitlab/merge_request_templates/DEFAULT.md",
+] as const;
+
 const TREE_PATHS = [...TEMPLATE_PATHS, ...TEMPLATE_DIRECTORIES] as const;
 
 type ExecuteGit = GitVcsDriver.GitVcsDriver["Service"]["execute"];
@@ -175,3 +181,36 @@ export const detectPrTemplate = Effect.fn("detectPrTemplate")(function* (
     return Option.none();
   }).pipe(Effect.orElseSucceed(() => Option.none()));
 });
+
+export const detectGitLabMergeRequestTemplate = Effect.fn("detectGitLabMergeRequestTemplate")(
+  function* (cwd: string, treeish: string, executeGit: ExecuteGit) {
+    return yield* Effect.gen(function* () {
+      const result = yield* executeGit({
+        operation: "PrTemplateDetection.listGitLabTemplates",
+        cwd,
+        args: ["ls-tree", "-r", "-z", "--full-tree", treeish, "--", ...GITLAB_TEMPLATE_PATHS],
+        maxOutputBytes: TREE_LIST_MAX_BYTES,
+        appendTruncationMarker: true,
+      });
+      if (result.stdoutTruncated) {
+        return Option.none();
+      }
+
+      const entriesByPath = new Map(
+        parseTemplateTreeEntries(result.stdout).map((entry) => [entry.path, entry]),
+      );
+      for (const templatePath of GITLAB_TEMPLATE_PATHS) {
+        const entry = entriesByPath.get(templatePath);
+        if (!entry) {
+          continue;
+        }
+        const template = yield* readTemplateBlob({ cwd, executeGit, entry });
+        if (Option.isSome(template)) {
+          return template;
+        }
+      }
+
+      return Option.none();
+    }).pipe(Effect.orElseSucceed(() => Option.none()));
+  },
+);

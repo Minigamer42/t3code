@@ -60,7 +60,10 @@ import * as ServerSettings from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import { detectPrTemplate } from "../sourceControl/PrTemplateDetection.ts";
+import {
+  detectGitLabMergeRequestTemplate,
+  detectPrTemplate,
+} from "../sourceControl/PrTemplateDetection.ts";
 import type { ChangeRequest } from "@t3tools/contracts";
 
 export interface GitActionProgressReporter {
@@ -1983,10 +1986,23 @@ export const make = Effect.gen(function* () {
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
     const policy = yield* resolveStylePolicy(cwd, settings);
-    const changeRequestTemplate =
-      settings.style.followChangeRequestTemplates && provider.kind === "github"
-        ? Option.getOrUndefined(yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute))
-        : undefined;
+    let changeRequestTemplate: string | undefined;
+    if (settings.style.followChangeRequestTemplates) {
+      if (provider.kind === "github") {
+        changeRequestTemplate = Option.getOrUndefined(
+          yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute),
+        );
+      } else if (provider.kind === "gitlab") {
+        const configuredTemplate = yield* provider
+          .getConfiguredChangeRequestTemplate({ cwd })
+          .pipe(Effect.orElseSucceed(() => null));
+        changeRequestTemplate =
+          configuredTemplate ??
+          Option.getOrUndefined(
+            yield* detectGitLabMergeRequestTemplate(cwd, baseRangeRef, gitCore.execute),
+          );
+      }
+    }
 
     const generated = yield* textGeneration.generatePrContent({
       cwd,

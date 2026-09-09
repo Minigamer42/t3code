@@ -230,6 +230,20 @@ export const make = Effect.gen(function* () {
             }),
         ),
       ),
+    getConfiguredChangeRequestTemplate: (input) =>
+      gitlab.getConfiguredChangeRequestTemplate(input).pipe(
+        Effect.mapError(
+          (error) =>
+            new SourceControlProviderError({
+              provider: "gitlab",
+              operation: "getConfiguredChangeRequestTemplate",
+              command: error.command,
+              cwd: input.cwd,
+              detail: error.detail,
+              cause: error,
+            }),
+        ),
+      ),
     checkoutChangeRequest: (input) =>
       gitlab.checkoutMergeRequest(input).pipe(
         Effect.mapError(

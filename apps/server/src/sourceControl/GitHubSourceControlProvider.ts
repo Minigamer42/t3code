@@ -302,6 +302,7 @@ export const make = Effect.gen(function* () {
             }),
         ),
       ),
+    getConfiguredChangeRequestTemplate: () => Effect.succeed(null),
     checkoutChangeRequest: (input) =>
       github.checkoutPullRequest(input).pipe(
         Effect.mapError(
