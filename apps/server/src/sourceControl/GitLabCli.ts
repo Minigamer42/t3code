@@ -362,16 +362,16 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
-function stateArgs(state: "open" | "closed" | "merged" | "all"): ReadonlyArray<string> {
+function gitLabApiState(state: "open" | "closed" | "merged" | "all"): string {
   switch (state) {
     case "open":
-      return [];
+      return "opened";
     case "closed":
-      return ["--closed"];
+      return "closed";
     case "merged":
-      return ["--merged"];
+      return "merged";
     case "all":
-      return ["--all"];
+      return "all";
   }
 }
 
@@ -470,15 +470,20 @@ export const make = Effect.gen(function* () {
       execute({
         cwd: input.cwd,
         args: [
-          "mr",
-          "list",
-          "--source-branch",
-          sourceRefName(input),
-          ...stateArgs(input.state),
-          "--per-page",
-          String(input.limit ?? 20),
-          "--output",
-          "json",
+          "api",
+          "--method",
+          "GET",
+          "projects/:fullpath/merge_requests",
+          "--raw-field",
+          `source_branch=${sourceRefName(input)}`,
+          "--raw-field",
+          `state=${gitLabApiState(input.state)}`,
+          "--raw-field",
+          `per_page=${String(input.limit ?? 20)}`,
+          "--raw-field",
+          "order_by=updated_at",
+          "--raw-field",
+          "sort=desc",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
