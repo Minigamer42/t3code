@@ -509,6 +509,7 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 
 describe("MessagesTimeline", () => {
   it("globally expands existing and future tool rows", async () => {
+    activityTestState.expanded = true;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", () => 0);
     vi.stubGlobal("cancelAnimationFrame", () => {});
@@ -522,7 +523,11 @@ describe("MessagesTimeline", () => {
       expect(
         renderer!.root
           .findAllByProps({ "aria-expanded": false })
-          .filter((node) => typeof node.type === "string"),
+          .filter(
+            (node) =>
+              typeof node.type === "string" &&
+              ["current detail", "future detail"].includes(node.props["aria-label"]),
+          ),
       ).toHaveLength(1);
       await act(() => {
         renderer!.update(
@@ -537,7 +542,11 @@ describe("MessagesTimeline", () => {
       expect(
         renderer!.root
           .findAllByProps({ "aria-expanded": true })
-          .filter((node) => typeof node.type === "string"),
+          .filter(
+            (node) =>
+              typeof node.type === "string" &&
+              ["current detail", "future detail"].includes(node.props["aria-label"]),
+          ),
       ).toHaveLength(2);
       await act(() => {
         renderer!.update(
@@ -552,7 +561,11 @@ describe("MessagesTimeline", () => {
       expect(
         renderer!.root
           .findAllByProps({ "aria-expanded": false })
-          .filter((node) => typeof node.type === "string"),
+          .filter(
+            (node) =>
+              typeof node.type === "string" &&
+              ["current detail", "future detail"].includes(node.props["aria-label"]),
+          ),
       ).toHaveLength(2);
     } finally {
       await act(() => renderer?.unmount());
