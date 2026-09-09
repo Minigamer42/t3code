@@ -1985,7 +1985,22 @@ export const make = Effect.gen(function* () {
     });
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
-    const policy = yield* resolveStylePolicy(cwd, settings);
+    const stylePolicy = yield* resolveStylePolicy(cwd, settings);
+    const repositoryChangeRequestInstructions = yield* readRepositoryInstructions(
+      cwd,
+      ".t3code/change-request.md",
+    );
+    const policy = repositoryChangeRequestInstructions
+      ? {
+          ...stylePolicy,
+          changeRequestInstructions: [
+            stylePolicy.changeRequestInstructions,
+            repositoryChangeRequestInstructions,
+          ]
+            .filter((instructions): instructions is string => Boolean(instructions))
+            .join("\n\n"),
+        }
+      : stylePolicy;
     let changeRequestTemplate: string | undefined;
     if (settings.style.followChangeRequestTemplates) {
       if (provider.kind === "github") {

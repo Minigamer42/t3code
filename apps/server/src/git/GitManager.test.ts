@@ -4008,11 +4008,20 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.mkdirSync(NodePath.join(repoDir, ".github"));
+      NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".github", "pull_request_template.md"),
         "## What changed?\n\n## Verification",
       );
-      yield* runGit(repoDir, ["add", ".github/pull_request_template.md"]);
+      NodeFS.writeFileSync(
+        NodePath.join(repoDir, ".t3code", "change-request.md"),
+        "Include a rollout section when relevant.\n",
+      );
+      yield* runGit(repoDir, [
+        "add",
+        ".github/pull_request_template.md",
+        ".t3code/change-request.md",
+      ]);
       yield* runGit(repoDir, ["commit", "-m", "Add pull request template"]);
       yield* runGit(repoDir, ["checkout", "-b", "feature-create-pr"]);
       const remoteDir = yield* createBareRemote();
@@ -4067,7 +4076,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.pr.status).toBe("created");
       expect(result.pr.number).toBe(88);
       expect(generatedPolicy).toMatchObject({
-        changeRequestInstructions: "Lead with user impact.",
+        changeRequestInstructions:
+          "Lead with user impact.\n\nInclude a rollout section when relevant.",
       });
       expect(generatedChangeRequestTemplate).toBe("## What changed?\n\n## Verification");
       expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
