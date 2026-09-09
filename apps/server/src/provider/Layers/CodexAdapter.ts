@@ -2563,6 +2563,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
+  const terminateCommand: NonNullable<CodexAdapterShape["terminateCommand"]> = (
+    threadId,
+    processId,
+  ) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) => session.runtime.terminateCommand(processId)),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/backgroundTerminals/terminate", cause),
+      ),
+    );
+
   const compactThread = Effect.fn("compactThread")(function* (threadId: ThreadId) {
     const session = yield* requireSession(threadId);
     yield* session.runtime.compactThread.pipe(
@@ -2717,6 +2730,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     sendTurn,
     compaction: { type: "native", start: compactThread },
     interruptTurn,
+    terminateCommand,
     readThread,
     rollbackThread,
     uploadFeedback,

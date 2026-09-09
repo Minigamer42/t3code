@@ -191,17 +191,23 @@ function makeFakeCodexAdapter(
       Effect.void,
   );
 
-  const compactThread = vi.fn((threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
-    Effect.sync(() =>
-      emit({
-        type: "thread.state.changed",
-        eventId: asEventId("evt-native-compact"),
-        provider,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        threadId,
-        payload: { state: "compacted" },
-      }),
-    ),
+  const terminateCommand = vi.fn(
+    (_threadId: ThreadId, _processId: string): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.void,
+  );
+
+  const compactThread = vi.fn(
+    (threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.sync(() =>
+        emit({
+          type: "thread.state.changed",
+          eventId: asEventId("evt-native-compact"),
+          provider,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          threadId,
+          payload: { state: "compacted" },
+        }),
+      ),
   );
   const respondToRequest = vi.fn(
     (
@@ -219,18 +225,20 @@ function makeFakeCodexAdapter(
     ): Effect.Effect<void, ProviderAdapterError> => Effect.void,
   );
 
-  const stopSession = vi.fn((threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
-    Effect.sync(() => {
-      sessions.delete(threadId);
-    }),
+  const stopSession = vi.fn(
+    (threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.sync(() => {
+        sessions.delete(threadId);
+      }),
   );
 
-  const listSessions = vi.fn((): Effect.Effect<ReadonlyArray<ProviderSession>> =>
-    Effect.sync(() => Array.from(sessions.values())),
+  const listSessions = vi.fn(
+    (): Effect.Effect<ReadonlyArray<ProviderSession>> =>
+      Effect.sync(() => Array.from(sessions.values())),
   );
 
-  const hasSession = vi.fn((threadId: ThreadId): Effect.Effect<boolean> =>
-    Effect.succeed(sessions.has(threadId)),
+  const hasSession = vi.fn(
+    (threadId: ThreadId): Effect.Effect<boolean> => Effect.succeed(sessions.has(threadId)),
   );
 
   const readThread = vi.fn(
@@ -264,10 +272,11 @@ function makeFakeCodexAdapter(
       Effect.succeed({ feedbackId: `feedback-${input.threadId}` }),
   );
 
-  const stopAll = vi.fn((): Effect.Effect<void, ProviderAdapterError> =>
-    Effect.sync(() => {
-      sessions.clear();
-    }),
+  const stopAll = vi.fn(
+    (): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.sync(() => {
+        sessions.clear();
+      }),
   );
 
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
@@ -287,6 +296,7 @@ function makeFakeCodexAdapter(
           ? { compaction: { type: "slash-command", command: "/compact" } }
           : {}),
     interruptTurn,
+    ...(provider === CODEX_DRIVER ? { terminateCommand } : {}),
     respondToRequest,
     respondToUserInput,
     stopSession,
@@ -324,6 +334,7 @@ function makeFakeCodexAdapter(
     sendTurn,
     compactThread,
     interruptTurn,
+    terminateCommand,
     respondToRequest,
     respondToUserInput,
     stopSession,
@@ -1676,6 +1687,9 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
+
+      yield* provider.terminateCommand({ threadId: session.threadId, processId: "18604" });
+      assert.deepEqual(routing.codex.terminateCommand.mock.calls, [[session.threadId, "18604"]]);
 
       yield* provider.respondToRequest({
         threadId: session.threadId,

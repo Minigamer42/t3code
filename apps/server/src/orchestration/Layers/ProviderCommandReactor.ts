@@ -68,6 +68,7 @@ type ProviderIntentEvent = Extract<
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
+      | "thread.tool-stop-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested"
@@ -353,6 +354,7 @@ const make = Effect.gen(function* () {
     readonly kind:
       | "provider.turn.start.failed"
       | "provider.turn.interrupt.failed"
+      | "provider.tool.stop.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
       | "provider.session.stop.failed";
@@ -379,6 +381,39 @@ const make = Effect.gen(function* () {
             payload: {
               detail: input.detail,
               ...(input.requestId ? { requestId: input.requestId } : {}),
+            },
+            turnId: input.turnId,
+            createdAt: input.createdAt,
+          },
+          createdAt: input.createdAt,
+        }),
+      ),
+    );
+
+  const appendToolStoppedActivity = (input: {
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId | null;
+    readonly toolCallId: string;
+    readonly createdAt: string;
+  }) =>
+    Effect.all({
+      commandId: serverCommandId("tool-stopped"),
+      eventId: serverEventId(),
+    }).pipe(
+      Effect.flatMap(({ commandId, eventId }) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: eventId,
+            tone: "tool",
+            kind: "tool.completed",
+            summary: "Tool stopped",
+            payload: {
+              toolCallId: input.toolCallId,
+              status: "stopped",
+              detail: "The command process was terminated.",
             },
             turnId: input.turnId,
             createdAt: input.createdAt,
@@ -1540,6 +1575,49 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverInterruptFailure));
   });
 
+  const processToolStopRequested = Effect.fn("processToolStopRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.tool-stop-requested" }>,
+  ) {
+    const thread = yield* resolveThreadShell(event.payload.threadId);
+    const session = thread?.session;
+    if (!session || session.status === "stopped") {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.tool.stop.failed",
+        summary: "Tool stop failed",
+        detail: "No active provider session is bound to this thread.",
+        turnId: event.payload.turnId ?? null,
+        createdAt: event.payload.createdAt,
+      });
+    }
+
+    yield* providerService
+      .terminateCommand({
+        threadId: event.payload.threadId,
+        processId: event.payload.processId,
+      })
+      .pipe(
+        Effect.andThen(
+          appendToolStoppedActivity({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId ?? null,
+            toolCallId: event.payload.toolCallId,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.tool.stop.failed",
+            summary: "Tool stop failed",
+            detail: formatFailureDetail(cause),
+            turnId: event.payload.turnId ?? null,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+      );
+  });
+
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -1729,6 +1807,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
+      case "thread.tool-stop-requested":
+        yield* processToolStopRequested(event);
+        return;
       case "thread.approval-response-requested":
         yield* processApprovalResponseRequested(event);
         return;
@@ -1792,6 +1873,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
+        event.type === "thread.tool-stop-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
         event.type === "thread.session-stop-requested" ||

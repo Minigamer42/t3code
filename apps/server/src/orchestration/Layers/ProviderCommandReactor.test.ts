@@ -177,6 +177,7 @@ describe("ProviderCommandReactor", () => {
     readonly beforeReadySessionDispatch?: () => Effect.Effect<void>;
     readonly compactThreadEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
+    readonly terminateCommandEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly startSessionEffect?: (
       session: ProviderSession,
@@ -269,6 +270,9 @@ describe("ProviderCommandReactor", () => {
     );
     const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
+    const terminateCommand = vi.fn(
+      (_: unknown) => input?.terminateCommandEffect?.() ?? Effect.void,
+    );
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
     const stopSession = vi.fn((stopInput: unknown) =>
@@ -355,6 +359,7 @@ describe("ProviderCommandReactor", () => {
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       compactThread,
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
+      terminateCommand: terminateCommand as ProviderServiceShape["terminateCommand"],
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
@@ -597,6 +602,7 @@ describe("ProviderCommandReactor", () => {
       sendTurn,
       compactThread,
       interruptTurn,
+      terminateCommand,
       respondToRequest,
       respondToUserInput,
       stopSession,
@@ -3305,6 +3311,76 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.interruptTurn.mock.calls.length === 1);
     expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({
       threadId: "thread-1",
+    });
+  });
+
+  it("stops one running command and records its stopped lifecycle state", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-tool-stop"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-1"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.tool.stop",
+        commandId: CommandId.make("cmd-tool-stop"),
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId("turn-1"),
+        toolCallId: "command-item-1",
+        processId: "18604",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const thread = (await harness.readModel()).threads.find(
+        (entry) => entry.id === ThreadId.make("thread-1"),
+      );
+      return (
+        thread?.activities.some(
+          (activity) =>
+            activity.kind === "tool.completed" &&
+            (activity.payload as { status?: unknown }).status === "stopped",
+        ) ?? false
+      );
+    });
+
+    expect(harness.terminateCommand).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
+      processId: "18604",
+    });
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    expect(
+      thread?.activities.find(
+        (activity) =>
+          activity.kind === "tool.completed" &&
+          (activity.payload as { status?: unknown }).status === "stopped",
+      ),
+    ).toMatchObject({
+      summary: "Tool stopped",
+      turnId: asTurnId("turn-1"),
+      payload: {
+        toolCallId: "command-item-1",
+        status: "stopped",
+      },
     });
   });
 

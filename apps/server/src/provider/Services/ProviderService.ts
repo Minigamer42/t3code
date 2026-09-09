@@ -13,6 +13,7 @@
  */
 import type {
   ProviderInterruptTurnInput,
+  ProviderTerminateCommandInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -65,6 +66,11 @@ export interface ProviderServiceShape {
    */
   readonly interruptTurn: (
     input: ProviderInterruptTurnInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
+
+  /** Terminate one command process without interrupting its owning turn. */
+  readonly terminateCommand: (
+    input: ProviderTerminateCommandInput,
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**

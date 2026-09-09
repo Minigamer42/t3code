@@ -25,6 +25,7 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  ProviderTerminateCommandInput,
   ProviderUploadFeedbackInput,
   ThreadId,
   TurnId,
@@ -1850,6 +1851,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const terminateCommand: ProviderServiceMethod<"terminateCommand"> = Effect.fn("terminateCommand")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.terminateCommand",
+        schema: ProviderTerminateCommandInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.terminateCommand",
+        allowRecovery: true,
+      });
+      const terminate = routed.adapter.terminateCommand;
+      if (!terminate) {
+        return yield* new ProviderAdapterRequestError({
+          provider: routed.adapter.provider,
+          method: "thread/backgroundTerminals/terminate",
+          detail: "This provider does not support terminating an individual command.",
+        });
+      }
+      yield* terminate(routed.threadId, input.processId);
+    },
+  );
+
   const respondToRequest: ProviderServiceMethod<"respondToRequest"> = Effect.fn("respondToRequest")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -2257,6 +2282,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     sendTurn,
     compactThread,
     interruptTurn,
+    terminateCommand,
     respondToRequest,
     respondToUserInput,
     stopSession,

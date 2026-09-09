@@ -218,6 +218,7 @@ export interface CodexSessionRuntimeShape {
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly compactThread: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly terminateCommand: (processId: string) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
     numTurns: number,
@@ -768,6 +769,26 @@ export const openCodexThread = (input: {
       ),
     );
 };
+
+interface CodexCommandTerminationClient {
+  readonly request: (
+    method: string,
+    payload: unknown,
+  ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+}
+
+/** An already-exited background command is indistinguishable from a successful stop. */
+export const terminateCodexCommand = (input: {
+  readonly client: CodexCommandTerminationClient;
+  readonly threadId: string;
+  readonly processId: string;
+}): Effect.Effect<void, CodexErrors.CodexAppServerError> =>
+  input.client
+    .request("thread/backgroundTerminals/terminate", {
+      threadId: input.threadId,
+      processId: input.processId,
+    })
+    .pipe(Effect.asVoid);
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
   switch (notification.method) {
@@ -2460,6 +2481,15 @@ export const makeCodexSessionRuntime = (
           // after turn/interrupt. Stop must clean them so the interrupted UI
           // state also reflects the process state.
           yield* cleanBackgroundTerminals(providerThreadId);
+        }),
+      terminateCommand: (processId) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          yield* terminateCodexCommand({
+            client: client.raw,
+            threadId: providerThreadId,
+            processId,
+          });
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;

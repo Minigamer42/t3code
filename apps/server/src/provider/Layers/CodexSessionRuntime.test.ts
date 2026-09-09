@@ -18,6 +18,7 @@ import {
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
+  terminateCodexCommand,
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
@@ -946,6 +947,36 @@ describe("openCodexThread", () => {
 
       NodeAssert.ok(isCodexAppServerRequestError(error));
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
+});
+
+describe("terminateCodexCommand", () => {
+  it.effect("treats an already-exited command as successfully stopped", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: string; payload: unknown }> = [];
+      const client = {
+        request: (method: string, payload: unknown) => {
+          calls.push({ method, payload });
+          return Effect.succeed({ terminated: false });
+        },
+      };
+
+      yield* terminateCodexCommand({
+        client,
+        threadId: "provider-thread-1",
+        processId: "18604",
+      });
+
+      NodeAssert.deepStrictEqual(calls, [
+        {
+          method: "thread/backgroundTerminals/terminate",
+          payload: {
+            threadId: "provider-thread-1",
+            processId: "18604",
+          },
+        },
+      ]);
     }),
   );
 });

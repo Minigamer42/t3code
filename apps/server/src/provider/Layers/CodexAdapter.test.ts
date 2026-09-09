@@ -86,22 +86,28 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   public readonly compactThread = Effect.void;
 
-  public readonly interruptTurnImpl = vi.fn((_turnId?: TurnId): Promise<void> =>
-    Promise.resolve(undefined),
+  public readonly interruptTurnImpl = vi.fn(
+    (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
   );
 
-  public readonly readThreadImpl = vi.fn((): Promise<CodexThreadSnapshot> =>
-    Promise.resolve({
-      threadId: "provider-thread-1",
-      turns: [],
-    }),
+  public readonly terminateCommandImpl = vi.fn(
+    (_processId: string): Promise<void> => Promise.resolve(undefined),
   );
 
-  public readonly rollbackThreadImpl = vi.fn((_numTurns: number): Promise<CodexThreadSnapshot> =>
-    Promise.resolve({
-      threadId: "provider-thread-1",
-      turns: [],
-    }),
+  public readonly readThreadImpl = vi.fn(
+    (): Promise<CodexThreadSnapshot> =>
+      Promise.resolve({
+        threadId: "provider-thread-1",
+        turns: [],
+      }),
+  );
+
+  public readonly rollbackThreadImpl = vi.fn(
+    (_numTurns: number): Promise<CodexThreadSnapshot> =>
+      Promise.resolve({
+        threadId: "provider-thread-1",
+        turns: [],
+      }),
   );
 
   public readonly uploadFeedbackImpl = vi.fn((_reason?: string) =>
@@ -138,6 +144,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
+  }
+
+  terminateCommand(processId: string) {
+    return Effect.promise(() => this.terminateCommandImpl(processId));
   }
 
   readThread = Effect.promise(() => this.readThreadImpl());
@@ -376,6 +386,25 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.ok(event.type === "thread.state.changed");
       NodeAssert.equal(event.payload.state, "compacted");
       yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("terminates one command in the active Codex session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-command-stop");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+
+      NodeAssert.ok(adapter.terminateCommand);
+      yield* adapter.terminateCommand(threadId, "18604");
+
+      NodeAssert.deepStrictEqual(runtime.terminateCommandImpl.mock.calls, [["18604"]]);
     }),
   );
 
