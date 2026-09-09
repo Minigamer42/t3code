@@ -229,6 +229,7 @@ layer("GitLabCli.layer", (it) => {
         headSelector: "owner:feature/provider",
         title: "Provider MR",
         bodyFile: "/tmp/t3-mr-body.md",
+        body: "## Summary\n\nProvider MR body",
       });
 
       expect(mockedRun).toHaveBeenCalledWith(
@@ -247,8 +248,9 @@ layer("GitLabCli.layer", (it) => {
             "--raw-field",
             "title=Provider MR",
             "--field",
-            "description=@/tmp/t3-mr-body.md",
+            "description=@-",
           ],
+          stdin: "## Summary\n\nProvider MR body",
         }),
       );
     }),
