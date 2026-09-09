@@ -37,7 +37,7 @@ export class ProviderTurnControlError extends Schema.TaggedError<ProviderTurnCon
   "ProviderTurnControlError",
   {
     threadId: ThreadId,
-    operation: Schema.Literals(["interrupt", "restart", "steer"]),
+    operation: Schema.Literals(["interrupt", "restart", "steer", "terminate-command"]),
     providerTurnId: ProviderTurnId,
     turnCompleted: Schema.optional(Schema.Boolean),
     steerDeclined: Schema.optional(Schema.Boolean),
@@ -50,6 +50,13 @@ export class ProviderTurnControlError extends Schema.TaggedError<ProviderTurnCon
 const isProviderTurnControlError = Schema.is(ProviderTurnControlError);
 
 export interface ProviderTurnControlServiceV2Shape {
+  readonly terminateCommand: (input: {
+    readonly threadId: ThreadId;
+    readonly providerSessionId: ProviderSessionId;
+    readonly providerThreadId: ProviderThreadId;
+    readonly providerTurnId: ProviderTurnId;
+    readonly processId: string;
+  }) => Effect.Effect<void, ProviderTurnControlError>;
   readonly interrupt: (input: {
     readonly subagent?: {
       readonly id: NodeId;
@@ -128,7 +135,7 @@ export const layer: Layer.Layer<
       readonly replacementProviderSessionId?: ProviderSessionId;
       readonly providerThreadId: ProviderThreadId;
       readonly providerTurnId: ProviderTurnId;
-      readonly operation: "interrupt" | "restart" | "steer";
+      readonly operation: "interrupt" | "restart" | "steer" | "terminate-command";
       readonly messageId?: MessageId;
     }) {
       const context = yield* projections.getProviderControlContext(input.threadId, input);
@@ -185,7 +192,11 @@ export const layer: Layer.Layer<
         // the durable effect (and retry 5x). The turn may still look running
         // in projection until recovery/finalization; there is no live adapter
         // to interrupt.
-        if (input.operation === "interrupt" || input.operation === "restart") {
+        if (
+          input.operation === "interrupt" ||
+          input.operation === "restart" ||
+          input.operation === "terminate-command"
+        ) {
           yield* Effect.logWarning(
             "Provider interrupt/restart found no live session; treating as already stopped",
             {
@@ -271,6 +282,55 @@ export const layer: Layer.Layer<
         if (Option.isNone(session) || session.value.applyThreadTitle === undefined) return;
         yield* session.value.applyThreadTitle({ providerThread, title: input.title });
       }),
+      terminateCommand: Effect.fn("ProviderTurnControlServiceV2.terminateCommand")(
+        function* (input) {
+          const loaded = yield* load({ ...input, operation: "terminate-command" }).pipe(
+            Effect.mapError((cause) =>
+              isProviderTurnControlError(cause)
+                ? cause
+                : new ProviderTurnControlError({
+                    threadId: input.threadId,
+                    providerTurnId: input.providerTurnId,
+                    operation: "terminate-command",
+                    cause,
+                  }),
+            ),
+          );
+          const session = Option.isSome(loaded.session)
+            ? loaded.session
+            : yield* sessions.get(input.providerSessionId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderTurnControlError({
+                      threadId: input.threadId,
+                      providerTurnId: input.providerTurnId,
+                      operation: "terminate-command",
+                      cause,
+                    }),
+                ),
+              );
+          if (Option.isNone(session)) return;
+          if (session.value.terminateCommand === undefined)
+            return yield* new ProviderTurnControlError({
+              threadId: input.threadId,
+              providerTurnId: input.providerTurnId,
+              operation: "terminate-command",
+            });
+          yield* session.value
+            .terminateCommand({ providerThread: loaded.providerThread, processId: input.processId })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderTurnControlError({
+                    threadId: input.threadId,
+                    providerTurnId: input.providerTurnId,
+                    operation: "terminate-command",
+                    cause,
+                  }),
+              ),
+            );
+        },
+      ),
       interrupt: Effect.fn("ProviderTurnControlService.interrupt")(
         function* (input) {
           const loaded = yield* load({ ...input, operation: "interrupt" });

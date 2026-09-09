@@ -15,6 +15,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -33,6 +34,14 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { forkParked } from "../serverActivation.ts";
 
 export const OrchestrationEffectRequestV2 = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("provider-command.stop"),
+    providerSessionId: ProviderSessionId,
+    providerThreadId: ProviderThreadId,
+    providerTurnId: ProviderTurnId,
+    itemId: TurnItemId,
+    processId: Schema.String,
+  }),
   Schema.Struct({
     type: Schema.Literal("provider-runtime.continue"),
     sourceRunId: RunId,
@@ -155,6 +164,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
 export const PROCESS_BOUND_EFFECT_TYPES = [
   "provider-session.apply-model-selection",
   "provider-session.apply-thread-title",
+  "provider-command.stop",
   "provider-turn.start",
   "provider-turn.interrupt",
   "provider-turn.steer",

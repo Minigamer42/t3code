@@ -1779,6 +1779,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("command_execution"),
     input: Schema.String,
+    processId: Schema.optional(TrimmedNonEmptyString),
+    stopRequested: Schema.optional(Schema.Boolean),
     output: Schema.optional(Schema.String),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
     outputOmitted: Schema.optional(Schema.Boolean),
@@ -2664,6 +2666,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("command_execution"),
     input: Schema.String,
+    processId: Schema.optional(TrimmedNonEmptyString),
+    stopRequested: Schema.optional(Schema.Boolean),
     output: Schema.optional(Schema.String),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
     outputOmitted: Schema.optional(Schema.Boolean),
@@ -3439,6 +3443,12 @@ export const OrchestrationV2Command = Schema.Union([
     holdQueue: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
+    type: Schema.Literal("thread.tool.stop"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: TurnItemId,
+  }),
+  Schema.Struct({
     type: Schema.Literal("queued-message.promote-to-steer"),
     commandId: CommandId,
     threadId: ThreadId,
@@ -3622,6 +3632,23 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
   }),
+  Schema.Struct({
+    type: Schema.Literal("thread.tool.stop.failed"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: TurnItemId,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.tool.stop.complete"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: TurnItemId,
+  }),
+  /**
+   * Records what a pull request watch saw, and wakes the agent in the same transaction when
+   * `wake` is set. Rejected once the watch started at `startedAt` has ended, and a wake is
+   * rejected on a settled or archived thread, so a read that raced either changes nothing.
+   */
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,
