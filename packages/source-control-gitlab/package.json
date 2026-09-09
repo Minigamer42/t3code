@@ -38,6 +38,10 @@
     "./server/GitLabSourceControlProvider": {
       "types": "./src/server/GitLabSourceControlProvider.ts",
       "import": "./src/server/GitLabSourceControlProvider.ts"
+    },
+    "./server/gitLabChangeRequestTemplate": {
+      "types": "./src/server/gitLabChangeRequestTemplate.ts",
+      "import": "./src/server/gitLabChangeRequestTemplate.ts"
     }
   },
   "scripts": {

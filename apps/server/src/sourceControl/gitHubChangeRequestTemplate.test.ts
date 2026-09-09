@@ -9,6 +9,7 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as GitLabChangeRequestTemplate from "@t3tools/source-control-gitlab/server/gitLabChangeRequestTemplate";
 import * as GitHubChangeRequestTemplate from "@t3tools/source-control-github/server/gitHubChangeRequestTemplate";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
@@ -25,6 +26,12 @@ const TEMPLATE_DIRECTORIES = [
   ".github/PULL_REQUEST_TEMPLATE",
   "PULL_REQUEST_TEMPLATE",
   "docs/PULL_REQUEST_TEMPLATE",
+] as const;
+
+const GITLAB_TEMPLATE_PATHS = [
+  ".gitlab/merge_request_templates/Default.md",
+  ".gitlab/merge_request_templates/default.md",
+  ".gitlab/merge_request_templates/DEFAULT.md",
 ] as const;
 
 const layerPrTemplateDetectionTest = GitVcsDriver.layer.pipe(
@@ -83,6 +90,12 @@ const detectTemplate = (cwd: string, treeish = "HEAD") =>
     return yield* GitHubChangeRequestTemplate.detect(cwd, treeish, git.execute);
   });
 
+const detectGitLabTemplate = (cwd: string, treeish = "HEAD") =>
+  Effect.gen(function* () {
+    const git = yield* GitVcsDriver.GitVcsDriver;
+    return yield* GitLabChangeRequestTemplate.detect(cwd, treeish, git.execute);
+  });
+
 it.effect.each(SINGLE_TEMPLATE_PATHS)("recognizes $0", (relativePath) =>
   runWithTempDirectory((cwd) =>
     Effect.gen(function* () {
@@ -90,6 +103,18 @@ it.effect.each(SINGLE_TEMPLATE_PATHS)("recognizes $0", (relativePath) =>
       yield* commitTemplates(cwd);
 
       const template = yield* detectTemplate(cwd);
+      assert.strictEqual(Option.getOrUndefined(template), `template from ${relativePath}`);
+    }),
+  ),
+);
+
+it.effect.each(GITLAB_TEMPLATE_PATHS)("recognizes GitLab template $0", (relativePath) =>
+  runWithTempDirectory((cwd) =>
+    Effect.gen(function* () {
+      yield* writeTemplate(cwd, relativePath, `template from ${relativePath}`);
+      yield* commitTemplates(cwd);
+
+      const template = yield* detectGitLabTemplate(cwd);
       assert.strictEqual(Option.getOrUndefined(template), `template from ${relativePath}`);
     }),
   ),
