@@ -26,6 +26,8 @@ const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const NOOP_QUEUED_MESSAGE_ACTION = (_messageId: MessageId) => {};
+const EMPTY_MESSAGE_IDS: ReadonlySet<MessageId> = new Set();
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
@@ -88,6 +90,7 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   CircleAlertIcon,
+  Clock3Icon,
   DownloadIcon,
   EyeIcon,
   GlobeIcon,
@@ -97,8 +100,10 @@ import {
   MousePointerClickIcon,
   PaintbrushIcon,
   SearchIcon,
+  SendIcon,
   SquarePenIcon,
   TerminalIcon,
+  Trash2Icon,
   Undo2Icon,
   WrenchIcon,
   XIcon,
@@ -222,6 +227,11 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  queuedMessageIds: ReadonlySet<MessageId>;
+  sendingQueuedMessageIds: ReadonlySet<MessageId>;
+  onEditQueuedMessage: (messageId: MessageId) => void;
+  onDeleteQueuedMessage: (messageId: MessageId) => void;
+  onSendQueuedMessageNow: (messageId: MessageId) => void;
 }
 
 interface TimelineRowActivityState {
@@ -360,6 +370,11 @@ interface MessagesTimelineProps {
   loadEarlier?: CitationHistoryPage | null;
   toolCallsExpanded?: boolean;
   toolCallExpansionEpoch?: number;
+  queuedMessageIds?: ReadonlySet<MessageId>;
+  sendingQueuedMessageIds?: ReadonlySet<MessageId>;
+  onEditQueuedMessage?: (messageId: MessageId) => void;
+  onDeleteQueuedMessage?: (messageId: MessageId) => void;
+  onSendQueuedMessageNow?: (messageId: MessageId) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +424,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   loadEarlier = null,
   toolCallsExpanded = false,
   toolCallExpansionEpoch = 0,
+  queuedMessageIds = EMPTY_MESSAGE_IDS,
+  sendingQueuedMessageIds = EMPTY_MESSAGE_IDS,
+  onEditQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
+  onDeleteQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
+  onSendQueuedMessageNow = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
@@ -769,6 +789,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       agentPanelModel,
       onOpenAgents,
+      queuedMessageIds,
+      sendingQueuedMessageIds,
+      onEditQueuedMessage,
+      onDeleteQueuedMessage,
+      onSendQueuedMessageNow,
     }),
     [
       readyCitationRequest,
@@ -793,6 +818,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       agentPanelModel,
       onOpenAgents,
+      queuedMessageIds,
+      sendingQueuedMessageIds,
+      onEditQueuedMessage,
+      onDeleteQueuedMessage,
+      onSendQueuedMessageNow,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -1442,10 +1472,60 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
   const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
   const revertTurnCount = row.revertTurnCount;
+  const isQueued = ctx.queuedMessageIds.has(row.message.id);
+  const isSendingQueued = ctx.sendingQueuedMessageIds.has(row.message.id);
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className={cn(
+          "relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground",
+          isQueued && "border border-dashed border-primary/50",
+        )}
+      >
+        {isQueued ? (
+          <div className="mb-2 flex items-center justify-between gap-3 border-border/60 border-b pb-2 text-xs">
+            <span className="flex items-center gap-1.5 font-medium text-muted-foreground">
+              <Clock3Icon className="size-3.5" />
+              {isSendingQueued ? "Sending…" : "Queued"}
+            </span>
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={isSendingQueued}
+                onClick={() => ctx.onEditQueuedMessage(row.message.id)}
+                className="h-6 gap-1 px-1.5 text-xs"
+              >
+                <SquarePenIcon className="size-3" />
+                Edit
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={isSendingQueued}
+                onClick={() => ctx.onDeleteQueuedMessage(row.message.id)}
+                className="h-6 gap-1 px-1.5 text-xs text-destructive hover:text-destructive"
+              >
+                <Trash2Icon className="size-3" />
+                Delete
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={isSendingQueued}
+                onClick={() => ctx.onSendQueuedMessageNow(row.message.id)}
+                className="h-6 gap-1 px-1.5 text-xs"
+              >
+                <SendIcon className="size-3" />
+                Send now
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (

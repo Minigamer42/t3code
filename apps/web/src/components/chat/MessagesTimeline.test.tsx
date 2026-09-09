@@ -1072,6 +1072,23 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("rounded-2xl bg-message p-3");
   });
 
+  it("renders controls for a queued user message", () => {
+    const entry = buildUserTimelineEntry("Queued prompt.");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[entry]}
+        queuedMessageIds={new Set([entry.message.id])}
+      />,
+    );
+
+    expect(markup).toContain("Queued");
+    expect(markup).toContain("Edit");
+    expect(markup).toContain("Delete");
+    expect(markup).toContain("Send now");
+    expect(markup).toContain("border-dashed");
+  });
+
   it("preserves arbitrary XML-like tags and comparisons in rendered user messages", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
