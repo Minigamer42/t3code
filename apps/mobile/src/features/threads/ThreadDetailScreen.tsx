@@ -154,6 +154,7 @@ export interface ThreadDetailScreenProps {
   readonly onPickDraftFiles: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
+  readonly isStopRequested: boolean;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
@@ -987,6 +988,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         maxHeight={pendingUserInputMaxHeight}
                         collapsed={userInputCollapsed}
                         onToggleCollapsed={handleToggleUserInputCollapsed}
+                        isStopRequested={props.isStopRequested}
                         onStopThread={props.onStopThread}
                         cardProgress={userInputCardProgress}
                         cardCoverage={userInputCardCoverage}
@@ -1042,6 +1044,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onPickDraftFiles={props.onPickDraftFiles}
                     onNativePasteImages={props.onNativePasteImages}
                     onRemoveDraftImage={props.onRemoveDraftImage}
+                    isStopRequested={props.isStopRequested}
                     onStopThread={props.onStopThread}
                     onSendMessage={handleSendMessage}
                     onShowUsageLimits={showUsageLimits}

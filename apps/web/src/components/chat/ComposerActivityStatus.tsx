@@ -21,3 +21,18 @@ export function ComposerActivityRow({ phase }: { readonly phase: ThreadSyncPhase
     </ComposerBanner.Row>
   );
 }
+
+export function ComposerStopRequestedRow() {
+  return (
+    <ComposerBanner.Row>
+      <ComposerBanner.Icon>
+        <Spinner />
+      </ComposerBanner.Icon>
+      <ComposerBanner.Content>
+        <span className="shrink-0 whitespace-nowrap text-muted-foreground" role="status">
+          Stop requested…
+        </span>
+      </ComposerBanner.Content>
+    </ComposerBanner.Row>
+  );
+}

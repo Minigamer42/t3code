@@ -241,6 +241,7 @@ function ThreadRouteContent(
   const threadId = firstRouteParam(params.threadId);
   const routeThreadIdentity =
     environmentIdRaw !== null && threadId !== null ? `${environmentIdRaw}:${threadId}` : null;
+  const [stopRequestedThreadId, setStopRequestedThreadId] = useState<ThreadId | null>(null);
   const [inspectorSelection, setInspectorSelection] = useState<ThreadInspectorSelection | null>(
     () => (props.renderInspector ? { routeThreadIdentity, mode: "route" } : null),
   );
@@ -253,6 +254,19 @@ function ThreadRouteContent(
     }
     return null;
   })();
+  useEffect(() => {
+    if (stopRequestedThreadId === null) {
+      return;
+    }
+    if (
+      selectedThread?.id !== stopRequestedThreadId ||
+      (selectedThread.session?.status !== "running" &&
+        selectedThread.session?.status !== "starting")
+    ) {
+      setStopRequestedThreadId(null);
+    }
+  }, [selectedThread?.id, selectedThread?.session?.status, stopRequestedThreadId]);
+
   useEffect(() => {
     if (
       fileInspector.supported &&
@@ -498,15 +512,17 @@ function ThreadRouteContent(
   const handleOpenConnectionEditor = useCallback(() => {
     void navigation.navigate("Connections");
   }, [navigation]);
-  const handleStopThread = useCallback(() => {
+  const handleStopThread = useCallback(async () => {
     if (
       !selectedThread ||
+      stopRequestedThreadId === selectedThread.id ||
       (selectedThread.session?.status !== "running" &&
         selectedThread.session?.status !== "starting")
     ) {
       return;
     }
-    return interruptThreadTurn({
+    setStopRequestedThreadId(selectedThread.id);
+    const result = await interruptThreadTurn({
       environmentId: selectedThread.environmentId,
       input: {
         threadId: selectedThread.id,
@@ -515,7 +531,10 @@ function ThreadRouteContent(
           : {}),
       },
     });
-  }, [interruptThreadTurn, selectedThread]);
+    if (result._tag === "Failure") {
+      setStopRequestedThreadId((current) => (current === selectedThread.id ? null : current));
+    }
+  }, [interruptThreadTurn, selectedThread, stopRequestedThreadId]);
 
   const handleOpenTerminal = useCallback(
     (nextTerminalId?: string | null) => {
@@ -893,6 +912,7 @@ function ThreadRouteContent(
           onNativePasteImages={composer.onNativePasteImages}
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
+          isStopRequested={stopRequestedThreadId === selectedThread.id}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}

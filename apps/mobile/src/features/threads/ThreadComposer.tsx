@@ -129,6 +129,7 @@ export interface ThreadComposerProps {
   readonly onPickDraftFiles: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
+  readonly isStopRequested: boolean;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
@@ -714,9 +715,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 />
                 {showStopAction ? (
                   <ComposerActionButton
-                    accessibilityLabel="Stop agent"
+                    accessibilityLabel={
+                      props.isStopRequested ? "Stop requested, waiting for agent" : "Stop agent"
+                    }
                     icon="stop.fill"
                     variant="danger"
+                    pending={props.isStopRequested}
                     onPress={props.onStopThread}
                   />
                 ) : (
@@ -805,9 +809,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   />
                   {showStopAction ? (
                     <ComposerActionButton
-                      accessibilityLabel="Stop agent"
+                      accessibilityLabel={
+                        props.isStopRequested ? "Stop requested, waiting for agent" : "Stop agent"
+                      }
                       icon="stop.fill"
                       variant="danger"
+                      pending={props.isStopRequested}
                       onPress={props.onStopThread}
                     />
                   ) : voicePresentation.showsSend ? (

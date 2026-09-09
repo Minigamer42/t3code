@@ -518,6 +518,17 @@ export function buildRunningThreadTurnInterruptInput(
   return buildThreadTurnInterruptInput(thread);
 }
 
+export function canRequestRunningThreadInterrupt(
+  thread: Pick<Thread, "id" | "session"> | null | undefined,
+  phase: SessionPhase,
+  interruptRequestedThreadId: ThreadId | null,
+): boolean {
+  return (
+    thread?.id !== interruptRequestedThreadId &&
+    buildRunningThreadTurnInterruptInput(thread, phase) !== null
+  );
+}
+
 export function reconcileMountedTerminalThreadIds(input: {
   currentThreadIds: ReadonlyArray<string>;
   openThreadIds: ReadonlyArray<string>;

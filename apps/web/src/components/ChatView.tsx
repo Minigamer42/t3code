@@ -378,6 +378,7 @@ import {
   buildLoadingThreadFromShell,
   buildRunningThreadTurnInterruptInput,
   buildThreadTurnInterruptInput,
+  canRequestRunningThreadInterrupt,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -2989,11 +2990,12 @@ export default function ChatView(props: ChatViewProps) {
     !compactionSettled;
   const isWorking =
     phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
+  const isInterruptPending = interruptRequestedThreadId === activeThread?.id;
   const isTurnInterruptible =
     phase === "running" ||
     isSendBusy ||
     (activeLatestTurn !== null && !latestTurnSettled) ||
-    interruptRequestedThreadId === activeThread?.id;
+    isInterruptPending;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -3623,12 +3625,19 @@ export default function ChatView(props: ChatViewProps) {
   const requestThreadInterrupt = useCallback(
     async (input: { threadId: ThreadId; turnId?: TurnId }) => {
       const result = await interruptThreadTurn({ environmentId, input });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          input.threadId,
-          error instanceof Error ? error.message : "Failed to interrupt the current turn.",
-        );
+      if (result._tag === "Failure") {
+        if (interruptRequestedThreadIdRef.current === input.threadId) {
+          interruptRequestedThreadIdRef.current = null;
+          interruptAttemptedTurnKeyRef.current = null;
+          setInterruptRequestedThreadId((current) => (current === input.threadId ? null : current));
+        }
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            input.threadId,
+            error instanceof Error ? error.message : "Failed to interrupt the current turn.",
+          );
+        }
       }
     },
     [environmentId, interruptThreadTurn, setThreadError],
@@ -3686,6 +3695,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const onInterrupt = useCallback(async () => {
     if (!activeThread) return;
+    if (interruptRequestedThreadIdRef.current === activeThread.id) return;
     const interruptInput = buildThreadTurnInterruptInput(activeThread);
     interruptRequestedThreadIdRef.current = activeThread.id;
     interruptAttemptedTurnKeyRef.current =
@@ -3698,8 +3708,11 @@ export default function ChatView(props: ChatViewProps) {
       setInterruptRequestedThreadId(null);
     }
   }, [activeThread, isSendBusy, phase, queuedTurnIsSettled, requestThreadInterrupt]);
-  const canInterruptRunningThread =
-    buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
+  const canInterruptRunningThread = canRequestRunningThreadInterrupt(
+    activeThread,
+    phase,
+    interruptRequestedThreadId,
+  );
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -8889,6 +8902,7 @@ export default function ChatView(props: ChatViewProps) {
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
                             isTurnInterruptible={isTurnInterruptible}
+                            isInterruptPending={isInterruptPending}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={

@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   View,
@@ -220,6 +221,7 @@ export function ComposerToolbarScroller(props: {
 export function ComposerActionButton(props: {
   readonly accessibilityLabel: string;
   readonly disabled?: boolean;
+  readonly pending?: boolean;
   readonly icon: ComponentProps<typeof SymbolView>["name"];
   readonly onPress: () => void;
   readonly variant?: "primary" | "danger";
@@ -228,9 +230,9 @@ export function ComposerActionButton(props: {
     <Pressable
       accessibilityLabel={props.accessibilityLabel}
       accessibilityRole="button"
-      accessibilityState={{ disabled: props.disabled }}
+      accessibilityState={{ busy: props.pending, disabled: props.disabled || props.pending }}
       className="size-[44px] shrink-0 items-center justify-center active:opacity-70"
-      disabled={props.disabled}
+      disabled={props.disabled || props.pending}
       onPress={props.onPress}
     >
       <View
@@ -243,15 +245,24 @@ export function ComposerActionButton(props: {
               : "bg-primary",
         )}
       >
-        <SymbolView
-          name={props.icon}
-          size={16}
-          weight="semibold"
-          tintColorClassName={
-            props.variant === "danger" ? "accent-danger-foreground" : "accent-primary-foreground"
-          }
-          type="monochrome"
-        />
+        {props.pending ? (
+          <ActivityIndicator
+            size="small"
+            colorClassName={
+              props.variant === "danger" ? "accent-danger-foreground" : "accent-primary-foreground"
+            }
+          />
+        ) : (
+          <SymbolView
+            name={props.icon}
+            size={16}
+            weight="semibold"
+            tintColorClassName={
+              props.variant === "danger" ? "accent-danger-foreground" : "accent-primary-foreground"
+            }
+            type="monochrome"
+          />
+        )}
       </View>
     </Pressable>
   );

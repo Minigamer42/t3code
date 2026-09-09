@@ -1,7 +1,14 @@
 import { QuestionAttachments } from "./QuestionAttachments";
 import type { ApprovalRequestId, UserInputQuestion } from "@t3tools/contracts";
 import { useCallback, useRef } from "react";
-import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  ScrollView,
+  View,
+  type LayoutChangeEvent,
+} from "react-native";
 import Animated, {
   Easing,
   FadeInUp,
@@ -37,6 +44,7 @@ export interface PendingUserInputCardProps {
   readonly onToggleCollapsed: () => void;
   /** Renders a stop control on the collapsed bar, which replaces the composer. */
   readonly onStopThread?: () => void;
+  readonly isStopRequested?: boolean;
   /**
    * 0 collapsed → 1 expanded. Slides the iOS overlay card down behind the
    * collapsed bar (inside a clipping window) on the UI thread; the host
@@ -190,8 +198,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       </Pressable>
       {props.onStopThread ? (
         <ControlPill
-          accessibilityLabel="Stop"
-          icon="stop.fill"
+          accessibilityLabel={props.isStopRequested ? "Stop requested, waiting for agent" : "Stop"}
+          disabled={props.isStopRequested}
+          icon={props.isStopRequested ? undefined : "stop.fill"}
+          iconNode={
+            props.isStopRequested ? (
+              <ActivityIndicator size="small" colorClassName="accent-danger-foreground" />
+            ) : undefined
+          }
           variant="danger"
           className="h-9 w-9"
           onPress={props.onStopThread}

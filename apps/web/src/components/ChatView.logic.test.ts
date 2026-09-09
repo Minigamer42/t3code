@@ -34,6 +34,7 @@ import {
   buildLoadingThreadFromShell,
   buildRunningThreadTurnInterruptInput,
   buildThreadTurnInterruptInput,
+  canRequestRunningThreadInterrupt,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   deriveLockedProvider,
@@ -1322,6 +1323,19 @@ describe("buildRunningThreadTurnInterruptInput", () => {
     });
 
     expect(buildRunningThreadTurnInterruptInput(runningThread, "running")).toEqual({ threadId });
+  });
+
+  it("does not queue another interrupt while one is pending for the thread", () => {
+    const runningThread = makeThread({
+      session: {
+        ...readySession,
+        status: "running",
+        activeTurnId: TurnId.make("turn-running"),
+      },
+    });
+
+    expect(canRequestRunningThreadInterrupt(runningThread, "running", null)).toBe(true);
+    expect(canRequestRunningThreadInterrupt(runningThread, "running", threadId)).toBe(false);
   });
 });
 
