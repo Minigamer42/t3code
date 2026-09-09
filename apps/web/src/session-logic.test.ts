@@ -1189,6 +1189,62 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("summarizes structured IDE diagnostics with their source range", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "ide-diagnostics-structured",
+        kind: "tool.completed",
+        summary: "IDE diagnostics",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "IDE diagnostics",
+          data: {
+            item: {
+              tool: "ide_diagnostics",
+              arguments: {
+                file: "apps/web/src/session-logic.ts",
+                startLine: 120,
+                endLine: 124,
+              },
+              result: {
+                structuredContent: { problemCount: 3 },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.detail).toBe("apps/web/src/session-logic.ts:120-124 - 3 problems");
+  });
+
+  it("summarizes IDE diagnostics returned as JSON text", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "ide-diagnostics-text",
+        kind: "tool.completed",
+        summary: "IDE diagnostics",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "IDE diagnostics",
+          data: {
+            item: {
+              tool: "ide_diagnostics",
+              arguments: { file: "apps/web/src/Chat.tsx", startLine: 42 },
+              result: {
+                content: [{ type: "text", text: '{"problemCount":1}' }],
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.detail).toBe("apps/web/src/Chat.tsx:42 - 1 problem");
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
