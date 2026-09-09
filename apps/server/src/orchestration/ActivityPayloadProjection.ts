@@ -91,6 +91,9 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   if ("command" in item) {
     projectedItem.command = item.command;
   }
+  if ("processId" in item) {
+    projectedItem.processId = item.processId;
+  }
 
   const aggregatedOutput = asTrimmedString(item.aggregatedOutput);
   if (aggregatedOutput) {

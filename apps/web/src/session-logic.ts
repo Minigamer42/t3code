@@ -594,9 +594,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolPresentation.toolSource) {
     entry.toolSource = toolPresentation.toolSource;
   }
-  if (itemType === "mcp_tool_call") {
+  if (itemType === "mcp_tool_call" || itemType === "command_execution") {
     const data = asRecord(payload?.data);
-    const toolData = typeof data?.toolName === "string" ? (data.item ?? data) : data?.item;
+    const toolData =
+      itemType === "mcp_tool_call" && typeof data?.toolName === "string"
+        ? (data.item ?? data)
+        : data?.item;
     if (toolData !== undefined) {
       entry.toolData = toolData;
     }
@@ -669,6 +672,7 @@ function agentSpawnGroupKey(entry: DerivedWorkLogEntry): string {
 
 function toolLifecycleCollapseMapKey(entry: DerivedWorkLogEntry): string | undefined {
   if (
+    entry.sourceActivityKind !== "tool.started" &&
     entry.sourceActivityKind !== "tool.updated" &&
     entry.sourceActivityKind !== "tool.completed"
   ) {
@@ -777,6 +781,7 @@ function shouldCollapseToolLifecycleEntries(
   next: DerivedWorkLogEntry,
 ): boolean {
   if (
+    previous.sourceActivityKind !== "tool.started" &&
     previous.sourceActivityKind !== "tool.updated" &&
     previous.sourceActivityKind !== "tool.completed"
   ) {
@@ -789,7 +794,14 @@ function shouldCollapseToolLifecycleEntries(
     return false;
   }
   if (previous.sourceActivityKind === "tool.completed") {
-    return false;
+    return (
+      next.sourceActivityKind === "tool.completed" &&
+      previous.toolCallId !== undefined &&
+      previous.toolCallId === next.toolCallId
+    );
+  }
+  if (previous.toolCallId !== undefined && previous.toolCallId === next.toolCallId) {
+    return true;
   }
   if (
     previous[workLogCollapseKey] !== undefined &&
@@ -829,11 +841,16 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next[workLogCollapseKey] ?? previous[workLogCollapseKey];
   const toolCallId = next.toolCallId ?? previous.toolCallId;
-  const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
+  const commandWasStopped =
+    previous.toolLifecycleStatus === "stopped" && next.sourceActivityKind === "tool.completed";
+  const toolLifecycleStatus = commandWasStopped
+    ? previous.toolLifecycleStatus
+    : (next.toolLifecycleStatus ?? previous.toolLifecycleStatus);
   const toolData = next.toolData ?? previous.toolData;
   return {
     ...previous,
     ...next,
+    ...(commandWasStopped ? { label: previous.label } : {}),
     ...(detail ? { detail } : {}),
     ...(viewedImagePath ? { viewedImagePath } : {}),
     ...(command ? { command } : {}),

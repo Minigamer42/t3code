@@ -1450,6 +1450,9 @@ export default function ChatView(props: ChatViewProps) {
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
+  const stopThreadTool = useAtomCommand(threadEnvironment.stopTool, {
+    reportFailure: false,
+  });
   const respondToThreadApproval = useAtomCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -3641,6 +3644,29 @@ export default function ChatView(props: ChatViewProps) {
       }
     },
     [environmentId, interruptThreadTurn, setThreadError],
+  );
+
+  const requestToolStop = useCallback(
+    async (input: { toolCallId: string; processId: string; turnId: TurnId | null }) => {
+      if (!activeThreadId) return;
+      const result = await stopThreadTool({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+          toolCallId: input.toolCallId,
+          processId: input.processId,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : "Failed to stop the command.",
+        );
+      }
+    },
+    [activeThreadId, environmentId, setThreadError, stopThreadTool],
   );
 
   const interruptAcceptedDispatchIfRequested = useCallback(
@@ -8801,6 +8827,7 @@ export default function ChatView(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                onStopTool={selectedProvider === "codex" ? requestToolStop : null}
                 toolCallsExpanded={toolCallsExpanded}
                 toolCallExpansionEpoch={toolCallExpansionEpoch}
                 queuedMessageIds={queuedMessageIds}

@@ -327,6 +327,94 @@ describe("MessagesTimeline", () => {
     }
   });
 
+  it("stops a supported running command and hides the action otherwise", async () => {
+    const runningCommand = {
+      id: "running-command-entry",
+      kind: "work" as const,
+      createdAt: MESSAGE_CREATED_AT,
+      entry: {
+        id: "running-command",
+        createdAt: MESSAGE_CREATED_AT,
+        turnId: TurnId.make("turn-command"),
+        toolCallId: "command-item-1",
+        label: "Run command",
+        tone: "tool" as const,
+        itemType: "command_execution" as const,
+        command: "sleep 60",
+        toolData: { processId: "18604" },
+        toolLifecycleStatus: "inProgress" as const,
+      },
+    };
+    const onStopTool = vi.fn();
+    const activeTurnProps = {
+      isWorking: true,
+      latestTurn: {
+        turnId: TurnId.make("turn-command"),
+        state: "running" as const,
+        startedAt: MESSAGE_CREATED_AT,
+        completedAt: null,
+      },
+      runningTurnId: TurnId.make("turn-command"),
+    };
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            {...activeTurnProps}
+            timelineEntries={[runningCommand]}
+            toolCallsExpanded
+            toolCallExpansionEpoch={1}
+            onStopTool={onStopTool}
+          />,
+        );
+      });
+      await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
+      const stopButton = renderer!.root.findByProps({ "aria-label": "Stop sleep 60" });
+      await act(() => stopButton.props.onClick());
+      expect(onStopTool).toHaveBeenCalledWith({
+        toolCallId: "command-item-1",
+        processId: "18604",
+        turnId: TurnId.make("turn-command"),
+      });
+
+      await act(() => {
+        renderer!.update(
+          <MessagesTimeline
+            {...buildProps()}
+            {...activeTurnProps}
+            timelineEntries={[runningCommand]}
+            toolCallsExpanded
+            toolCallExpansionEpoch={1}
+          />,
+        );
+      });
+      expect(renderer!.root.findAllByProps({ "aria-label": "Stop sleep 60" })).toHaveLength(0);
+
+      await act(() => {
+        renderer!.update(
+          <MessagesTimeline
+            {...buildProps()}
+            {...activeTurnProps}
+            timelineEntries={[
+              {
+                ...runningCommand,
+                entry: { ...runningCommand.entry, toolLifecycleStatus: "completed" },
+              },
+            ]}
+            toolCallsExpanded
+            toolCallExpansionEpoch={1}
+            onStopTool={onStopTool}
+          />,
+        );
+      });
+      expect(renderer!.root.findAllByProps({ "aria-label": "Stop sleep 60" })).toHaveLength(0);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
   it("renders previous and next controls with the minimap", () => {
     const first = buildUserTimelineEntry("First turn");
     const secondBase = buildUserTimelineEntry("Second turn");

@@ -236,6 +236,13 @@ interface TimelineRowSharedState {
   onEditQueuedMessage: (messageId: MessageId) => void;
   onDeleteQueuedMessage: (messageId: MessageId) => void;
   onSendQueuedMessageNow: (messageId: MessageId) => void;
+  onStopTool: ((input: StopToolInput) => void) | null;
+}
+
+interface StopToolInput {
+  readonly toolCallId: string;
+  readonly processId: string;
+  readonly turnId: TurnId | null;
 }
 
 interface TimelineRowActivityState {
@@ -379,6 +386,7 @@ interface MessagesTimelineProps {
   onEditQueuedMessage?: (messageId: MessageId) => void;
   onDeleteQueuedMessage?: (messageId: MessageId) => void;
   onSendQueuedMessageNow?: (messageId: MessageId) => void;
+  onStopTool?: ((input: StopToolInput) => void) | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +441,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onEditQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   onDeleteQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   onSendQueuedMessageNow = NOOP_QUEUED_MESSAGE_ACTION,
+  onStopTool = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
@@ -798,6 +807,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onEditQueuedMessage,
       onDeleteQueuedMessage,
       onSendQueuedMessageNow,
+      onStopTool,
     }),
     [
       readyCitationRequest,
@@ -827,6 +837,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onEditQueuedMessage,
       onDeleteQueuedMessage,
       onSendQueuedMessageNow,
+      onStopTool,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -3191,6 +3202,18 @@ function workEntryRawCommand(
   return rawCommand === workEntry.command.trim() ? null : rawCommand;
 }
 
+function workEntryCommandProcessId(workEntry: TimelineWorkEntry): string | null {
+  if (
+    workEntry.itemType !== "command_execution" ||
+    typeof workEntry.toolData !== "object" ||
+    workEntry.toolData === null
+  ) {
+    return null;
+  }
+  const processId = (workEntry.toolData as { processId?: unknown }).processId;
+  return typeof processId === "string" && processId.trim().length > 0 ? processId.trim() : null;
+}
+
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
@@ -3391,7 +3414,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
-  const { threadRef, onImageExpand } = use(TimelineRowCtx);
+  const { threadRef, onImageExpand, onStopTool } = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
   const groupView = use(WorkGroupViewCtx);
   const [expandedOverride, setExpandedOverride] = useState<{
@@ -3421,6 +3444,13 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           workspaceRoot,
         })
       : null;
+  const commandMatchesVisibleLabel = workEntry.command?.trim() === previewText.trim();
+  const commandProcessId = workEntryCommandProcessId(workEntry);
+  const canStopCommand =
+    workEntry.toolLifecycleStatus === "inProgress" &&
+    workEntry.toolCallId !== undefined &&
+    commandProcessId !== null &&
+    onStopTool !== null;
   const canExpand =
     (showFailedIndicator && previewText.trim().length > 0) ||
     (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
@@ -3430,7 +3460,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       workEntry.detail?.trim() ||
       workEntry.output?.trim() ||
       workEntry.changedFiles?.length ||
-      viewedImage,
+      viewedImage ||
+      canStopCommand,
     );
   const defaultExpanded =
     activity.toolCallsExpanded && canExpand && workLogEntryIsToolLike(workEntry);
@@ -3592,13 +3623,36 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       {workEntry.questionAnswer ? (
         <QuestionAnswerHistory answer={workEntry.questionAnswer} />
       ) : null}
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand && (expandedBody || canStopCommand) ? (
         <div
           className="mt-1 ms-7 cursor-default rounded-md bg-muted/40 px-3 py-2"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          {canStopCommand ? (
+            <div className={cn("flex justify-end", expandedBody && "mb-1")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1.5 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() =>
+                  onStopTool!({
+                    toolCallId: workEntry.toolCallId!,
+                    processId: commandProcessId,
+                    turnId: workEntry.turnId ?? null,
+                  })
+                }
+                aria-label={`Stop ${previewText}`}
+              >
+                <span className="size-2 rounded-[2px] bg-current" aria-hidden />
+                Stop
+              </Button>
+            </div>
+          ) : null}
+          {expandedBody ? (
+            <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          ) : null}
         </div>
       ) : null}
     </div>

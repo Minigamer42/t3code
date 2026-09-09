@@ -1014,6 +1014,70 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("keeps one stopped row when Codex later completes the command", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-started",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-1",
+        kind: "tool.started",
+        summary: "Running command",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "command-item",
+          status: "inProgress",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "sleep 60",
+              processId: "18604",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-stopped",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Tool stopped",
+        payload: {
+          toolCallId: "command-item",
+          status: "stopped",
+          detail: "The command process was terminated.",
+        },
+      }),
+      makeActivity({
+        id: "command-provider-completed",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "command-item",
+          status: "completed",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "sleep 60",
+              processId: "18604",
+            },
+          },
+        },
+      }),
+    ];
+
+    expect(deriveWorkLogEntries(activities)).toMatchObject([
+      {
+        label: "Tool stopped",
+        toolCallId: "command-item",
+        toolLifecycleStatus: "stopped",
+        toolData: { processId: "18604" },
+      },
+    ]);
+  });
+
   it("does not merge reused tool call ids across turns", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

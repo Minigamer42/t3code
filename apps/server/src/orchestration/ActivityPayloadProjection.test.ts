@@ -51,6 +51,7 @@ describe("projectActivityPayload", () => {
         data: {
           item: {
             command: "/bin/zsh -lc 'printf hello'",
+            processId: "18604",
             aggregatedOutput: `hello from codex\n${"x".repeat(5000)}`,
           },
         },
@@ -59,6 +60,7 @@ describe("projectActivityPayload", () => {
     const data = (projected.payload as Record<string, unknown>).data as Record<string, unknown>;
     expect(data.item).toEqual({
       command: "/bin/zsh -lc 'printf hello'",
+      processId: "18604",
       aggregatedOutput: "hello from codex",
     });
     expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
