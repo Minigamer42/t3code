@@ -33,6 +33,7 @@ interface ComposerPrimaryActionsProps {
   isRunning: boolean;
   /** Stop can reach a run, including one still preparing or starting. */
   canInterrupt: boolean;
+  isInterruptPending?: boolean;
   followUpBehavior?: "queue" | "steer";
   alternateShortcutLabel?: string | null;
   showPlanFollowUpPrompt: boolean;
@@ -91,6 +92,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   pendingAction,
   isRunning,
   canInterrupt,
+  isInterruptPending = false,
   followUpBehavior = "steer",
   alternateShortcutLabel = null,
   showPlanFollowUpPrompt,
@@ -142,11 +144,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
             )}
             {...pointerFocusProps}
-            disabled={!canOperateThread}
+            disabled={!canOperateThread || isInterruptPending}
             onClick={() => {
-              if (canOperateThread) onInterrupt();
+              if (canOperateThread && !isInterruptPending) onInterrupt();
             }}
-            aria-label="Stop generation"
+            aria-label={isInterruptPending ? "Stop requested" : "Stop generation"}
           />
         }
       >
@@ -154,7 +156,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <rect x="2" y="2" width="8" height="8" rx="1.5" />
         </svg>
       </TooltipTrigger>
-      <TooltipPopup>Interrupt</TooltipPopup>
+      <TooltipPopup>
+        {isInterruptPending ? "Stop requested — waiting for the provider" : "Interrupt"}
+      </TooltipPopup>
     </Tooltip>
   );
 

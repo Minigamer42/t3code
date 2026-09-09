@@ -629,22 +629,43 @@ function ThreadRouteContent(
   const handleOpenConnectionEditor = useCallback(() => {
     void navigation.navigate("Connections");
   }, [navigation]);
-  const handleStopThread = useCallback(() => {
+  const interruptKey =
+    selectedThread && composer.interruptibleRunId
+      ? `${selectedThread.environmentId}:${selectedThread.id}:${composer.interruptibleRunId}`
+      : null;
+  const interruptRequestedKeyRef = useRef<string | null>(null);
+  const [interruptRequestedKey, setInterruptRequestedKey] = useState<string | null>(null);
+  const isInterruptPending = interruptKey !== null && interruptRequestedKey === interruptKey;
+  useEffect(() => {
+    if (interruptRequestedKeyRef.current !== interruptKey) {
+      interruptRequestedKeyRef.current = null;
+      setInterruptRequestedKey(null);
+    }
+  }, [interruptKey]);
+  const handleStopThread = useCallback(async () => {
     if (
       !selectedThread ||
       !readEnvironmentScope(selectedThread.environmentId, AuthOrchestrationOperateScope) ||
-      composer.interruptibleRunId === null
+      composer.interruptibleRunId === null ||
+      interruptKey === null ||
+      interruptRequestedKeyRef.current === interruptKey
     ) {
       return;
     }
-    return interruptThreadTurn({
+    interruptRequestedKeyRef.current = interruptKey;
+    setInterruptRequestedKey(interruptKey);
+    const result = await interruptThreadTurn({
       environmentId: selectedThread.environmentId,
       input: {
         threadId: selectedThread.id,
         runId: composer.interruptibleRunId,
       },
     });
-  }, [composer.interruptibleRunId, interruptThreadTurn, selectedThread]);
+    if (result._tag === "Failure" && interruptRequestedKeyRef.current === interruptKey) {
+      interruptRequestedKeyRef.current = null;
+      setInterruptRequestedKey(null);
+    }
+  }, [composer.interruptibleRunId, interruptKey, interruptThreadTurn, selectedThread]);
 
   const handleOpenTerminal = useCallback(
     (nextTerminalId?: string | null) => {
@@ -1041,6 +1062,7 @@ function ThreadRouteContent(
           historyControls={historyControls}
           activeThreadBusy={composer.activeThreadBusy}
           canStopThread={awaitingBootstrapTurn || composer.interruptibleRunId !== null}
+          isInterruptPending={isInterruptPending}
           queuedRunEdit={composer.queuedRunEdit}
           composerDraftKey={composer.composerDraftKey}
           followUpBehavior={composer.followUpBehavior}

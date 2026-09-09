@@ -4608,16 +4608,37 @@ export default function ChatView(props: ChatViewProps) {
   }, [composerRef]);
   const canInterruptRunningThread =
     canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
+  const interruptKey =
+    canInterruptRunningThread && activeThread
+      ? `${environmentId}:${activeThread.id}:${activeRuntime?.activeRunId ?? "starting"}`
+      : null;
+  const interruptRequestedKeyRef = useRef<string | null>(null);
+  const [interruptRequestedKey, setInterruptRequestedKey] = useState<string | null>(null);
+  const isInterruptPending = interruptKey !== null && interruptRequestedKey === interruptKey;
+  useEffect(() => {
+    if (interruptRequestedKeyRef.current !== interruptKey) {
+      interruptRequestedKeyRef.current = null;
+      setInterruptRequestedKey(null);
+    }
+  }, [interruptKey]);
   const onInterrupt = useCallback(async () => {
     if (
       !activeThread ||
+      interruptKey === null ||
+      interruptRequestedKeyRef.current === interruptKey ||
       !readEnvironmentScope(activeThread.environmentId, AuthOrchestrationOperateScope)
     )
       return;
+    interruptRequestedKeyRef.current = interruptKey;
+    setInterruptRequestedKey(interruptKey);
     const result = await interruptThreadTurn({
       environmentId,
       input: { threadId: activeThread.id },
     });
+    if (result._tag === "Failure" && interruptRequestedKeyRef.current === interruptKey) {
+      interruptRequestedKeyRef.current = null;
+      setInterruptRequestedKey(null);
+    }
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       setThreadError(
@@ -4625,7 +4646,7 @@ export default function ChatView(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
     }
-  }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
+  }, [activeThread, environmentId, interruptKey, interruptThreadTurn, setThreadError]);
   useEffect(() => subscribeSnapShotComposerFocus(focusComposer), [focusComposer]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -11802,6 +11823,7 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               phase={phase}
                               canInterrupt={canInterruptRunningThread}
+                              isInterruptPending={isInterruptPending}
                               isConnecting={isConnecting}
                               isSendBusy={
                                 (isSendBusy && !sendQueuesBehindSetup) ||

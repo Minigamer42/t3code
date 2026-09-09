@@ -201,6 +201,7 @@ export interface ThreadDetailScreenProps {
   readonly historyControls?: ThreadFeedHistoryControls;
   readonly activeThreadBusy: boolean;
   readonly canStopThread: boolean;
+  readonly isInterruptPending: boolean;
   /** Set while a queued message is open in the composer for editing. */
   readonly queuedRunEdit: QueuedRunEdit | null;
   readonly composerDraftKey: string | null;
@@ -1373,6 +1374,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                           collapsed={userInputCollapsed}
                           onToggleCollapsed={handleToggleUserInputCollapsed}
                           onStopThread={props.onStopThread}
+                        isInterruptPending={props.isInterruptPending}
                           cardProgress={userInputCardProgress}
                           cardCoverage={userInputCardCoverage}
                           onInputFocusChange={handleOwnedInputFocusChange}
@@ -1446,6 +1448,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         queueCount={props.selectedThreadQueueCount}
                         activeThreadBusy={props.activeThreadBusy}
                         canStopThread={props.canStopThread}
+                      isInterruptPending={props.isInterruptPending}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
                         // Follow-ups typed before the server creates the thread wait in
