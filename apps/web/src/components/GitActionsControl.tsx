@@ -161,6 +161,7 @@ interface RunGitActionWithToastInput {
   skipDefaultBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
   featureBranch?: boolean;
+  featureBranchOnly?: boolean;
   filePaths?: string[];
 }
 
@@ -431,6 +432,7 @@ function GitActionItemIcon({
   icon: GitActionIconName;
   SourceControlIcon: ReturnType<typeof getSourceControlPresentation>["Icon"];
 }) {
+  if (icon === "branch") return <GitBranchPlusIcon />;
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
   return <SourceControlIcon />;
@@ -445,6 +447,7 @@ function GitQuickActionIcon({
   className?: string;
   SourceControlIcon: ReturnType<typeof getSourceControlPresentation>["Icon"];
 }) {
+  if (quickAction.kind === "create_branch") return <GitBranchPlusIcon className={className} />;
   if (quickAction.kind === "open_publish") return <CloudUploadIcon className={className} />;
   if (quickAction.kind === "run_pull") return <CloudDownloadIcon className={className} />;
   if (quickAction.kind === "open_push_dialog") return <CloudUploadIcon className={className} />;
@@ -1429,6 +1432,7 @@ export default function GitActionsControl({
       skipDefaultBranchPrompt = false,
       statusOverride,
       featureBranch = false,
+      featureBranchOnly = false,
       filePaths,
     }: RunGitActionWithToastInput) {
       if (
@@ -1483,6 +1487,7 @@ export default function GitActionsControl({
         ...(commitMessage ? { commitMessage } : {}),
         ...(splitCommits ? { splitCommits: true } : {}),
         ...(featureBranch ? { featureBranch } : {}),
+        ...(featureBranchOnly ? { featureBranchOnly } : {}),
         ...(filePaths ? { filePaths } : {}),
         // A pull request the action opens is linked to the thread it ran beside. Drafts
         // have no server thread yet, so there is nothing to link to.
@@ -1648,6 +1653,15 @@ export default function GitActionsControl({
       setIsCommitDialogOpen(true);
       return;
     }
+    if (quickAction.kind === "create_branch") {
+      void runGitActionWithToast({
+        action: "commit",
+        featureBranch: true,
+        featureBranchOnly: true,
+        skipDefaultBranchPrompt: true,
+      });
+      return;
+    }
     if (quickAction.kind === "open_publish") {
       setIsPublishDialogOpen(true);
       return;
@@ -1720,6 +1734,15 @@ export default function GitActionsControl({
 
   const openDialogForMenuItem = (item: GitActionMenuItem) => {
     if (item.disabled) return;
+    if (item.dialogAction === "create_branch") {
+      void runGitActionWithToast({
+        action: "commit",
+        featureBranch: true,
+        featureBranchOnly: true,
+        skipDefaultBranchPrompt: true,
+      });
+      return;
+    }
     if (item.dialogAction === "push") {
       if (requiresForcePushConfirmation(gitStatusForActions)) {
         setIsForcePushDialogOpen(true);
@@ -2304,7 +2327,11 @@ export default function GitActionsControl({
             >
               Commit on new branch
             </Button>
-            <Button size="sm" disabled={!canWriteSourceControl || noneSelected} onClick={() => runSplitDialogAction()}>
+            <Button
+              size="sm"
+              disabled={!canWriteSourceControl || noneSelected}
+              onClick={() => runSplitDialogAction()}
+            >
               Split &amp; commit
             </Button>
           </DialogFooter>
