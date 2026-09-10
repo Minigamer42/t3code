@@ -1249,7 +1249,7 @@ const ThreadTurnInterruptCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const ThreadToolStopCommand = Schema.Struct({
+const ThreadToolStopCommandWire = Schema.Struct({
   type: Schema.Literal("thread.tool.stop"),
   commandId: CommandId,
   threadId: ThreadId,
@@ -1258,6 +1258,47 @@ const ThreadToolStopCommand = Schema.Struct({
   processId: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
+
+const ThreadToolStopCommandSource = Schema.Struct({
+  type: Schema.Literal("thread.tool.stop"),
+  commandId: Schema.Unknown,
+  threadId: Schema.Unknown,
+  turnId: Schema.optional(Schema.Unknown),
+  toolCallId: Schema.optional(Schema.Unknown),
+  itemId: Schema.optional(Schema.Unknown),
+  processId: Schema.Unknown,
+  createdAt: Schema.Unknown,
+});
+
+// Stop requests briefly used `itemId` on the wire. Accept that rollout-era
+// name while keeping `toolCallId` as the only decoded and encoded shape.
+const ThreadToolStopCommand = ThreadToolStopCommandSource.pipe(
+  Schema.decodeTo(
+    ThreadToolStopCommandWire,
+    SchemaTransformation.transformOrFail({
+      decode: (raw) =>
+        Effect.succeed({
+          type: raw.type,
+          commandId: raw.commandId,
+          threadId: raw.threadId,
+          ...(raw.turnId == null ? {} : { turnId: raw.turnId }),
+          toolCallId: raw.toolCallId ?? raw.itemId,
+          processId: raw.processId,
+          createdAt: raw.createdAt,
+        } as typeof ThreadToolStopCommandWire.Encoded),
+      encode: (value) =>
+        Effect.succeed({
+          type: value.type,
+          commandId: value.commandId,
+          threadId: value.threadId,
+          ...(value.turnId === undefined ? {} : { turnId: value.turnId }),
+          toolCallId: value.toolCallId,
+          processId: value.processId,
+          createdAt: value.createdAt,
+        } as typeof ThreadToolStopCommandSource.Encoded),
+    }),
+  ),
+);
 
 const ThreadApprovalRespondCommand = Schema.Struct({
   type: Schema.Literal("thread.approval.respond"),
@@ -1758,13 +1799,46 @@ export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-export const ThreadToolStopRequestedPayload = Schema.Struct({
+const ThreadToolStopRequestedPayloadWire = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
   toolCallId: TrimmedNonEmptyString,
   processId: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
+
+const ThreadToolStopRequestedPayloadSource = Schema.Struct({
+  threadId: Schema.Unknown,
+  turnId: Schema.optional(Schema.Unknown),
+  toolCallId: Schema.optional(Schema.Unknown),
+  itemId: Schema.optional(Schema.Unknown),
+  processId: Schema.Unknown,
+  createdAt: Schema.Unknown,
+});
+
+export const ThreadToolStopRequestedPayload = ThreadToolStopRequestedPayloadSource.pipe(
+  Schema.decodeTo(
+    ThreadToolStopRequestedPayloadWire,
+    SchemaTransformation.transformOrFail({
+      decode: (raw) =>
+        Effect.succeed({
+          threadId: raw.threadId,
+          ...(raw.turnId == null ? {} : { turnId: raw.turnId }),
+          toolCallId: raw.toolCallId ?? raw.itemId,
+          processId: raw.processId,
+          createdAt: raw.createdAt,
+        } as typeof ThreadToolStopRequestedPayloadWire.Encoded),
+      encode: (value) =>
+        Effect.succeed({
+          threadId: value.threadId,
+          ...(value.turnId === undefined ? {} : { turnId: value.turnId }),
+          toolCallId: value.toolCallId,
+          processId: value.processId,
+          createdAt: value.createdAt,
+        } as typeof ThreadToolStopRequestedPayloadSource.Encoded),
+    }),
+  ),
+);
 
 export const ThreadApprovalResponseRequestedPayload = Schema.Struct({
   threadId: ThreadId,

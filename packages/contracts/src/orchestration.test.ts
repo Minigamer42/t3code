@@ -1062,6 +1062,49 @@ it.effect("decodes active placement on existing metadata events while accepting 
   }),
 );
 
+it.effect("decodes legacy tool stop identifiers across command and event boundaries", () =>
+  Effect.gen(function* () {
+    const legacyCommand = yield* decodeClientOrchestrationCommand({
+      type: "thread.tool.stop",
+      commandId: "cmd-tool-stop",
+      threadId: "thread-1",
+      turnId: null,
+      itemId: "call-legacy",
+      processId: "1234",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(legacyCommand.type, "thread.tool.stop");
+    if (legacyCommand.type === "thread.tool.stop") {
+      assert.strictEqual(legacyCommand.toolCallId, "call-legacy");
+      assert.strictEqual(legacyCommand.turnId, undefined);
+    }
+
+    const legacyEvent = yield* decodeOrchestrationEvent({
+      type: "thread.tool-stop-requested",
+      sequence: 1,
+      eventId: "event-tool-stop",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-tool-stop",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "call-legacy",
+        processId: "1234",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    assert.strictEqual(legacyEvent.type, "thread.tool-stop-requested");
+    if (legacyEvent.type === "thread.tool-stop-requested") {
+      assert.strictEqual(legacyEvent.payload.toolCallId, "call-legacy");
+    }
+  }),
+);
+
 it.effect("accepts a title regeneration intent in thread.meta.update", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationCommand({
