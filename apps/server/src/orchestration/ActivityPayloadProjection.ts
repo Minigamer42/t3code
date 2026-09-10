@@ -558,7 +558,7 @@ export function projectThreadDetailSnapshot(
       ...snapshot.thread,
       activities: dropSupersededToolUpdatedActivities(
         dropStaleContextWindowActivities(snapshot.thread.activities),
-      ).map(projectActivityPayload),
+      ).map((activity) => projectActivityPayload(activity)),
     },
   };
 }

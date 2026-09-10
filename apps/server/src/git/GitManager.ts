@@ -3154,8 +3154,23 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const modelSelection = yield* serverSettingsService.getSettings.pipe(
-      Effect.map((settings) => settings.textGenerationModelSelection),
+    const textGenerationSettings = yield* serverSettingsService.getSettings.pipe(
+      Effect.flatMap((settings) =>
+        settings.sourceControlWriterModelSelection === null
+          ? Effect.succeed({
+              modelSelection: settings.textGenerationModelSelection,
+              style: settings.sourceControlWritingStyle,
+            })
+          : providerRegistry.getProviders.pipe(
+              Effect.map((providers) => ({
+                modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
+                  settings,
+                  providers,
+                ),
+                style: settings.sourceControlWritingStyle,
+              })),
+            ),
+      ),
       Effect.mapError(
         (cause) =>
           new GitManagerError({
@@ -3166,7 +3181,19 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    const policy = yield* readCommitMessagePolicy(input.cwd);
+    const stylePolicy = yield* resolveStylePolicy(input.cwd, textGenerationSettings);
+    const repositoryCommitInstructions = yield* readRepositoryInstructions(
+      input.cwd,
+      ".t3code/commit-message.md",
+    );
+    const policy = repositoryCommitInstructions
+      ? {
+          ...stylePolicy,
+          commitInstructions: [stylePolicy.commitInstructions, repositoryCommitInstructions]
+            .filter((instructions): instructions is string => Boolean(instructions))
+            .join("\n\n"),
+        }
+      : stylePolicy;
     const generationCwd = yield* fileSystem
       .makeTempDirectory({
         prefix: "t3code-commit-message-",
@@ -3196,7 +3223,7 @@ export const make = Effect.gen(function* () {
             stagedSummary: limitContext(context.summary, 8_000),
             stagedPatch: limitContext(context.patch, 50_000),
             ...(policy ? { policy } : {}),
-            modelSelection,
+            modelSelection: textGenerationSettings.modelSelection,
           })
           .pipe(Effect.map(sanitizeCommitMessage));
         messages.set(commit.sha, {

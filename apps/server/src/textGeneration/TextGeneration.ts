@@ -15,6 +15,8 @@ export interface CommitMessageGenerationInput {
   branch: string | null;
   stagedSummary: string;
   stagedPatch: string;
+  /** Optional repository-specific instructions for generated commit text. */
+  policy?: TextGenerationPolicy | undefined;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
   /** What model and provider to use for generation. */
