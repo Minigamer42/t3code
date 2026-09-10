@@ -45,6 +45,19 @@ describe("buildGitActionProgressStages", () => {
       ["Force pushing with lease..."],
     );
   });
+
+  it("only shows branch preparation for a branch-only action", () => {
+    assert.deepEqual(
+      buildGitActionProgressStages({
+        action: "commit",
+        hasCustomCommitMessage: false,
+        hasWorkingTreeChanges: false,
+        featureBranch: true,
+        featureBranchOnly: true,
+      }),
+      ["Preparing feature ref..."],
+    );
+  });
 });
 
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
@@ -642,17 +655,29 @@ describe("when: working tree has local changes and ref is behind upstream", () =
 });
 
 describe("when: HEAD is detached and there are no local changes", () => {
-  it("resolveQuickAction shows detached head hint", () => {
+  it("resolveQuickAction offers to create a feature branch", () => {
     const quick = resolveQuickAction(
       status({ refName: null, hasWorkingTreeChanges: false, hasUpstream: false }),
       false,
     );
-    assert.deepInclude(quick, { kind: "show_hint", label: "Commit", disabled: true });
+    assert.deepEqual(quick, {
+      kind: "create_branch",
+      label: "Create feature branch",
+      disabled: false,
+    });
   });
 
-  it("buildMenuItems keeps commit, push, and PR disabled", () => {
+  it("buildMenuItems enables feature branch creation and keeps other actions disabled", () => {
     const items = buildMenuItems(status({ refName: null, hasWorkingTreeChanges: false }), false);
     assert.deepEqual(items, [
+      {
+        id: "branch",
+        label: "Create feature branch",
+        disabled: false,
+        icon: "branch",
+        kind: "open_dialog",
+        dialogAction: "create_branch",
+      },
       {
         id: "commit",
         label: "Commit",
@@ -682,17 +707,16 @@ describe("when: HEAD is detached and there are no local changes", () => {
 });
 
 describe("when: HEAD is detached and there are local changes", () => {
-  it("resolveQuickAction makes commit available", () => {
+  it("resolveQuickAction offers to create a feature branch before committing", () => {
     const quick = resolveQuickAction(
       status({ refName: null, hasWorkingTreeChanges: true, hasUpstream: false }),
       false,
     );
 
     assert.deepEqual(quick, {
-      label: "Commit",
+      label: "Create feature branch",
       disabled: false,
-      kind: "run_action",
-      action: "commit",
+      kind: "create_branch",
     });
   });
 });

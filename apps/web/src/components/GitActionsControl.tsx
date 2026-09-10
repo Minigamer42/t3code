@@ -150,6 +150,7 @@ interface RunGitActionWithToastInput {
   skipDefaultBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
   featureBranch?: boolean;
+  featureBranchOnly?: boolean;
   progressToastId?: GitActionToastId;
   filePaths?: string[];
 }
@@ -474,6 +475,7 @@ function GitActionItemIcon({
   icon: GitActionIconName;
   SourceControlIcon: ReturnType<typeof getSourceControlPresentation>["Icon"];
 }) {
+  if (icon === "branch") return <GitBranchPlusIcon />;
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
   return <SourceControlIcon />;
@@ -487,6 +489,9 @@ function GitQuickActionIcon({
   SourceControlIcon: ReturnType<typeof getSourceControlPresentation>["Icon"];
 }) {
   const iconClassName = "size-3.5";
+  if (quickAction.kind === "create_branch") {
+    return <GitBranchPlusIcon className={iconClassName} />;
+  }
   if (quickAction.kind === "open_pr") return <SourceControlIcon className={iconClassName} />;
   if (quickAction.kind === "open_publish") return <CloudUploadIcon className={iconClassName} />;
   if (quickAction.kind === "open_push_dialog") {
@@ -1363,6 +1368,7 @@ export default function GitActionsControl({
       skipDefaultBranchPrompt = false,
       statusOverride,
       featureBranch = false,
+      featureBranchOnly = false,
       progressToastId,
       filePaths,
     }: RunGitActionWithToastInput) => {
@@ -1406,6 +1412,7 @@ export default function GitActionsControl({
         hasWorkingTreeChanges: !!actionStatus?.hasWorkingTreeChanges,
         splitCommits,
         featureBranch,
+        featureBranchOnly,
         terminology: changeRequestTerminology,
         shouldPushBeforePr:
           action === "create_pr" &&
@@ -1508,6 +1515,7 @@ export default function GitActionsControl({
         ...(commitMessage ? { commitMessage } : {}),
         ...(splitCommits ? { splitCommits: true } : {}),
         ...(featureBranch ? { featureBranch } : {}),
+        ...(featureBranchOnly ? { featureBranchOnly } : {}),
         ...(filePaths ? { filePaths } : {}),
         // A pull request the action opens is linked to the thread it ran beside. Drafts
         // have no server thread yet, so there is nothing to link to.
@@ -1651,6 +1659,15 @@ export default function GitActionsControl({
       setIsCommitDialogOpen(true);
       return;
     }
+    if (quickAction.kind === "create_branch") {
+      void runGitActionWithToast({
+        action: "commit",
+        featureBranch: true,
+        featureBranchOnly: true,
+        skipDefaultBranchPrompt: true,
+      });
+      return;
+    }
     if (quickAction.kind === "open_publish") {
       setIsPublishDialogOpen(true);
       return;
@@ -1715,6 +1732,15 @@ export default function GitActionsControl({
 
   const openDialogForMenuItem = (item: GitActionMenuItem) => {
     if (item.disabled) return;
+    if (item.dialogAction === "create_branch") {
+      void runGitActionWithToast({
+        action: "commit",
+        featureBranch: true,
+        featureBranchOnly: true,
+        skipDefaultBranchPrompt: true,
+      });
+      return;
+    }
     if (item.kind === "open_pr") {
       void openExistingPr();
       return;
@@ -1960,8 +1986,7 @@ export default function GitActionsControl({
               ) : null}
               {gitStatusForActions?.refName === null && (
                 <p className="px-2 py-1.5 text-xs text-warning">
-                  Detached HEAD: create and checkout a refName to enable push and pull request
-                  actions.
+                  Detached HEAD: create a feature branch to enable push and pull request actions.
                 </p>
               )}
               {gitStatusForActions &&
