@@ -10,16 +10,21 @@ import {
   ORCHESTRATION_PROTOCOL_VERSION,
   ORCHESTRATION_V2_WS_METHODS,
   ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   ThreadId,
   WS_METHODS,
   WsRpcGroup,
   type OrchestrationV2ThreadLaunchInput,
   type OrchestrationV2ThreadLaunchResult,
   type ProjectMutation,
+  type ModelSelection,
+  type ProviderOptionSelection,
   type ProjectSnapshot,
   type ServerSettings,
 } from "@t3tools/contracts";
 import { truncate } from "@t3tools/shared/String";
+import { createModelSelection } from "@t3tools/shared/model";
 import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings";
 import * as Console from "effect/Console";
 import * as Crypto from "effect/Crypto";
@@ -74,6 +79,117 @@ export class ThreadCliPromptEmptyError extends Schema.TaggedError<ThreadCliPromp
   }
 }
 
+export class ThreadCliModelSelectionError extends Schema.TaggedError<ThreadCliModelSelectionError>()(
+  "ThreadCliModelSelectionError",
+  { detail: Schema.String },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+const reasoningOptionIdByDriver: Readonly<Record<string, string>> = {
+  codex: "reasoningEffort",
+  claudeAgent: "effort",
+  cursor: "reasoning",
+  grok: "reasoningEffort",
+  opencode: "variant",
+};
+
+function replaceModelOption(
+  options: ReadonlyArray<ProviderOptionSelection>,
+  replacement: ProviderOptionSelection,
+): Array<ProviderOptionSelection> {
+  return [...options.filter((option) => option.id !== replacement.id), replacement];
+}
+
+function resolveProviderDriver(
+  settings: ServerSettings,
+  instanceId: ProviderInstanceId,
+): ProviderDriverKind {
+  const configured = settings.providerInstances[instanceId];
+  if (configured !== undefined) {
+    return configured.driver;
+  }
+  return ProviderDriverKind.make(instanceId);
+}
+
+function resolveModelSelection(input: {
+  readonly base: ModelSelection;
+  readonly settings: ServerSettings;
+  readonly provider: string | undefined;
+  readonly model: string | undefined;
+  readonly reasoning: string | undefined;
+  readonly fast: boolean;
+}): Effect.Effect<ModelSelection, ThreadCliModelSelectionError> {
+  return Effect.gen(function* () {
+    const explicitProvider = input.provider?.trim();
+    if (input.provider !== undefined && explicitProvider?.length === 0) {
+      return yield* new ThreadCliModelSelectionError({
+        detail: "Provider instance cannot be empty.",
+      });
+    }
+    const explicitModel = input.model?.trim();
+    if (input.model !== undefined && explicitModel?.length === 0) {
+      return yield* new ThreadCliModelSelectionError({ detail: "Model cannot be empty." });
+    }
+    const explicitReasoning = input.reasoning?.trim();
+    if (input.reasoning !== undefined && explicitReasoning?.length === 0) {
+      return yield* new ThreadCliModelSelectionError({
+        detail: "Reasoning level cannot be empty.",
+      });
+    }
+
+    const instanceId = explicitProvider
+      ? ProviderInstanceId.make(explicitProvider)
+      : input.base.instanceId;
+    if (
+      explicitProvider &&
+      !isModelSelectionProviderEnabled(input.settings, {
+        instanceId,
+        model: explicitModel ?? input.base.model,
+      })
+    ) {
+      return yield* new ThreadCliModelSelectionError({
+        detail: `Provider instance '${explicitProvider}' is not enabled in T3 Code settings.`,
+      });
+    }
+    if (instanceId !== input.base.instanceId && explicitModel === undefined) {
+      return yield* new ThreadCliModelSelectionError({
+        detail: "--model is required when --provider selects a different provider instance.",
+      });
+    }
+
+    const model = explicitModel ?? input.base.model;
+    let options = instanceId === input.base.instanceId ? [...(input.base.options ?? [])] : [];
+    const driver = resolveProviderDriver(input.settings, instanceId);
+
+    if (explicitReasoning !== undefined) {
+      const optionId = reasoningOptionIdByDriver[driver];
+      if (optionId === undefined) {
+        return yield* new ThreadCliModelSelectionError({
+          detail: `--reasoning is not supported for provider driver '${driver}'.`,
+        });
+      }
+      options = replaceModelOption(options, { id: optionId, value: explicitReasoning });
+    }
+
+    if (input.fast) {
+      if (driver === "codex") {
+        options = replaceModelOption(options, { id: "serviceTier", value: "priority" });
+      } else if (driver === "claudeAgent" || driver === "cursor") {
+        options = replaceModelOption(options, { id: "fastMode", value: true });
+      } else {
+        return yield* new ThreadCliModelSelectionError({
+          detail: `--fast is not supported for provider driver '${driver}'.`,
+        });
+      }
+    }
+
+    return createModelSelection(instanceId, model, options);
+  });
+}
+
 const threadCliUuid = Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
 
 const threadCreateFlags = {
@@ -87,6 +203,23 @@ const threadCreateFlags = {
     Flag.withDescription("Optional first prompt to start immediately."),
     Flag.optional,
   ),
+  provider: Flag.String("provider").pipe(
+    Flag.withDescription("Provider instance id for this thread."),
+    Flag.optional,
+  ),
+  model: Flag.String("model").pipe(
+    Flag.withDescription("Model id for this thread."),
+    Flag.optional,
+  ),
+  reasoning: Flag.String("reasoning").pipe(
+    Flag.withAlias("reasoning-level"),
+    Flag.withDescription("Reasoning level for this thread."),
+    Flag.optional,
+  ),
+  fast: Flag.Boolean("fast").pipe(
+    Flag.withDescription("Use the provider's fast mode or priority service tier."),
+    Flag.withDefault(false),
+  ),
   json: Flag.Boolean("json").pipe(
     Flag.withDescription("Print the created thread as JSON."),
     Flag.withDefault(false),
@@ -99,6 +232,10 @@ export const createThreadFromCliInput = Effect.fn("createThreadFromCliInput")(fu
     readonly project: Option.Option<string>;
     readonly title: Option.Option<string>;
     readonly prompt: Option.Option<string>;
+    readonly provider: Option.Option<string>;
+    readonly model: Option.Option<string>;
+    readonly reasoning: Option.Option<string>;
+    readonly fast: boolean;
     readonly json: boolean;
   },
   server: {
@@ -127,10 +264,18 @@ export const createThreadFromCliInput = Effect.fn("createThreadFromCliInput")(fu
   const existingProject =
     projectById ?? projects.find((project) => project.workspaceRoot === workspaceRoot);
   const projectModel = existingProject?.defaultModelSelection;
-  const modelSelection =
+  const inheritedModelSelection =
     projectModel && isModelSelectionProviderEnabled(server.settings, projectModel)
       ? projectModel
       : server.settings.textGenerationModelSelection;
+  const modelSelection = yield* resolveModelSelection({
+    base: inheritedModelSelection,
+    settings: server.settings,
+    provider: Option.getOrUndefined(flags.provider),
+    model: Option.getOrUndefined(flags.model),
+    reasoning: Option.getOrUndefined(flags.reasoning),
+    fast: flags.fast,
+  });
   const projectId = existingProject?.id ?? ProjectId.make(yield* threadCliUuid);
   const projectTitle = existingProject?.title ?? (yield* resolveProjectTitle(workspaceRoot));
   if (existingProject === undefined) {
