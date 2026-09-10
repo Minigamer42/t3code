@@ -2102,7 +2102,6 @@ function LiveActivityContent({
 
 function workEntryActionIconName(kind: ReturnType<typeof toolGroupAction>): WorkEntryIconName {
   switch (kind) {
-    case "pull-request":
     case "link-pr":
     case "unlink-pr":
     case "list-prs":
