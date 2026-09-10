@@ -78,7 +78,6 @@ export interface RunVcsStackedActionInput {
   readonly commitMessage?: string;
   readonly splitCommits?: boolean;
   readonly featureBranch?: boolean;
-  readonly featureBranchOnly?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
   /** The thread the action runs beside; the server links a pull request it creates to it. */
   readonly threadId?: ThreadId;
@@ -470,7 +469,6 @@ export function createVcsActionManager<R, E>(
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.splitCommits ? { splitCommits: true } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),
-          ...(input.featureBranchOnly ? { featureBranchOnly: true } : {}),
           ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
           ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
         };

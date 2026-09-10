@@ -1515,7 +1515,6 @@ export default function GitActionsControl({
         ...(commitMessage ? { commitMessage } : {}),
         ...(splitCommits ? { splitCommits: true } : {}),
         ...(featureBranch ? { featureBranch } : {}),
-        ...(featureBranchOnly ? { featureBranchOnly } : {}),
         ...(filePaths ? { filePaths } : {}),
         // A pull request the action opens is linked to the thread it ran beside. Drafts
         // have no server thread yet, so there is nothing to link to.
