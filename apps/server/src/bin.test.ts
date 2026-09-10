@@ -972,6 +972,64 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
+  it.effect("applies explicit provider, model, reasoning, and fast thread options", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-model-overrides-test-"),
+      );
+      const workspaceRoot = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-thread-model-overrides-workspace-"),
+      );
+      const config = yield* makeCliTestServerConfig(baseDir);
+      NodeFS.mkdirSync(NodePath.dirname(config.settingsPath), { recursive: true });
+      NodeFS.writeFileSync(
+        config.settingsPath,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - Test fixture matches persisted settings JSON.
+        JSON.stringify({
+          providerInstances: {
+            codex_work: { driver: "codex", enabled: true },
+          },
+        }),
+      );
+
+      yield* withLiveProjectCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          const { output } = yield* captureStdout(
+            runCli([
+              "thread",
+              "create",
+              workspaceRoot,
+              "--provider",
+              "codex_work",
+              "--model",
+              "gpt-explicit",
+              "--reasoning",
+              "high",
+              "--fast",
+              "--base-dir",
+              baseDir,
+              "--json",
+            ]),
+          );
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is a presentation DTO.
+          const created = JSON.parse(output) as { readonly threadId: string };
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+          const readModel = yield* projectionSnapshotQuery.getSnapshot();
+          const thread = readModel.threads.find((candidate) => candidate.id === created.threadId);
+
+          assert.deepEqual(thread?.modelSelection, {
+            instanceId: ProviderInstanceId.make("codex_work"),
+            model: "gpt-explicit",
+            options: [
+              { id: "reasoningEffort", value: "high" },
+              { id: "serviceTier", value: "priority" },
+            ],
+          });
+        }),
+      );
+    }),
+  );
+
   it.effect("requires a running server before creating a thread", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(

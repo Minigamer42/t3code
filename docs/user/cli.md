@@ -27,6 +27,23 @@ stale or disabled, the command uses the enabled provider selection from the serv
 start against the project's current checkout with full access. Use `--json` when another script
 needs the created thread and project IDs.
 
+Override the inherited selection with `--provider` (a provider instance id), `--model`,
+`--reasoning`, and `--fast`:
+
+```bash
+t3 thread create /path/to/project \
+  --prompt "Fix the failing tests" \
+  --provider codex_work \
+  --model gpt-5.6-luna \
+  --reasoning high \
+  --fast
+```
+
+When `--provider` changes the inherited provider instance, `--model` is required. `--fast` uses
+Codex's priority service tier and the native fast-mode option for Claude and Cursor. Providers that
+do not expose fast mode reject the flag before creating the thread. `--reasoning-level` is an alias
+for `--reasoning`.
+
 The command must find the same T3 home as the running server. If the server was started with a
 custom data directory, pass it explicitly:
 
