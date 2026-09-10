@@ -165,7 +165,6 @@ interface RunGitActionWithToastInput {
   skipDefaultBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
   featureBranch?: boolean;
-  featureBranchOnly?: boolean;
   filePaths?: string[];
 }
 
@@ -1381,7 +1380,6 @@ export default function GitActionsControl({
     skipDefaultBranchPrompt = false,
     statusOverride,
     featureBranch = false,
-    featureBranchOnly = false,
     filePaths,
   }: RunGitActionWithToastInput) {
     if (
@@ -1436,7 +1434,6 @@ export default function GitActionsControl({
       ...(commitMessage ? { commitMessage } : {}),
       ...(splitCommits ? { splitCommits: true } : {}),
       ...(featureBranch ? { featureBranch } : {}),
-      ...(featureBranchOnly ? { featureBranchOnly } : {}),
       ...(filePaths ? { filePaths } : {}),
       ...(activeServerThread ? { threadId: activeServerThread.id } : {}),
       ...(activeDraftThread ? { projectId: activeDraftThread.projectId } : {}),
@@ -1526,7 +1523,6 @@ export default function GitActionsControl({
       void runGitActionWithToast({
         action: "commit",
         featureBranch: true,
-        featureBranchOnly: true,
         skipDefaultBranchPrompt: true,
       });
       return;
@@ -1596,7 +1592,6 @@ export default function GitActionsControl({
       void runGitActionWithToast({
         action: "commit",
         featureBranch: true,
-        featureBranchOnly: true,
         skipDefaultBranchPrompt: true,
       });
       return;

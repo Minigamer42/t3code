@@ -4317,7 +4317,11 @@ export const make = Effect.gen(function* () {
         const initialStatus = yield* input.forceWithLease
           ? gitCore.statusDetailsLocal(input.cwd)
           : gitCore.statusDetails(input.cwd);
-        const wantsCommit = isCommitAction(input.action) && !input.featureBranchOnly;
+        const branchOnly =
+          input.featureBranch === true &&
+          input.action === "commit" &&
+          initialStatus.branch === null;
+        const wantsCommit = isCommitAction(input.action) && !branchOnly;
         const upToDateBranch =
           input.action === "create_pr" &&
           initialStatus.hasUpstream &&
@@ -4360,17 +4364,7 @@ export const make = Effect.gen(function* () {
           });
         }
 
-        if (
-          input.featureBranchOnly &&
-          (!input.featureBranch || input.action !== "commit" || initialStatus.branch !== null)
-        ) {
-          return yield* new GitManagerError({
-            operation: "runStackedAction",
-            cwd: input.cwd,
-            detail: "Branch-only creation requires a detached HEAD feature-branch commit action.",
-          });
-        }
-        if (input.featureBranch && !wantsCommit && !input.featureBranchOnly) {
+        if (input.featureBranch && !wantsCommit && !branchOnly) {
           return yield* new GitManagerError({
             operation: "runStackedAction",
             cwd: input.cwd,
@@ -4452,7 +4446,7 @@ export const make = Effect.gen(function* () {
             initialStatus.branch,
             input.commitMessage,
             input.filePaths,
-            input.featureBranchOnly,
+            branchOnly,
           );
           branchStep = result.branchStep;
           commitMessageForStep = result.resolvedCommitMessage;
