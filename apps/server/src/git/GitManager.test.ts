@@ -722,7 +722,6 @@ function runStackedAction(
     commitMessage?: string;
     splitCommits?: boolean;
     featureBranch?: boolean;
-    featureBranchOnly?: boolean;
     forceWithLease?: boolean;
     filePaths?: readonly string[];
   },
@@ -4742,6 +4741,12 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["branch", "-m", "development"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "development"]);
+      yield* runGit(remoteDir, ["symbolic-ref", "HEAD", "refs/heads/development"]);
+      yield* runGit(repoDir, ["remote", "set-head", "origin", "development"]);
       yield* runGit(repoDir, ["checkout", "-b", "source-change"]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\ndetached change\n");
       yield* runGit(repoDir, ["add", "README.md"]);
@@ -4770,7 +4775,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         cwd: repoDir,
         action: "commit",
         featureBranch: true,
-        featureBranchOnly: true,
       });
 
       expect(result.branch).toEqual({
