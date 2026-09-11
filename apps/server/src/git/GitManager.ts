@@ -3021,9 +3021,6 @@ export const make = Effect.gen(function* () {
     });
     const headSha = headResult.stdout.trim();
     const baseRef = yield* gitCore.resolveBaseRef(cwd, status.branch);
-    const excludedRefs = Array.from(
-      new Set([status.upstreamRef, baseRef].filter((ref): ref is string => ref !== null)),
-    );
     const rewriteableCount = Math.min(
       MAX_REWRITEABLE_COMMITS,
       status.aheadOfDefaultCount > 0 ? status.aheadOfDefaultCount : status.aheadCount,
@@ -3036,7 +3033,7 @@ export const make = Effect.gen(function* () {
             "--reverse",
             `--max-count=${rewriteableCount}`,
             "HEAD",
-            ...(excludedRefs.length > 0 ? ["--not", ...excludedRefs] : []),
+            ...(baseRef !== null ? ["--not", baseRef] : []),
           ]
         : null;
     const shas = args
