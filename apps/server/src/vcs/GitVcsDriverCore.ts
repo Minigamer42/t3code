@@ -191,6 +191,41 @@ function parseNumstatEntries(
   return entries;
 }
 
+/** Parses the separate old/new path records emitted by a NUL-delimited no-index diff. */
+function parseNoIndexNumstatEntries(
+  stdout: string,
+): Array<{ path: string; insertions: number; deletions: number }> {
+  const records = stdout.split("\0");
+  const entries: Array<{ path: string; insertions: number; deletions: number }> = [];
+
+  for (let index = 0; index < records.length;) {
+    const header = records[index++] ?? "";
+    if (header.length === 0) continue;
+    const firstTab = header.indexOf("\t");
+    const secondTab = firstTab < 0 ? -1 : header.indexOf("\t", firstTab + 1);
+    if (firstTab < 0 || secondTab < 0) continue;
+
+    const added = Number.parseInt(header.slice(0, firstTab), 10);
+    const deleted = Number.parseInt(header.slice(firstTab + 1, secondTab), 10);
+    let rawPath = header.slice(secondTab + 1);
+    if (rawPath.length === 0) {
+      index += 1;
+      rawPath = records[index++] ?? "";
+    }
+    if (rawPath.length === 0) continue;
+
+    const normalizedPath =
+      rawPath.startsWith("./") || rawPath.startsWith(".\\") ? rawPath.slice(2) : rawPath;
+    entries.push({
+      path: normalizedPath,
+      insertions: Number.isFinite(added) ? added : 0,
+      deletions: Number.isFinite(deleted) ? deleted : 0,
+    });
+  }
+
+  return entries;
+}
+
 function parsePorcelainPath(line: string): string | null {
   if (line.startsWith("? ") || line.startsWith("! ")) {
     const simple = line.slice(2).trim();
@@ -1630,6 +1665,73 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  /** Gets Git-compatible untracked stats in one process without changing the real index. */
+  const readUntrackedNumstat = Effect.fn("readUntrackedNumstat")(function* (
+    cwd: string,
+    repositoryRoot: string,
+    untrackedPaths: ReadonlyArray<string>,
+  ) {
+    if (untrackedPaths.length === 0) return [];
+
+    const repositoryRelativePaths = untrackedPaths.map((untrackedPath) =>
+      path.relative(repositoryRoot, path.resolve(cwd, untrackedPath)).replaceAll("\\", "/"),
+    );
+
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const emptyDirectory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3code-git-empty-tree-",
+        });
+        const result = yield* executeGitWithStableDiagnostics(
+          "GitVcsDriver.statusDetails.untrackedNumstat",
+          repositoryRoot,
+          [
+            "diff",
+            "--no-index",
+            "--numstat",
+            "-z",
+            "--no-renames",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--",
+            emptyDirectory,
+            ".",
+            "--",
+            ...repositoryRelativePaths,
+          ],
+          {
+            allowNonZeroExit: true,
+            env: { GIT_LITERAL_PATHSPECS: "1" },
+          },
+        );
+        const entries = parseNoIndexNumstatEntries(result.stdout).map((entry) => ({
+          ...entry,
+          path: path.relative(cwd, path.resolve(repositoryRoot, entry.path)).replaceAll("\\", "/"),
+        }));
+        return untrackedPaths.map((untrackedPath) => {
+          const normalizedPath = untrackedPath.endsWith("/")
+            ? untrackedPath.slice(0, -1)
+            : untrackedPath;
+          const nestedPrefix = `${normalizedPath}/`;
+          let insertions = 0;
+          let deletions = 0;
+          for (const entry of entries) {
+            if (
+              entry.path !== normalizedPath &&
+              !(untrackedPath.endsWith("/") && entry.path.startsWith(nestedPrefix))
+            ) {
+              continue;
+            }
+            insertions += entry.insertions;
+            deletions += entry.deletions;
+          }
+          return { path: untrackedPath, insertions, deletions };
+        });
+      }),
+    ).pipe(Effect.orElseSucceed(() => []));
+  });
+
   const readStatusDetailsLocal = Effect.fn("readStatusDetailsLocal")(function* (cwd: string) {
     const indexResult = yield* executeGitWithStableDiagnostics(
       "GitVcsDriver.statusDetails.indexPath",
@@ -1702,6 +1804,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       });
     }
 
+    const untrackedPaths: Array<string> = [];
+    for (const line of statusResult.stdout.split(/\r?\n/g)) {
+      if (!line.startsWith("? ")) continue;
+      const pathValue = parsePorcelainPath(line);
+      if (pathValue) untrackedPaths.push(pathValue);
+    }
+
     const repositoryPaths = yield* resolveRepositoryPaths(cwd).pipe(
       Effect.catchTags({ GitCommandError: () => Effect.succeed(null) }),
     );
@@ -1772,8 +1881,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ],
       { concurrency: "unbounded" },
     );
-    const statusStdout = statusResult.stdout;
+    const untrackedNumstatEntries = yield* readUntrackedNumstat(
+      cwd,
+      repositoryPaths?.worktreeRoot ?? cwd,
+      untrackedPaths,
+    );
 
+    const statusStdout = statusResult.stdout;
     let refName: string | null = null;
     let upstreamRef: string | null = null;
     let aheadCount = 0;
@@ -1828,7 +1942,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           : yield* computeAheadCountAgainstBase(cwd, refName).pipe(Effect.orElseSucceed(() => 0));
     }
 
-    const numstatEntries = parseNumstatEntries(numstatStdout);
+    const numstatEntries = [...parseNumstatEntries(numstatStdout), ...untrackedNumstatEntries];
     const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
     for (const entry of numstatEntries) {
       fileStatMap.set(entry.path, { insertions: entry.insertions, deletions: entry.deletions });
