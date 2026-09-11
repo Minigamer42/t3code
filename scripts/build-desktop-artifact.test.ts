@@ -1342,6 +1342,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         command.args.some((arg) => arg.endsWith("build-browser-secret.mjs")),
       );
       assert.isDefined(helper);
+      assert.include(helper.args, "--required");
       const path = yield* Path.Path;
       assert.deepStrictEqual(helper.args.slice(-4), [
         "--arch",

@@ -2330,6 +2330,7 @@ export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (inp
       "node",
       [
         path.join(input.repoRoot, "apps/desktop/scripts/build-browser-secret.mjs"),
+        "--required",
         "--arch",
         input.arch === "arm64" ? "arm64" : "x64",
         "--output",
