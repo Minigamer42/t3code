@@ -1,5 +1,5 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
-import { EnvironmentId, type ReviewDiffFileContentsResult } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type ReviewDiffFileContentsResult } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -8,6 +8,7 @@ import { createGitDiffFileContentsLoader } from "./diffFileContents";
 
 const SOURCE = {
   environmentId: EnvironmentId.make("environment-1"),
+  threadId: ThreadId.make("thread-1"),
   cwd: "/workspace",
   sourceKind: "branch-range" as const,
   baseRef: "main",
@@ -45,6 +46,7 @@ describe("createGitDiffFileContentsLoader", () => {
     expect(getDiffFileContents).toHaveBeenCalledWith({
       environmentId: "environment-1",
       input: {
+        threadId: "thread-1",
         cwd: "/workspace",
         sourceKind: "branch-range",
         changeType: "rename-changed",

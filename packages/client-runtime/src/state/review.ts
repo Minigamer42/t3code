@@ -27,6 +27,7 @@ export function createReviewEnvironmentAtoms<R, E>(
         key: ({ environmentId, input }) =>
           JSON.stringify([
             environmentId,
+            input.threadId,
             input.cwd,
             input.sourceKind,
             input.baseRef,

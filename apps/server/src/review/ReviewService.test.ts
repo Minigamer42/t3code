@@ -3,9 +3,12 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ReviewService from "./ReviewService.ts";
@@ -14,6 +17,11 @@ function makeLayer(input: {
   readonly workspaceRoot: string;
   readonly baseDir: string;
   readonly detectCalls?: Array<{ readonly cwd: string }>;
+  readonly threadWorkspace?: {
+    readonly threadId: ThreadId;
+    readonly workspaceRoot: string;
+    readonly worktreePath: string | null;
+  };
 }) {
   return ReviewService.layer.pipe(
     Layer.provide(
@@ -28,12 +36,114 @@ function makeLayer(input: {
       }),
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+    Layer.provide(
+      Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+        getThreadWorkspaceContext: (threadId) =>
+          Effect.succeed(
+            input.threadWorkspace?.threadId === threadId
+              ? Option.some({
+                  threadId,
+                  projectId: ProjectId.make("project-review"),
+                  workspaceRoot: input.threadWorkspace.workspaceRoot,
+                  worktreePath: input.threadWorkspace.worktreePath,
+                })
+              : Option.none(),
+          ),
+      }),
+    ),
     Layer.provide(ServerConfig.layerTest(input.workspaceRoot, input.baseDir)),
     Layer.provideMerge(NodeServices.layer),
   );
 }
 
 describe("ReviewService", () => {
+  it.effect("allows the exact worktree registered to the requesting thread", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const serverRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-server-" });
+      const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+      const worktreeRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-worktree-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const threadId = ThreadId.make("thread-review");
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getDiffPreview({ threadId, cwd: worktreeRoot });
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            workspaceRoot: serverRoot,
+            baseDir,
+            detectCalls,
+            threadWorkspace: { threadId, workspaceRoot: projectRoot, worktreePath: worktreeRoot },
+          }),
+        ),
+      );
+
+      assert.strictEqual(result.cwd, worktreeRoot);
+      assert.deepStrictEqual(detectCalls, [{ cwd: worktreeRoot }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("allows the project root registered to a thread without a worktree", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const serverRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-server-" });
+      const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const threadId = ThreadId.make("thread-review");
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getDiffPreview({ threadId, cwd: projectRoot });
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            workspaceRoot: serverRoot,
+            baseDir,
+            detectCalls,
+            threadWorkspace: { threadId, workspaceRoot: projectRoot, worktreePath: null },
+          }),
+        ),
+      );
+
+      assert.strictEqual(result.cwd, projectRoot);
+      assert.deepStrictEqual(detectCalls, [{ cwd: projectRoot }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects a cwd that does not match the requesting thread workspace", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const serverRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-server-" });
+      const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+      const worktreeRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-worktree-" });
+      const otherRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-other-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const threadId = ThreadId.make("thread-review");
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getDiffPreview({ threadId, cwd: otherRoot }).pipe(Effect.flip);
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            workspaceRoot: serverRoot,
+            baseDir,
+            detectCalls,
+            threadWorkspace: { threadId, workspaceRoot: projectRoot, worktreePath: worktreeRoot },
+          }),
+        ),
+      );
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+      assert.deepStrictEqual(detectCalls, []);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects diff preview cwd outside the configured workspace roots", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

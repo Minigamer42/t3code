@@ -4866,6 +4866,7 @@ describe("agent browser access", () => {
         getProjectShellById: () => Effect.die("unused"),
         getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
         getThreadCheckpointContext: () => Effect.die("unused"),
+        getThreadWorkspaceContext: () => Effect.die("unused"),
         getFullThreadDiffContext: () => Effect.die("unused"),
         getThreadRuntimeContext: () => Effect.die("unused"),
         getThreadShellById: (requestedThreadId) =>

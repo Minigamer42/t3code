@@ -47,11 +47,14 @@ export interface ProjectionEventReplayStats {
   readonly payloadBytes: number;
 }
 
-export interface ProjectionThreadCheckpointContext {
+export interface ProjectionThreadWorkspaceContext {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
   readonly worktreePath: string | null;
+}
+
+export interface ProjectionThreadCheckpointContext extends ProjectionThreadWorkspaceContext {
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
 }
 
@@ -188,6 +191,11 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadCheckpointContext: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<ProjectionThreadCheckpointContext>, ProjectionRepositoryError>;
+
+  /** Read the registered project root and optional worktree for one active thread. */
+  readonly getThreadWorkspaceContext: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<ProjectionThreadWorkspaceContext>, ProjectionRepositoryError>;
 
   /**
    * Read only the narrow context needed to compute a full-thread diff from

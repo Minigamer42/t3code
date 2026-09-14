@@ -74,6 +74,7 @@ import {
   type ProjectionFullThreadDiffContext,
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
+  type ProjectionThreadWorkspaceContext,
   type ProjectionThreadDetailQuery,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
@@ -1177,6 +1178,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           ON projects.project_id = threads.project_id
         WHERE threads.thread_id = ${threadId}
           AND threads.deleted_at IS NULL
+          AND projects.deleted_at IS NULL
         LIMIT 1
       `,
   });
@@ -2997,19 +2999,32 @@ pending_approval_requests AS (
       });
     });
 
+  const getThreadWorkspaceContext: ProjectionSnapshotQueryShape["getThreadWorkspaceContext"] = (
+    threadId,
+  ) =>
+    getThreadCheckpointContextThreadRow({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadWorkspaceContext:query",
+          "ProjectionSnapshotQuery.getThreadWorkspaceContext:decodeRow",
+        ),
+      ),
+      Effect.map(
+        Option.map((row): ProjectionThreadWorkspaceContext => ({
+          threadId: row.threadId,
+          projectId: row.projectId,
+          workspaceRoot: row.workspaceRoot,
+          worktreePath: row.worktreePath,
+        })),
+      ),
+    );
+
   const getThreadCheckpointContext: ProjectionSnapshotQueryShape["getThreadCheckpointContext"] = (
     threadId,
   ) =>
     Effect.gen(function* () {
-      const threadRow = yield* getThreadCheckpointContextThreadRow({ threadId }).pipe(
-        Effect.mapError(
-          toPersistenceSqlOrDecodeError(
-            "ProjectionSnapshotQuery.getThreadCheckpointContext:getThread:query",
-            "ProjectionSnapshotQuery.getThreadCheckpointContext:getThread:decodeRow",
-          ),
-        ),
-      );
-      if (Option.isNone(threadRow)) {
+      const threadContext = yield* getThreadWorkspaceContext(threadId);
+      if (Option.isNone(threadContext)) {
         return Option.none<ProjectionThreadCheckpointContext>();
       }
 
@@ -3023,10 +3038,7 @@ pending_approval_requests AS (
       );
 
       return Option.some({
-        threadId: threadRow.value.threadId,
-        projectId: threadRow.value.projectId,
-        workspaceRoot: threadRow.value.workspaceRoot,
-        worktreePath: threadRow.value.worktreePath,
+        ...threadContext.value,
         checkpoints: checkpointRows.map((row): OrchestrationCheckpointSummary => ({
           turnId: row.turnId,
           checkpointTurnCount: row.checkpointTurnCount,
@@ -3647,6 +3659,7 @@ pending_approval_requests AS (
     getFirstActiveThreadIdByProjectId,
     getImportedAgentSessionSources,
     getThreadCheckpointContext,
+    getThreadWorkspaceContext,
     getFullThreadDiffContext,
     getThreadShellById,
     getThreadRuntimeContext,

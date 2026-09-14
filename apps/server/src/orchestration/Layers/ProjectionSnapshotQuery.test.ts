@@ -1399,6 +1399,16 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           )
       `;
 
+      const workspaceContext = yield* snapshotQuery.getThreadWorkspaceContext(
+        ThreadId.make("thread-context"),
+      );
+      assert.deepEqual(Option.getOrThrow(workspaceContext), {
+        threadId: ThreadId.make("thread-context"),
+        projectId: asProjectId("project-context"),
+        workspaceRoot: "/tmp/context-workspace",
+        worktreePath: "/tmp/context-worktree",
+      });
+
       const context = yield* snapshotQuery.getThreadCheckpointContext(
         ThreadId.make("thread-context"),
       );
