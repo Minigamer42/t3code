@@ -2212,6 +2212,16 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [showFileContextMenu],
   );
 
+  const handleAuxClick = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handleOpenInEditor();
+    },
+    [handleOpenInEditor],
+  );
+
   const canOpenInEditor = onOpen !== undefined;
   const canOpenInBrowser = onOpenInBrowser !== undefined;
   const canOpenInPanel = threadRef !== undefined && Boolean(panelPath);
@@ -2251,6 +2261,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
                 }
                 handleOpenInFilePreview();
               }}
+              onAuxClick={handleAuxClick}
               onContextMenu={handleContextMenu}
             >
               <FileTagChipContent
