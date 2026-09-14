@@ -345,6 +345,7 @@ export default function DiffPanel({
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
+            threadId: activeThread.id,
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
@@ -373,6 +374,7 @@ export default function DiffPanel({
     if (!canReadFiles) return undefined;
     return createGitDiffFileContentsLoader(getDiffFileContents, {
       environmentId: activeThread.environmentId,
+      threadId: activeThread.id,
       cwd: preview.cwd,
       sourceKind: selectedGitSource.kind,
       baseRef: selectedGitSource.baseRef,
