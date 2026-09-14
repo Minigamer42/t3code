@@ -9,6 +9,10 @@ import { GitHubIcon } from "./Icons";
 import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 
+const { openInPreferredEditor } = vi.hoisted(() => ({
+  openInPreferredEditor: vi.fn(async () => ({ _tag: "Success", value: "vscode" })),
+}));
+
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
@@ -49,7 +53,7 @@ vi.mock("../remoteOpen", () => ({
   useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }),
 }));
 vi.mock("../editorPreferences", () => ({
-  useOpenInPreferredEditor: () => vi.fn(),
+  useOpenInPreferredEditor: () => openInPreferredEditor,
   usePreferredEditor: () => [null, vi.fn()],
 }));
 vi.mock("~/lib/openPullRequestLink", () => ({
@@ -384,6 +388,40 @@ describe("ChatMarkdown skill chips", () => {
 });
 
 describe("ChatMarkdown file option chips", () => {
+  it("opens a Markdown file link in the editor on middle click without navigating", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    openInPreferredEditor.mockClear();
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          <ChatMarkdown
+            cwd="/tmp/project"
+            environmentId={EnvironmentId.make("environment-1")}
+            text="[Source](/tmp/project/src/main.ts:103)"
+          />,
+        );
+      });
+      const link = renderer!.root
+        .findAllByType("a")
+        .find((candidate) => candidate.props.className?.includes("chat-markdown-file-link"));
+      if (!link) throw new Error("Missing Markdown file link");
+      const preventDefault = vi.fn();
+      const stopPropagation = vi.fn();
+
+      await act(async () => {
+        link.props.onAuxClick?.({ button: 1, preventDefault, stopPropagation });
+      });
+
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(stopPropagation).toHaveBeenCalledOnce();
+      expect(openInPreferredEditor).toHaveBeenCalledWith("/tmp/project/src/main.ts:103");
+    } finally {
+      await act(async () => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the fallback button text selectable", () => {
     const html = renderToStaticMarkup(
       <ChatMarkdown cwd="/tmp/project" text="[Source](/tmp/project/src/main.ts)" />,
