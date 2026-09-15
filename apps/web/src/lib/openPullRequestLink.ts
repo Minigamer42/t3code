@@ -110,9 +110,9 @@ export function findProjectOnChangeRequestHost(
  * own, since the panel is told which one to show.
  */
 export function shouldOpenPullRequestExternally(
-  event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey">,
+  event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey"> & { readonly button?: number },
 ): boolean {
-  return event.metaKey || event.ctrlKey;
+  return event.metaKey || event.ctrlKey || event.button === 1;
 }
 
 export function useOpenChangeRequestLink(

@@ -15,8 +15,12 @@ import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 
 export interface ResolveLinkTargetInput {
   readonly url: string;
-  /** Cmd/Ctrl-click always goes to the system browser, whatever the default. */
-  readonly event: { readonly metaKey: boolean; readonly ctrlKey: boolean };
+  /** Cmd/Ctrl-click and middle-click always go to the system browser, whatever the default. */
+  readonly event: {
+    readonly metaKey: boolean;
+    readonly ctrlKey: boolean;
+    readonly button?: number;
+  };
   readonly preference: BrowserLinkTarget;
   /** Whether this client has an in-app browser and a thread to open it beside. */
   readonly canOpenInApp: boolean;
@@ -25,12 +29,12 @@ export interface ResolveLinkTargetInput {
 /**
  * The target a click resolves to. "app" only comes back when the preference
  * asks for it, the runtime can honour it, the URL is one the in-app browser
- * can load, and the click carried no modifier — the modifier is the one-gesture
- * way out when the default is in-app, mirroring how change-request links
- * already treat it.
+ * can load, and the click carried no external-open gesture — a modifier or
+ * middle click is the one-gesture way out when the default is in-app,
+ * mirroring how change-request links already treat it.
  */
 export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTarget {
-  if (input.event.metaKey || input.event.ctrlKey) return "system";
+  if (input.event.metaKey || input.event.ctrlKey || input.event.button === 1) return "system";
   if (input.preference !== "app") return "system";
   if (!input.canOpenInApp) return "system";
   if (!isWebUrl(input.url)) return "system";

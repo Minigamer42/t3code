@@ -50,7 +50,7 @@ describe("resolveLinkTarget", () => {
     ).toBe("system");
   });
 
-  it("treats a modifier click as the way out of the in-app default", () => {
+  it("treats a modifier or middle click as the way out of the in-app default", () => {
     expect(
       resolveLinkTarget({
         url: "https://example.com/",
@@ -63,6 +63,14 @@ describe("resolveLinkTarget", () => {
       resolveLinkTarget({
         url: "https://example.com/",
         event: { metaKey: false, ctrlKey: true },
+        preference: "app",
+        canOpenInApp: true,
+      }),
+    ).toBe("system");
+    expect(
+      resolveLinkTarget({
+        url: "https://example.com/",
+        event: { metaKey: false, ctrlKey: false, button: 1 },
         preference: "app",
         canOpenInApp: true,
       }),

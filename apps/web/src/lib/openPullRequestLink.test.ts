@@ -184,9 +184,12 @@ describe("matchesLinkedPullRequestUrl", () => {
 });
 
 describe("shouldOpenPullRequestExternally", () => {
-  it("uses the browser for command-click and control-click", () => {
+  it("uses the browser for command-click, control-click, and middle-click", () => {
     expect(shouldOpenPullRequestExternally({ metaKey: true, ctrlKey: false })).toBe(true);
     expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: true })).toBe(true);
+    expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: false, button: 1 })).toBe(
+      true,
+    );
   });
 
   it("keeps an unmodified click in the pull request view", () => {
