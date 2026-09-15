@@ -1534,6 +1534,7 @@ export default function GitActionsControl({
       let toastActionProps: {
         children: string;
         onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+        onAuxClick?: (event: MouseEvent<HTMLButtonElement>) => void;
       } | null = null;
       if (toastCta.kind === "run_action") {
         toastActionProps = {
@@ -1546,11 +1547,15 @@ export default function GitActionsControl({
           },
         };
       } else if (toastCta.kind === "open_pr") {
+        const openCreatedPr = (event: MouseEvent<HTMLButtonElement>) => {
+          closeResultToast();
+          openPrLink(event, toastCta.url);
+        };
         toastActionProps = {
           children: toastCta.label,
-          onClick: (event) => {
-            closeResultToast();
-            openPrLink(event, toastCta.url);
+          onClick: openCreatedPr,
+          onAuxClick: (event) => {
+            if (event.button === 1) openCreatedPr(event);
           },
         };
       }
