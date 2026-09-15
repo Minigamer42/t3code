@@ -190,6 +190,19 @@ describe("resolveBranchTriggerLabel", () => {
     ).toBe("From origin/main");
   });
 
+  it("shows an explicit worktree branch with its origin base", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "development",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: true,
+        worktreeBranch: "jm/indiv/juh/ehrungen",
+      }),
+    ).toBe("jm/indiv/juh/ehrungen from origin/development");
+  });
+
   it("shows the origin ref for local branch names that contain slashes", () => {
     expect(
       resolveBranchTriggerLabel({
