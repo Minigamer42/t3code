@@ -10032,6 +10032,9 @@ export default function ChatView(props: ChatViewProps) {
                       ...(draftThread?.worktreeBranch
                         ? { branch: draftThread.worktreeBranch }
                         : {}),
+                      ...(draftThread?.worktreeName
+                        ? { worktreeName: draftThread.worktreeName }
+                        : {}),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },
                     runSetupScript: true,

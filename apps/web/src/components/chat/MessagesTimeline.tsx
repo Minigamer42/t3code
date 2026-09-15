@@ -4198,6 +4198,7 @@ function toolGroupSummaryIconName(
     case "mixed":
       return "hammer";
   }
+  return "hammer";
 }
 
 function WorkGroupToggleTimelineRow({

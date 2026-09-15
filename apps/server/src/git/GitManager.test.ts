@@ -5155,7 +5155,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".t3code", "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({
           hooks: {
             afterPush: [

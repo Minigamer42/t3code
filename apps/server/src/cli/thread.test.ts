@@ -10,6 +10,8 @@ import {
   type ProjectSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as Option from "effect/Option";
 import {
   createThreadFromCliInput,
@@ -52,7 +54,7 @@ const overrideSettings = {
   providerInstances: {
     ...DEFAULT_SERVER_SETTINGS.providerInstances,
     codex_work: {
-      ...DEFAULT_SERVER_SETTINGS.providerInstances.codex!,
+      ...DEFAULT_SERVER_SETTINGS.providerInstances[ProviderInstanceId.make("codex")]!,
       driver: ProviderDriverKind.make("codex"),
       enabled: true,
     },
@@ -81,14 +83,14 @@ it.effect("applies provider, model, reasoning and priority overrides to the laun
       },
     );
     assert.deepStrictEqual(launched?.modelSelection, {
-      instanceId: "codex_work",
+      instanceId: ProviderInstanceId.make("codex_work"),
       model: "explicit-model",
       options: [
         { id: "reasoningEffort", value: "high" },
         { id: "serviceTier", value: "priority" },
       ],
     });
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("requires an explicit model before changing provider instances", () =>
@@ -104,7 +106,7 @@ it.effect("requires an explicit model before changing provider instances", () =>
     ).pipe(Effect.flip);
     assert.instanceOf(error, ThreadCliModelSelectionError);
     assert.include(error.message, "--model is required");
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("creates an empty thread without scheduling a first message", () =>
@@ -124,7 +126,7 @@ it.effect("creates an empty thread without scheduling a first message", () =>
     assert.strictEqual(launched?.title, "New thread");
     assert.strictEqual(launched?.modelSelection.model, "project-model");
     assert.strictEqual(launched?.initialMessage, undefined);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("starts a prompt using the active provider when the project default is disabled", () =>
@@ -138,7 +140,7 @@ it.effect("starts a prompt using the active provider when the project default is
       },
       providerInstances: {
         ...DEFAULT_SERVER_SETTINGS.providerInstances,
-        codex: { ...DEFAULT_SERVER_SETTINGS.providerInstances.codex!, enabled: false },
+        codex: { driver: ProviderDriverKind.make("codex"), enabled: false },
       },
       providers: {
         ...DEFAULT_SERVER_SETTINGS.providers,
@@ -161,7 +163,7 @@ it.effect("starts a prompt using the active provider when the project default is
     assert.strictEqual(launched?.title, "Investigate CI");
     assert.strictEqual(launched?.initialMessage?.text, "  Investigate CI  ");
     assert.strictEqual(launched?.modelSelection.model, "active-model");
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 for (const [field, expected] of [
@@ -179,7 +181,7 @@ for (const [field, expected] of [
           launchThread: () => Effect.die("Must not mutate"),
         },
       ).pipe(Effect.flip);
-      assert.instanceOf(error, expected);
-    }).pipe(Effect.provide(NodeServices.layer)),
+      assert.strictEqual(error._tag, expected.name);
+    }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
   );
 }
