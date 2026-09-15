@@ -23,6 +23,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { WorktreeName } from "./git.ts";
 import {
   PullRequestActor,
   PullRequestChecksState,
@@ -1190,6 +1191,7 @@ const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
   baseBranch: TrimmedNonEmptyString,
   branch: Schema.optional(TrimmedNonEmptyString),
+  worktreeName: Schema.optional(WorktreeName),
   startFromOrigin: Schema.optional(Schema.Boolean),
 });
 

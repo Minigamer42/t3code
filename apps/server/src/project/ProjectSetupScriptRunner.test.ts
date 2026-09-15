@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "@effect/vitest";
-import { type OrchestrationProject, ProjectId } from "@t3tools/contracts";
+import { type OrchestrationProject, ProjectId, type TerminalEvent } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -12,6 +12,9 @@ import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 
 const isProjectSetupScriptOperationError = Schema.is(
   ProjectSetupScriptRunner.ProjectSetupScriptOperationError,
+);
+const isProjectSetupScriptCommandError = Schema.is(
+  ProjectSetupScriptRunner.ProjectSetupScriptCommandError,
 );
 
 const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationProject => ({
@@ -55,7 +58,8 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
   });
 
 const makeTerminalManagerLayer = (
-  overrides: Pick<TerminalManager.TerminalManager["Service"], "open" | "write">,
+  overrides: Pick<TerminalManager.TerminalManager["Service"], "open" | "write"> &
+    Partial<Pick<TerminalManager.TerminalManager["Service"], "subscribe">>,
 ) =>
   Layer.succeed(TerminalManager.TerminalManager, {
     ...overrides,
@@ -64,13 +68,32 @@ const makeTerminalManagerLayer = (
     clear: () => Effect.void,
     restart: () => Effect.die(new Error("unused")),
     close: () => Effect.void,
-    subscribe: () => Effect.succeed(() => undefined),
+    subscribe:
+      overrides.subscribe ??
+      ((listener) =>
+        Effect.all([
+          listener({
+            type: "exited",
+            threadId: "thread-1",
+            terminalId: "setup-default-setup",
+            exitCode: 0,
+            exitSignal: null,
+          }),
+          listener({
+            type: "exited",
+            threadId: "thread-1",
+            terminalId: "setup-setup",
+            exitCode: 0,
+            exitSignal: null,
+          }),
+        ]).pipe(Effect.as(() => undefined))),
     subscribeMetadata: () => Effect.succeed(() => undefined),
   });
 
 const testLayer = (
   project: OrchestrationProject,
-  terminal: Pick<TerminalManager.TerminalManager["Service"], "open" | "write">,
+  terminal: Pick<TerminalManager.TerminalManager["Service"], "open" | "write"> &
+    Partial<Pick<TerminalManager.TerminalManager["Service"], "subscribe">>,
   settings = ServerSettings.layerTest(),
 ) =>
   ProjectSetupScriptRunner.layer.pipe(
@@ -115,7 +138,7 @@ describe("ProjectSetupScriptRunner", () => {
       expect(write).toHaveBeenCalledWith({
         threadId: "thread-1",
         terminalId: "setup-default-setup",
-        data: "npm install\r",
+        data: "(npm install); exit $?\r",
       });
     }).pipe(
       Effect.provide(
@@ -214,7 +237,7 @@ describe("ProjectSetupScriptRunner", () => {
         expect(write).toHaveBeenCalledWith({
           threadId: "thread-1",
           terminalId: "setup-setup",
-          data: "bun install\r",
+          data: "(bun install); exit $?\r",
         });
       }).pipe(Effect.provide(testLayer(project, { open, write })));
     },
@@ -260,6 +283,91 @@ describe("ProjectSetupScriptRunner", () => {
         testLayer(project, {
           open: () => Effect.fail(terminalError),
           write: () => Effect.die("unexpected write"),
+        }),
+      ),
+    );
+  });
+
+  it.effect("fails when the automatic setup command exits nonzero", () => {
+    let listener: ((event: TerminalEvent) => Effect.Effect<void>) | undefined;
+    const project = makeProject([
+      {
+        id: "setup",
+        name: "Setup",
+        command: "bun install",
+        icon: "configure",
+        runOnWorktreeCreate: true,
+      },
+    ]);
+    const write = vi.fn(() =>
+      listener
+        ? listener({
+            type: "output",
+            threadId: "thread-1",
+            terminalId: "setup-setup",
+            data: "\u001b[31mCannot derive the CoW backing path for worktree /repo/worktrees/a.\u001b[0m\r\n",
+          }).pipe(
+            Effect.andThen(
+              listener({
+                type: "exited",
+                threadId: "thread-1",
+                terminalId: "setup-setup",
+                exitCode: 23,
+                exitSignal: null,
+              }),
+            ),
+          )
+        : Effect.void,
+    );
+
+    return Effect.gen(function* () {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+      const error = yield* runner
+        .runForThread({
+          threadId: "thread-1",
+          projectId: "project-1",
+          worktreePath: "/repo/worktrees/a",
+        })
+        .pipe(Effect.flip);
+
+      expect(isProjectSetupScriptCommandError(error)).toBe(true);
+      if (isProjectSetupScriptCommandError(error)) {
+        expect(error.scriptId).toBe("setup");
+        expect(error.exitCode).toBe(23);
+        expect(error.worktreePath).toBe("/repo/worktrees/a");
+        expect(error.message).toContain(
+          "Cannot derive the CoW backing path for worktree /repo/worktrees/a.",
+        );
+        expect(error.message).not.toContain("\u001b");
+      }
+      expect(write).toHaveBeenCalledWith({
+        threadId: "thread-1",
+        terminalId: "setup-setup",
+        data: "(bun install); exit $?\r",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer(project, {
+          open: () =>
+            Effect.succeed({
+              threadId: "thread-1",
+              terminalId: "setup-setup",
+              cwd: "/repo/worktrees/a",
+              worktreePath: "/repo/worktrees/a",
+              status: "running" as const,
+              pid: 123,
+              history: "",
+              exitCode: null,
+              exitSignal: null,
+              label: "setup-setup",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            }),
+          subscribe: (nextListener) =>
+            Effect.sync(() => {
+              listener = nextListener;
+              return () => undefined;
+            }),
+          write,
         }),
       ),
     );

@@ -39,11 +39,27 @@ describe("VcsCreateWorktreeInput", () => {
       refName: "0123456789abcdef",
       newRefName: "feature/new",
       baseRefName: "origin/main",
+      worktreeName: "feature-new",
       path: "/tmp/worktree",
     });
 
     expect(parsed.baseRefName).toBe("origin/main");
+    expect(parsed.worktreeName).toBe("feature-new");
   });
+
+  it.each([".", "..", "parent/child", "parent\\child"])(
+    "rejects invalid worktree name %s",
+    (worktreeName) => {
+      expect(() =>
+        decodeCreateWorktreeInput({
+          cwd: "/repo",
+          refName: "main",
+          worktreeName,
+          path: null,
+        }),
+      ).toThrow();
+    },
+  );
 });
 
 describe("GitPreparePullRequestThreadInput", () => {

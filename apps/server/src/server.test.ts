@@ -10572,6 +10572,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
                   branch: "t3code/bootstrap-refName",
+                  worktreeName: "bootstrap-custom",
                   startFromOrigin: true,
                 },
                 runSetupScript: true,
@@ -10597,6 +10598,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           refName: fetchedOriginCommit,
           newRefName: "t3code/bootstrap-refName",
           baseRefName: "main",
+          worktreeName: "bootstrap-custom",
           path: null,
         });
         assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
@@ -10762,7 +10764,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("records setup-script failures without aborting bootstrap turn start", () =>
+  it.effect("aborts bootstrap turn start when the setup script fails", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
       const createWorktree = vi.fn(
@@ -10774,6 +10776,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           }),
       );
+      const rollbackWorktreeCreation = vi.fn(() => Effect.void);
       const runForThread = vi.fn(
         (
           input: Parameters<
@@ -10781,11 +10784,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           >[0],
         ) =>
           Effect.fail(
-            new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
+            new ProjectSetupScriptRunner.ProjectSetupScriptCommandError({
               threadId: input.threadId,
               worktreePath: input.worktreePath,
-              operation: "openTerminal",
-              cause: { message: "pty unavailable" },
+              scriptId: "configure-worktree",
+              scriptName: "Configure Worktree",
+              terminalId: "setup-configure-worktree",
+              detail:
+                "exited with code 1\nCannot derive the CoW backing path for worktree /tmp/bootstrap-worktree.",
+              exitCode: 1,
+              exitSignal: null,
             }),
           ),
       );
@@ -10794,6 +10802,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         layers: {
           gitVcsDriver: {
             createWorktree,
+            rollbackWorktreeCreation,
           },
           orchestrationEngine: {
             dispatch: (command) =>
@@ -10811,7 +10820,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const createdAt = "2026-01-01T00:00:00.000Z";
       const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
+      const result = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
             type: "thread.turn.start",
@@ -10846,13 +10855,24 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
             createdAt,
           }),
-        ),
+        ).pipe(Effect.result),
       );
 
-      assert.equal(response.sequence, 4);
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
+      assert.include(
+        result.failure.message,
+        "Cannot derive the CoW backing path for worktree /tmp/bootstrap-worktree.",
+      );
+      assert.strictEqual(result.failure.bootstrapThreadDisposition, "deleted");
+      assert.deepEqual(rollbackWorktreeCreation.mock.calls[0]?.[0], {
+        cwd: "/tmp/project",
+        path: "/tmp/bootstrap-worktree",
+        branch: "t3code/bootstrap-refName",
+      });
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
+        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.delete"],
       );
       const setupFailureActivity = dispatchedCommands.find(
         (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
@@ -10860,10 +10880,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.equal(setupFailureActivity?.activity.kind, "setup-script.failed");
       assert.deepEqual(setupFailureActivity?.activity.payload, {
-        detail: "pty unavailable",
+        detail:
+          "Project setup action 'Configure Worktree' failed in '/tmp/bootstrap-worktree': exited with code 1\nCannot derive the CoW backing path for worktree /tmp/bootstrap-worktree.",
         worktreePath: "/tmp/bootstrap-worktree",
       });
-      assertTrue(dispatchedCommands.every((command) => command.type !== "thread.delete"));
+      assertTrue(dispatchedCommands.every((command) => command.type !== "thread.turn.start"));
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

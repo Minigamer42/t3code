@@ -1648,6 +1648,37 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("rolls back a newly created worktree and branch", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const worktreePath = pathService.join(
+          yield* makeTmpDir("git-worktrees-"),
+          "failed-setup-worktree",
+        );
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/failed-setup",
+        });
+        yield* writeTextFile(worktreePath, "setup-output.txt", "partial setup output");
+
+        yield* driver.rollbackWorktreeCreation({
+          cwd,
+          path: worktreePath,
+          branch: "feature/failed-setup",
+        });
+
+        const fileSystem = yield* FileSystem.FileSystem;
+        assert.equal(yield* fileSystem.exists(worktreePath), false);
+        assert.equal(yield* git(cwd, ["branch", "--list", "feature/failed-setup"]), "");
+      }),
+    );
+
     it.effect("uses the branch leaf only for an explicitly named new ref worktree path", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -1682,6 +1713,29 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           refName: "jm/indiv/juh/existing",
         });
         assert.equal(pathService.basename(existing.worktree.path), "jm-indiv-juh-existing");
+      }),
+    );
+
+    it.effect("uses an explicit worktree name for the default worktree path", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          path: null,
+          refName: initialBranch,
+          newRefName: "jm/indiv/juh/ehrungen",
+          worktreeName: "ehrungen-custom",
+        });
+
+        assert.equal(pathService.basename(created.worktree.path), "ehrungen-custom");
+        assert.equal(
+          yield* git(created.worktree.path, ["branch", "--show-current"]),
+          "jm/indiv/juh/ehrungen",
+        );
       }),
     );
 

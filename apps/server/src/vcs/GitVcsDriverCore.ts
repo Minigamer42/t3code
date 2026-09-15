@@ -3052,7 +3052,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ? path.basename(targetBranch)
         : targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
-    const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch);
+    const worktreePath =
+      input.path ?? path.join(worktreesDir, repoName, input.worktreeName ?? sanitizedBranch);
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];
@@ -3338,6 +3339,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     });
   });
 
+  const rollbackWorktreeCreation: GitVcsDriver.GitVcsDriver["Service"]["rollbackWorktreeCreation"] =
+    Effect.fn("rollbackWorktreeCreation")(function* (input) {
+      yield* removeWorktree({ cwd: input.cwd, path: input.path, force: true });
+      yield* executeGit(
+        "GitVcsDriver.rollbackWorktreeCreation",
+        input.cwd,
+        ["branch", "-D", "--", input.branch],
+        { fallbackErrorDetail: "git branch deletion failed during worktree rollback" },
+      );
+    });
+
   const pruneWorktrees: GitVcsDriver.GitVcsDriver["Service"]["pruneWorktrees"] = Effect.fn(
     "pruneWorktrees",
   )(function* (input) {
@@ -3554,6 +3566,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       withListRefsInvalidation(input.cwd, fetchRemoteTrackingBranch(input)),
     setBranchUpstream: (input) => withListRefsInvalidation(input.cwd, setBranchUpstream(input)),
     removeWorktree: (input) => withListRefsInvalidation(input.cwd, removeWorktree(input)),
+    rollbackWorktreeCreation: (input) =>
+      withListRefsInvalidation(input.cwd, rollbackWorktreeCreation(input)),
     pruneWorktrees: (input) => withListRefsInvalidation(input.cwd, pruneWorktrees(input)),
     renameBranch: (input) => withListRefsInvalidation(input.cwd, renameBranch(input)),
     createRef: (input) => withListRefsInvalidation(input.cwd, createRef(input)),

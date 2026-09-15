@@ -230,6 +230,12 @@ export interface GitSetBranchUpstreamInput {
   remoteBranch: string;
 }
 
+export interface GitRollbackWorktreeCreationInput {
+  readonly cwd: string;
+  readonly path: string;
+  readonly branch: string;
+}
+
 export interface GitRemoteStatusOptions {
   readonly refreshUpstream?: boolean;
 }
@@ -327,6 +333,9 @@ export class GitVcsDriver extends Context.Service<
     ) => Effect.Effect<void, GitCommandError>;
     readonly removeWorktree: (
       input: VcsRemoveWorktreeInput,
+    ) => Effect.Effect<void, GitCommandError>;
+    readonly rollbackWorktreeCreation: (
+      input: GitRollbackWorktreeCreationInput,
     ) => Effect.Effect<void, GitCommandError>;
     /** Drops worktree admin entries whose directory is already gone (`git worktree prune`). */
     readonly pruneWorktrees: (input: {

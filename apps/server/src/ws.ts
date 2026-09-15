@@ -7,6 +7,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -314,6 +315,8 @@ function projectSetupScriptCompatibilityDetail(
       return legacySetupFailureDescription(error.cause);
     case "ProjectSetupScriptProjectNotFoundError":
       return "Project was not found for setup script execution.";
+    case "ProjectSetupScriptCommandError":
+      return error.message;
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -999,6 +1002,7 @@ const makeWsRpcLayer = (
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
+          let createdWorktree: GitVcsDriver.GitRollbackWorktreeCreationInput | null = null;
 
           const cleanupCreatedThread = () =>
             createdThread
@@ -1014,7 +1018,12 @@ const makeWsRpcLayer = (
                 )
               : Effect.succeed(false);
 
-          const recordSetupScriptLaunchFailure = (input: {
+          const cleanupCreatedWorktree = () =>
+            createdWorktree
+              ? gitWorkflow.rollbackWorktreeCreation(createdWorktree)
+              : Effect.void;
+
+          const recordSetupScriptFailure = (input: {
             readonly error: ProjectSetupScriptRunner.ProjectSetupScriptRunnerError;
             readonly requestedAt: string;
             readonly worktreePath: string;
@@ -1023,7 +1032,7 @@ const makeWsRpcLayer = (
             return appendSetupScriptActivity({
               threadId: command.threadId,
               kind: "setup-script.failed",
-              summary: "Setup script failed to start",
+              summary: "Setup script failed",
               createdAt: input.requestedAt,
               payload: {
                 detail,
@@ -1033,7 +1042,7 @@ const makeWsRpcLayer = (
             }).pipe(
               Effect.ignoreCause({ log: false }),
               Effect.flatMap(() =>
-                Effect.logWarning("bootstrap turn start failed to launch setup script", {
+                Effect.logWarning("bootstrap turn start setup script failed", {
                   threadId: command.threadId,
                   worktreePath: input.worktreePath,
                   detail,
@@ -1108,11 +1117,9 @@ const makeWsRpcLayer = (
                 .pipe(
                   Effect.matchEffect({
                     onFailure: (error) =>
-                      recordSetupScriptLaunchFailure({
-                        error,
-                        requestedAt,
-                        worktreePath,
-                      }),
+                      recordSetupScriptFailure({ error, requestedAt, worktreePath }).pipe(
+                        Effect.andThen(Effect.fail(error)),
+                      ),
                     onSuccess: (setupResult) => {
                       if (setupResult.status !== "started") {
                         return Effect.void;
@@ -1186,9 +1193,17 @@ const makeWsRpcLayer = (
                 refName: worktreeBaseRef,
                 newRefName: bootstrap.prepareWorktree.branch,
                 baseRefName: bootstrap.prepareWorktree.baseBranch,
+                ...(bootstrap.prepareWorktree.worktreeName
+                  ? { worktreeName: bootstrap.prepareWorktree.worktreeName }
+                  : {}),
                 path: null,
               });
               targetWorktreePath = worktree.worktree.path;
+              createdWorktree = {
+                cwd: bootstrap.prepareWorktree.projectCwd,
+                path: worktree.worktree.path,
+                branch: worktree.worktree.refName,
+              };
               yield* dispatchFromClient({
                 type: "thread.meta.update",
                 commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
@@ -1210,25 +1225,39 @@ const makeWsRpcLayer = (
               if (Cause.hasInterruptsOnly(cause)) {
                 return Effect.fail(dispatchError);
               }
-              return Effect.uninterruptible(cleanupCreatedThread()).pipe(
-                Effect.matchCauseEffect({
-                  onFailure: (cleanupCause) =>
-                    Effect.logWarning("bootstrap thread cleanup failed", {
+              return Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const worktreeCleanup = yield* Effect.exit(cleanupCreatedWorktree());
+                  if (createdWorktree && Exit.isFailure(worktreeCleanup)) {
+                    yield* Effect.logWarning("bootstrap worktree rollback failed", {
                       threadId: command.threadId,
-                      detail: Cause.pretty(cleanupCause),
-                    }).pipe(Effect.flatMap(() => Effect.fail(dispatchError))),
-                  onSuccess: (threadDeleted) =>
-                    Effect.fail(
-                      threadDeleted
-                        ? new OrchestrationDispatchCommandError({
-                            message: dispatchError.message,
-                            ...(dispatchError.cause !== undefined
-                              ? { cause: dispatchError.cause }
-                              : {}),
-                            bootstrapThreadDisposition: "deleted",
-                          })
-                        : dispatchError,
-                    ),
+                      worktreePath: createdWorktree.path,
+                      branch: createdWorktree.branch,
+                      detail: Cause.pretty(worktreeCleanup.cause),
+                    });
+                  }
+
+                  const threadCleanup = yield* Effect.exit(cleanupCreatedThread());
+                  if (Exit.isFailure(threadCleanup)) {
+                    yield* Effect.logWarning("bootstrap thread cleanup failed", {
+                      threadId: command.threadId,
+                      detail: Cause.pretty(threadCleanup.cause),
+                    });
+                  }
+
+                  const threadDeleted = Exit.isSuccess(threadCleanup) && threadCleanup.value;
+                  const worktreeRollbackFailed = Exit.isFailure(worktreeCleanup);
+                  if (!threadDeleted && !worktreeRollbackFailed) {
+                    return yield* dispatchError;
+                  }
+                  return yield* new OrchestrationDispatchCommandError({
+                    message:
+                      worktreeRollbackFailed && createdWorktree
+                        ? `${dispatchError.message} Automatic rollback of worktree '${createdWorktree.path}' failed; manual cleanup may be required.`
+                        : dispatchError.message,
+                    ...(dispatchError.cause !== undefined ? { cause: dispatchError.cause } : {}),
+                    ...(threadDeleted ? { bootstrapThreadDisposition: "deleted" as const } : {}),
+                  });
                 }),
               );
             }),

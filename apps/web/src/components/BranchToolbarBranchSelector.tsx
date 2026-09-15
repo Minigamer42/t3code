@@ -7,7 +7,14 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
+import {
+  WorktreeName,
+  type ContextMenuItem,
+  type EnvironmentId,
+  type VcsRef,
+  type ThreadId,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon, GitBranchIcon, SearchIcon } from "lucide-react";
 import {
@@ -57,6 +64,7 @@ import {
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { Button } from "./ui/button";
+import { DraftInput } from "./ui/draft-input";
 import { Switch } from "./ui/switch";
 import { getVirtualizedScrollFadeClassName } from "./ui/scroll-area";
 import {
@@ -91,6 +99,8 @@ function toBranchActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
 }
 
+const isWorktreeName = Schema.is(WorktreeName);
+
 export function BranchToolbarBranchSelector({
   className,
   environmentId,
@@ -106,6 +116,7 @@ export function BranchToolbarBranchSelector({
   onComposerFocusRequest,
 }: BranchToolbarBranchSelectorProps) {
   const startFromOriginSwitchId = useId();
+  const worktreeNameInputId = useId();
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, "thread session stop");
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -271,6 +282,7 @@ export function BranchToolbarBranchSelector({
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
   const worktreeBranch = draftThread?.worktreeBranch ?? null;
+  const worktreeName = draftThread?.worktreeName ?? null;
   const checkoutPullRequestItemValue =
     prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
   const canCreateBranch =
@@ -464,13 +476,14 @@ export function BranchToolbarBranchSelector({
     const name = sanitizeNewRefName(rawName);
     if (!branchCwd || !name || isBranchActionPending) return;
 
-    setIsBranchMenuOpen(false);
-    onComposerFocusRequest?.();
-
     if (isSelectingWorktreeBase && draftThread) {
       setDraftThreadContext(draftId ?? threadRef, { worktreeBranch: name });
+      setBranchQuery("");
       return;
     }
+
+    setIsBranchMenuOpen(false);
+    onComposerFocusRequest?.();
 
     runBranchAction(async () => {
       const previousBranch = resolvedActiveBranch;
@@ -880,6 +893,43 @@ export function BranchToolbarBranchSelector({
             >
               Use generated branch name
             </Button>
+          ) : null}
+          {isSelectingWorktreeBase ? (
+            <div
+              className="space-y-1.5 border-t border-border/60 px-3 py-2"
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <label
+                htmlFor={worktreeNameInputId}
+                className="font-medium text-muted-foreground text-xs"
+              >
+                Worktree name
+              </label>
+              <DraftInput
+                id={worktreeNameInputId}
+                size="compact"
+                value={worktreeName ?? ""}
+                placeholder={worktreeBranch?.split("/").at(-1) ?? "Derived from branch"}
+                aria-label="Worktree name"
+                onCommit={(value) => {
+                  const nextWorktreeName = value.trim();
+                  if (nextWorktreeName.length > 0 && !isWorktreeName(nextWorktreeName)) {
+                    toastManager.add({
+                      type: "error",
+                      title: "Invalid worktree name",
+                      description: "Use one directory name without slashes or control characters.",
+                    });
+                    return;
+                  }
+                  setDraftThreadContext(draftId ?? threadRef, {
+                    worktreeName: nextWorktreeName || null,
+                  });
+                }}
+              />
+              <p className="text-muted-foreground text-xs">
+                Optional. Clear it to use the automatic name.
+              </p>
+            </div>
           ) : null}
           {isSelectingWorktreeBase ? (
             <Tooltip>
