@@ -4,6 +4,7 @@ import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import {
   deriveLocalBranchNameFromRemoteRef,
   isWorktreeChangeBlocked,
+  resolveBranchTriggerLabel,
   resolveBranchSelectionTarget,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
@@ -431,4 +432,20 @@ describe("resolveConfirmedSelectedRef", () => {
       expected,
     );
   });
+});
+
+describe("explicit worktree branch", () => {
+  it("shows an explicit worktree branch with its origin base", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "development",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: true,
+        worktreeBranch: "jm/indiv/juh/ehrungen",
+      }),
+    ).toBe("jm/indiv/juh/ehrungen from development (remote)");
+  });
+
 });
