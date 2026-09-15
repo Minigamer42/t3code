@@ -36,7 +36,10 @@ import {
   type ReviewDiffPreviewSource,
   type VcsRef,
 } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  isTemporaryWorktreeBranch,
+} from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -5307,11 +5310,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const folderName = readableName !== null && Buffer.byteLength(directoryName) <= 40
         ? directoryName
         : `${prefix}-${Hex.encode(hash).slice(0, 16)}`;
-      const basePath = path.join(parentDir, repoName, folderName);
+      const basePath = path.join(parentDir, repoName, input.worktreeName ?? folderName);
       worktreePath = basePath;
       for (
         let suffix = 2;
-        yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false));
+        input.worktreeName === undefined &&
+        (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)));
         suffix++
       ) {
         worktreePath = `${basePath}-${suffix}`;

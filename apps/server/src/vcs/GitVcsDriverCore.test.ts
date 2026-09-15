@@ -7053,10 +7053,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           pathService.dirname(created.worktree.path),
           pathService.join(worktreesDirectory, pathService.basename(cwd)),
         );
-        assert.match(
-          pathService.basename(created.worktree.path),
-          /^feature-custom-dir-[0-9a-f]{16}$/,
-        );
+        assert.equal(pathService.basename(created.worktree.path), "custom-dir");
         assert.equal(yield* fileSystem.exists(created.worktree.path), true);
 
         yield* git(cwd, ["worktree", "remove", "--force", created.worktree.path]);
@@ -7368,6 +7365,29 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           refName: "jm/indiv/juh/existing",
         });
         assert.match(pathService.basename(existing.worktree.path), /^jm-indiv-juh-existing-[a-f0-9]{16}$/);
+      }),
+    );
+
+    it.effect("uses an explicit worktree name for the default worktree path", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          path: null,
+          refName: initialBranch,
+          newRefName: "jm/indiv/juh/ehrungen",
+          worktreeName: "ehrungen-custom",
+        });
+
+        assert.equal(pathService.basename(created.worktree.path), "ehrungen-custom");
+        assert.equal(
+          yield* git(created.worktree.path, ["branch", "--show-current"]),
+          "jm/indiv/juh/ehrungen",
+        );
       }),
     );
 
