@@ -28,7 +28,11 @@ import {
   type ReviewDiffPreviewSource,
   type VcsRef,
 } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  isTemporaryWorktreeBranch,
+  normalizeGitRemoteUrl,
+} from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -3636,7 +3640,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     "createWorktree",
   )(function* (input, options) {
     const targetBranch = input.newRefName ?? input.refName;
-    const sanitizedBranch = targetBranch.replace(/\//g, "-");
+    const sanitizedBranch =
+      input.newRefName && !isTemporaryWorktreeBranch(targetBranch)
+        ? path.basename(targetBranch)
+        : targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
     let worktreePath = input.path;
     if (worktreePath == null) {
