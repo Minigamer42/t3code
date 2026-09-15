@@ -36,7 +36,7 @@ import {
   type ReviewDiffPreviewSource,
   type VcsRef,
 } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
+import { dedupeRemoteBranchesWithLocalMatches, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -5295,14 +5295,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       const identity = `${yield* readGitCommonDir(input.cwd)}\0${targetBranch}`;
       const hash = yield* digest.digest(Digest.sha256, new TextEncoder().encode(identity));
-      // UTF-8 bytes bound UTF-16 length too, leaving room for files on Windows.
+      const readableName = input.newRefName && !isTemporaryWorktreeBranch(targetBranch)
+        ? path.basename(targetBranch)
+        : null;
+      const directoryName = readableName ?? targetBranch.replace(/\//g, "-");
       let prefix = "";
-      for (const character of targetBranch.replace(/\//g, "-")) {
+      for (const character of directoryName) {
         if (Buffer.byteLength(prefix + character) > 23) break;
         prefix += character;
       }
-      const basePath = path.join(parentDir, repoName, `${prefix}-${Hex.encode(hash).slice(0, 16)}`);
-      // The name is stable per branch, so a folder left by an earlier worktree must not block it.
+      const folderName = readableName !== null && Buffer.byteLength(directoryName) <= 40
+        ? directoryName
+        : `${prefix}-${Hex.encode(hash).slice(0, 16)}`;
+      const basePath = path.join(parentDir, repoName, folderName);
       worktreePath = basePath;
       for (
         let suffix = 2;
