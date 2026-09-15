@@ -2761,6 +2761,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const projectChanged =
               nextProjectRef.environmentId !== existing.environmentId ||
               nextProjectRef.projectId !== existing.projectId;
+            const switchedToWorktree =
+              options.envMode === "worktree" && existing.envMode !== "worktree";
             const nextWorktreePath =
               options.worktreePath === undefined
                 ? projectChanged
@@ -2769,7 +2771,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 : (options.worktreePath ?? null);
             const nextBranch =
               options.branch === undefined
-                ? projectChanged
+                ? projectChanged || switchedToWorktree
                   ? null
                   : existing.branch
                 : (options.branch ?? null);
