@@ -270,9 +270,11 @@ export function BranchToolbarBranchSelector({
   const prReference = parsePullRequestReference(trimmedBranchQuery);
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
+  const worktreeBranch = draftThread?.worktreeBranch ?? null;
   const checkoutPullRequestItemValue =
     prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
-  const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
+  const canCreateBranch =
+    (!isSelectingWorktreeBase || draftThread !== null) && trimmedBranchQuery.length > 0;
   // The ref is created under its sanitized name, so the collision check has to
   // use that name too. Matching on the raw query would offer to create a ref
   // that already exists whenever sanitizing changes the name.
@@ -465,6 +467,11 @@ export function BranchToolbarBranchSelector({
     setIsBranchMenuOpen(false);
     onComposerFocusRequest?.();
 
+    if (isSelectingWorktreeBase && draftThread) {
+      setDraftThreadContext(draftId ?? threadRef, { worktreeBranch: name });
+      return;
+    }
+
     runBranchAction(async () => {
       const previousBranch = resolvedActiveBranch;
       setOptimisticBranch(name);
@@ -618,6 +625,7 @@ export function BranchToolbarBranchSelector({
     resolvedActiveBranch,
     resolvedActiveBranchIsRemote,
     startFromOrigin,
+    worktreeBranch,
   });
 
   // Branch status is the fallback when this thread has no linked pull requests.
@@ -693,7 +701,10 @@ export function BranchToolbarBranchSelector({
           className="pe-1.5"
           onClick={() => createRef(trimmedBranchQuery)}
         >
-          <span className="truncate">Create new ref &quot;{newRefName}&quot;</span>
+          <span className="truncate">
+            {isSelectingWorktreeBase ? "Create worktree branch" : "Create new ref"} &quot;
+            {newRefName}&quot;
+          </span>
         </ComboboxItem>
       );
     }
@@ -856,6 +867,20 @@ export function BranchToolbarBranchSelector({
               />
             </ComboboxListVirtualized>
           </div>
+          {isSelectingWorktreeBase && worktreeBranch ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="h-8 w-full justify-start rounded-none border-t border-border/60 px-3 font-normal text-muted-foreground text-xs"
+              onClick={() => {
+                setDraftThreadContext(draftId ?? threadRef, { worktreeBranch: null });
+                setIsBranchMenuOpen(false);
+                onComposerFocusRequest?.();
+              }}
+            >
+              Use generated branch name
+            </Button>
+          ) : null}
           {isSelectingWorktreeBase ? (
             <Tooltip>
               <TooltipTrigger

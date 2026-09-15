@@ -1539,6 +1539,34 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.startFromOrigin).toBe(false);
   });
 
+  it("persists the explicit worktree branch with the draft thread", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      branch: "development",
+      envMode: "worktree",
+      environmentSelection: "auto",
+    });
+    store.setDraftThreadContext(draftId, { worktreeBranch: "jm/indiv/juh/ehrungen" });
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+
+    expect(persisted.draftThreadsByThreadKey[draftId]?.worktreeBranch).toBe(
+      "jm/indiv/juh/ehrungen",
+    );
+    expect(persisted.draftThreadsByThreadKey[draftId]?.environmentSelection).toBe("manual");
+
+    const hydrated = persistApi.getOptions().merge(persisted, useComposerDraftStore.getState());
+    expect(hydrated.draftThreadsByThreadKey[draftId]?.worktreeBranch).toBe("jm/indiv/juh/ehrungen");
+  });
+
   it("preserves existing branch and worktree when setProjectDraftThreadId receives undefined", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {
@@ -1592,11 +1620,12 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
-  it("clears branch and worktree but keeps env mode when remapping a draft to another environment", () => {
+  it("clears branch and worktree intent but keeps env mode when remapping environments", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {
       threadId,
       branch: "feature/local-only",
+      worktreeBranch: "jm/indiv/juh/ehrungen",
       worktreePath: "/tmp/local-worktree",
       envMode: "worktree",
       startFromOrigin: true,
@@ -1610,6 +1639,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       environmentId: OTHER_TEST_ENVIRONMENT_ID,
       projectId,
       branch: null,
+      worktreeBranch: null,
       worktreePath: null,
       envMode: "worktree",
       startFromOrigin: true,
