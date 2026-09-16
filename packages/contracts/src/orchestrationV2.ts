@@ -715,6 +715,7 @@ export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
     baseRef: TrimmedNonEmptyString,
     branch: Schema.optional(TrimmedNonEmptyString),
     worktreeName: Schema.optional(WorktreeName),
+    reuseBaseBranchIfAvailable: Schema.optional(Schema.Boolean),
     startFromOrigin: Schema.optional(Schema.Boolean),
   }),
 ]);
