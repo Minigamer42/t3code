@@ -621,10 +621,31 @@ const make = Effect.gen(function* () {
       );
 
       const requestedBranch = input.workspaceStrategy.branch;
+      let reuseBaseBranch = false;
+      if (
+        input.workspaceStrategy.type === "worktree" &&
+        requestedBranch === undefined &&
+        input.workspaceStrategy.startFromOrigin !== true &&
+        input.workspaceStrategy.reuseBaseBranchIfAvailable === true
+      ) {
+        const baseRef = input.workspaceStrategy.baseRef;
+        const localRefs = yield* git
+          .listRefs({
+            cwd: project.workspaceRoot,
+            query: input.workspaceStrategy.baseRef,
+            refKind: "local",
+            refresh: true,
+            limit: 200,
+          })
+          .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+        reuseBaseBranch = localRefs.refs.some((ref) => ref.name === baseRef && !ref.worktreePath);
+      }
       const generatedTemporaryBranch =
-        input.workspaceStrategy.type === "worktree" && requestedBranch === undefined;
+        input.workspaceStrategy.type === "worktree" && requestedBranch === undefined && !reuseBaseBranch;
       let branch: string | null;
-      if (generatedTemporaryBranch) {
+      if (input.workspaceStrategy.type === "worktree" && reuseBaseBranch) {
+        branch = input.workspaceStrategy.baseRef;
+      } else if (input.workspaceStrategy.type === "worktree" && requestedBranch === undefined) {
         const uuid = yield* randomUuidV4;
         branch = buildTemporaryWorktreeBranchName(() => uuid.replaceAll("-", ""));
         const settings = yield* serverSettings.getSettings.pipe(
@@ -717,7 +738,7 @@ const make = Effect.gen(function* () {
             }));
           }
         }
-        if (branch !== null && (generatedTemporaryBranch || isTemporaryWorktreeBranch(branch))) {
+        if (!reuseBaseBranch && branch !== null && (generatedTemporaryBranch || isTemporaryWorktreeBranch(branch))) {
           const parts = branch.split("/");
           for (let depth = 1; depth < parts.length; depth++) {
             if (
@@ -742,8 +763,12 @@ const make = Effect.gen(function* () {
             {
               cwd: project.workspaceRoot,
               refName: startRef,
-              newRefName: branch!,
-              baseRefName,
+              ...(reuseBaseBranch
+                ? {}
+                : {
+                    newRefName: branch!,
+                    baseRefName,
+                  }),
               ...(input.workspaceStrategy.worktreeName === undefined
                 ? {}
                 : { worktreeName: input.workspaceStrategy.worktreeName }),
@@ -754,7 +779,7 @@ const make = Effect.gen(function* () {
                 onWorktreeClaimed: (path) =>
                   Effect.sync(() => {
                     createdWorktreePath = path;
-                    createdBranch = branch;
+                    createdBranch = reuseBaseBranch ? null : branch;
                   }),
                 onCheckoutProgress: (progress) =>
                   setupTracker.stage(threadId, "checkout", { percent: progress.percent }),
@@ -816,7 +841,7 @@ const make = Effect.gen(function* () {
         worktreePath = worktree.worktree.path;
         branch = worktree.worktree.refName;
         createdWorktreePath = worktreePath;
-        createdBranch = branch;
+        createdBranch = reuseBaseBranch ? null : branch;
         yield* setupTracker.update(threadId, (snapshot) => ({
           ...snapshot,
           worktreePath,
@@ -846,6 +871,7 @@ const make = Effect.gen(function* () {
 
       if (
         reused === undefined &&
+        !reuseBaseBranch &&
         worktreePath !== null &&
         branch !== null &&
         initialMessage !== undefined &&
