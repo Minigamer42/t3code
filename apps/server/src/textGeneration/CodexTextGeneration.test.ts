@@ -463,6 +463,7 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
         output: JSON.stringify({
           branch: "  Feat/Session  ",
         }),
+        stdinMustContain: "Create feature branches as jm/feature/...",
         stdinMustNotContain: "Image attachments supplied to the model",
       },
       (textGeneration) =>
@@ -470,6 +471,11 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
           const generated = yield* textGeneration.generateBranchName({
             cwd: process.cwd(),
             message: "Please update session handling.",
+            policy: {
+              kind: "custom",
+              branchInstructions: "Create feature branches as jm/feature/...",
+              inferRepositoryConventions: false,
+            },
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
 
