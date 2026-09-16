@@ -1245,7 +1245,7 @@ export const ServerSettings = Schema.Struct({
    */
   defaultThreadEnvMode: OmittedWhenNull(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(true)),
+    Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   /**
    * Null defers to the repository's t3.json, then to recursive. A value

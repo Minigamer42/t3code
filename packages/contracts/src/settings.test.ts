@@ -872,8 +872,8 @@ describe("ServerSettings worktree defaults", () => {
     ).toBe("worktree");
   });
 
-  it("defaults start-from-origin on for legacy configs", () => {
-    expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
+  it("defaults start-from-origin off for legacy configs", () => {
+    expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(false);
   });
 
   it("accepts start-from-origin updates", () => {
