@@ -10572,6 +10572,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
                   branch: "t3code/bootstrap-refName",
+                  reuseBaseBranchIfAvailable: true,
                   worktreeName: "bootstrap-custom",
                   startFromOrigin: true,
                 },
@@ -10644,6 +10645,270 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           assert.equal(finalCommand.bootstrap, undefined);
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("keeps a reused branch when setup failure rolls back its new worktree", () =>
+    Effect.gen(function* () {
+      const listRefs = vi.fn(() =>
+        Effect.succeed({
+          refs: [
+            {
+              name: "jm/bugfix/existing",
+              current: false,
+              isRemote: false,
+              isDefault: false,
+              worktreePath: null,
+            },
+          ],
+          isRepo: true,
+          hasPrimaryRemote: true,
+          nextCursor: null,
+          totalCount: 1,
+        }),
+      );
+      const createWorktree = vi.fn(() =>
+        Effect.succeed({
+          worktree: {
+            refName: "jm/bugfix/existing",
+            path: "/tmp/bootstrap-worktree",
+          },
+        }),
+      );
+      const removeWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"]>[0]) => {
+          void input;
+          return Effect.void;
+        },
+      );
+      const rollbackWorktreeCreation = vi.fn(() => Effect.void);
+      const runForThread = vi.fn(
+        (
+          input: Parameters<
+            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+          >[0],
+        ) =>
+          Effect.fail(
+            new ProjectSetupScriptRunner.ProjectSetupScriptCommandError({
+              threadId: input.threadId,
+              worktreePath: input.worktreePath,
+              scriptId: "configure-worktree",
+              scriptName: "Configure Worktree",
+              terminalId: "setup-configure-worktree",
+              detail: "exited with code 1\nsetup failed",
+              exitCode: 1,
+              exitSignal: null,
+            }),
+          ),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          vcsDriver: {
+            isInsideWorkTree: () => Effect.succeed(true),
+          },
+          gitVcsDriver: {
+            listRefs,
+            createWorktree,
+            removeWorktree,
+            rollbackWorktreeCreation,
+          },
+          vcsStatusBroadcaster: {
+            refreshStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: false,
+                refName: "jm/bugfix/existing",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                pr: null,
+              }),
+          },
+          projectSetupScriptRunner: { runForThread },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-existing-branch-setup-failure"),
+            threadId: ThreadId.make("thread-bootstrap-existing-branch-setup-failure"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-existing-branch-setup-failure"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap existing branch setup failure",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: "jm/bugfix/existing",
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: "/tmp/project",
+                baseBranch: "jm/bugfix/existing",
+                branch: "t3code/bootstrap-refName",
+                reuseBaseBranchIfAvailable: true,
+              },
+              runSetupScript: true,
+            },
+            createdAt,
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assert.deepEqual(removeWorktree.mock.calls[0]?.[0], {
+        cwd: "/tmp/project",
+        path: "/tmp/bootstrap-worktree",
+        force: true,
+      });
+      assert.equal(rollbackWorktreeCreation.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect.each([
+    {
+      caseName: "checks out an available selected branch",
+      existingWorktreePath: null,
+      expectedBranch: "jm/bugfix/existing",
+      expectedNewRefName: undefined,
+    },
+    {
+      caseName: "creates the fallback branch when the selected branch is already checked out",
+      existingWorktreePath: "/tmp/existing-worktree",
+      expectedBranch: "t3code/bootstrap-refName",
+      expectedNewRefName: "t3code/bootstrap-refName",
+    },
+  ])("$caseName", ({ existingWorktreePath, expectedBranch, expectedNewRefName }) =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const listRefs = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["listRefs"]>[0]) => {
+          void input;
+          return Effect.succeed({
+            refs: [
+              {
+                name: "jm/bugfix/existing",
+                current: existingWorktreePath !== null,
+                isRemote: false,
+                isDefault: false,
+                worktreePath: existingWorktreePath,
+              },
+            ],
+            isRepo: true,
+            hasPrimaryRemote: true,
+            nextCursor: null,
+            totalCount: 1,
+          });
+        },
+      );
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: input.newRefName ?? input.refName,
+              path: "/tmp/bootstrap-worktree",
+            },
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          vcsDriver: {
+            isInsideWorkTree: () => Effect.succeed(true),
+          },
+          gitVcsDriver: {
+            listRefs,
+            createWorktree,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-existing-branch"),
+            threadId: ThreadId.make("thread-bootstrap-existing-branch"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-existing-branch"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap existing branch",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: "jm/bugfix/existing",
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: "/tmp/project",
+                baseBranch: "jm/bugfix/existing",
+                branch: "t3code/bootstrap-refName",
+                reuseBaseBranchIfAvailable: true,
+              },
+            },
+            createdAt,
+          }),
+        ),
+      );
+
+      assert.deepEqual(listRefs.mock.calls[0]?.[0], {
+        cwd: "/tmp/project",
+        query: "jm/bugfix/existing",
+        refKind: "local",
+        refresh: true,
+        limit: 200,
+      });
+      assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
+        cwd: "/tmp/project",
+        refName: "jm/bugfix/existing",
+        ...(expectedNewRefName
+          ? { newRefName: expectedNewRefName, baseRefName: "jm/bugfix/existing" }
+          : {}),
+        path: null,
+      });
+      const branchUpdate = dispatchedCommands.find(
+        (command): command is Extract<OrchestrationCommand, { type: "thread.meta.update" }> =>
+          command.type === "thread.meta.update",
+      );
+      assert.equal(branchUpdate?.branch, expectedBranch);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect.each([

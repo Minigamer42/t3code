@@ -1002,7 +1002,11 @@ const makeWsRpcLayer = (
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
-          let createdWorktree: GitVcsDriver.GitRollbackWorktreeCreationInput | null = null;
+          let createdWorktree: {
+            readonly cwd: string;
+            readonly path: string;
+            readonly createdBranch: string | null;
+          } | null = null;
 
           const cleanupCreatedThread = () =>
             createdThread
@@ -1018,8 +1022,22 @@ const makeWsRpcLayer = (
                 )
               : Effect.succeed(false);
 
-          const cleanupCreatedWorktree = () =>
-            createdWorktree ? gitWorkflow.rollbackWorktreeCreation(createdWorktree) : Effect.void;
+          const cleanupCreatedWorktree = () => {
+            if (!createdWorktree) {
+              return Effect.void;
+            }
+            return createdWorktree.createdBranch
+              ? gitWorkflow.rollbackWorktreeCreation({
+                  cwd: createdWorktree.cwd,
+                  path: createdWorktree.path,
+                  branch: createdWorktree.createdBranch,
+                })
+              : gitWorkflow.removeWorktree({
+                  cwd: createdWorktree.cwd,
+                  path: createdWorktree.path,
+                  force: true,
+                });
+          };
 
           const recordSetupScriptFailure = (input: {
             readonly error: ProjectSetupScriptRunner.ProjectSetupScriptRunnerError;
@@ -1158,10 +1176,32 @@ const makeWsRpcLayer = (
             }
 
             if (bootstrap?.prepareWorktree) {
+              let newWorktreeBranch = bootstrap.prepareWorktree.branch;
+              if (
+                newWorktreeBranch &&
+                bootstrap.prepareWorktree.startFromOrigin !== true &&
+                bootstrap.prepareWorktree.reuseBaseBranchIfAvailable === true
+              ) {
+                const localRefs = yield* gitWorkflow.listRefs({
+                  cwd: bootstrap.prepareWorktree.projectCwd,
+                  query: bootstrap.prepareWorktree.baseBranch,
+                  refKind: "local",
+                  refresh: true,
+                  limit: 200,
+                });
+                const selectedLocalBranch = localRefs.refs.find(
+                  (ref) => ref.name === bootstrap.prepareWorktree?.baseBranch,
+                );
+                if (selectedLocalBranch && !selectedLocalBranch.worktreePath) {
+                  newWorktreeBranch = undefined;
+                }
+              }
+
               let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch;
-              // "Start from origin" is a stored default; repos without the
+              // "Start from origin" is a stored preference; repos without the
               // requested remote branch fall back to the local base branch.
               const startFromOrigin =
+                newWorktreeBranch !== undefined &&
                 bootstrap.prepareWorktree.startFromOrigin === true &&
                 (yield* gitWorkflow.remoteExists({
                   cwd: bootstrap.prepareWorktree.projectCwd,
@@ -1189,8 +1229,12 @@ const makeWsRpcLayer = (
               const worktree = yield* gitWorkflow.createWorktree({
                 cwd: bootstrap.prepareWorktree.projectCwd,
                 refName: worktreeBaseRef,
-                newRefName: bootstrap.prepareWorktree.branch,
-                baseRefName: bootstrap.prepareWorktree.baseBranch,
+                ...(newWorktreeBranch
+                  ? {
+                      newRefName: newWorktreeBranch,
+                      baseRefName: bootstrap.prepareWorktree.baseBranch,
+                    }
+                  : {}),
                 ...(bootstrap.prepareWorktree.worktreeName
                   ? { worktreeName: bootstrap.prepareWorktree.worktreeName }
                   : {}),
@@ -1200,7 +1244,7 @@ const makeWsRpcLayer = (
               createdWorktree = {
                 cwd: bootstrap.prepareWorktree.projectCwd,
                 path: worktree.worktree.path,
-                branch: worktree.worktree.refName,
+                createdBranch: newWorktreeBranch ?? null,
               };
               yield* dispatchFromClient({
                 type: "thread.meta.update",
@@ -1230,7 +1274,7 @@ const makeWsRpcLayer = (
                     yield* Effect.logWarning("bootstrap worktree rollback failed", {
                       threadId: command.threadId,
                       worktreePath: createdWorktree.path,
-                      branch: createdWorktree.branch,
+                      branch: createdWorktree.createdBranch,
                       detail: Cause.pretty(worktreeCleanup.cause),
                     });
                   }
