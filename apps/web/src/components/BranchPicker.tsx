@@ -250,8 +250,8 @@ export function BranchPicker({
                 }
               />
               <TooltipPopup side="top" className="max-w-72 whitespace-normal">
-                Creates the worktree from the latest matching branch on origin instead of your local
-                branch.
+                Creates a new worktree branch from the latest matching branch on origin instead of
+                reusing an available local branch.
               </TooltipPopup>
             </Tooltip>
           ) : null}
