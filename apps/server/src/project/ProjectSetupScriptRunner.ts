@@ -270,7 +270,7 @@ export const make = Effect.gen(function* () {
     if (
       commandResult.status !== "exited" ||
       commandResult.exitCode !== 0 ||
-      commandResult.exitSignal !== null
+      (commandResult.exitSignal !== null && commandResult.exitSignal !== 0)
     ) {
       const detail =
         commandResult.status === "error"
