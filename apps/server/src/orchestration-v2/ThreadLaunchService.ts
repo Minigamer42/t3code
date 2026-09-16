@@ -406,8 +406,29 @@ const make = Effect.gen(function* () {
       // under a temporary `t3/<hash>` name so the worktree never waits on
       // name generation, then rename in the background below.
       const requestedBranch = input.workspaceStrategy.branch;
+      let reuseBaseBranch = false;
+      if (
+        input.workspaceStrategy.type === "worktree" &&
+        requestedBranch === undefined &&
+        input.workspaceStrategy.startFromOrigin !== true &&
+        input.workspaceStrategy.reuseBaseBranchIfAvailable === true
+      ) {
+        const baseRef = input.workspaceStrategy.baseRef;
+        const localRefs = yield* git
+          .listRefs({
+            cwd: project.workspaceRoot,
+            query: input.workspaceStrategy.baseRef,
+            refKind: "local",
+            refresh: true,
+            limit: 200,
+          })
+          .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+        reuseBaseBranch = localRefs.refs.some((ref) => ref.name === baseRef && !ref.worktreePath);
+      }
       let branch: string | null;
-      if (input.workspaceStrategy.type === "worktree" && requestedBranch === undefined) {
+      if (input.workspaceStrategy.type === "worktree" && reuseBaseBranch) {
+        branch = input.workspaceStrategy.baseRef;
+      } else if (input.workspaceStrategy.type === "worktree" && requestedBranch === undefined) {
         const uuid = yield* randomUuidV4;
         branch = buildTemporaryWorktreeBranchName(() => uuid.replaceAll("-", ""));
       } else {
@@ -468,6 +489,7 @@ const make = Effect.gen(function* () {
         }
         if (startFromOrigin) yield* setupTracker.stageStatus(threadId, "fetch", "done");
         if (
+          !reuseBaseBranch &&
           branch !== null &&
           isTemporaryWorktreeBranch(branch) &&
           (yield* git
@@ -485,8 +507,12 @@ const make = Effect.gen(function* () {
             {
               cwd: project.workspaceRoot,
               refName: startRef,
-              newRefName: branch!,
-              baseRefName: input.workspaceStrategy.baseRef,
+              ...(reuseBaseBranch
+                ? {}
+                : {
+                    newRefName: branch!,
+                    baseRefName: input.workspaceStrategy.baseRef,
+                  }),
               ...(input.workspaceStrategy.worktreeName === undefined
                 ? {}
                 : { worktreeName: input.workspaceStrategy.worktreeName }),
@@ -532,6 +558,7 @@ const make = Effect.gen(function* () {
       // simply sticks if generation or the rename fails.
       if (
         reused === undefined &&
+        !reuseBaseBranch &&
         worktreePath !== null &&
         branch !== null &&
         initialMessage !== undefined &&
