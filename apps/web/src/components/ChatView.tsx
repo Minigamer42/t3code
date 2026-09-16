@@ -7178,6 +7178,9 @@ export default function ChatView(props: ChatViewProps) {
                       baseBranch: baseBranchForWorktree,
                       branch:
                         draftThread?.worktreeBranch ?? buildTemporaryWorktreeBranchName(randomHex),
+                      ...(!draftThread?.worktreeBranch && !startFromOrigin
+                        ? { reuseBaseBranchIfAvailable: true }
+                        : {}),
                       ...(draftThread?.worktreeName
                         ? { worktreeName: draftThread.worktreeName }
                         : {}),

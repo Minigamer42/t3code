@@ -351,6 +351,7 @@ export function BranchToolbarBranchSelector({
       : queriedActiveBranch
         ? queriedActiveBranch.isRemote === true
         : null;
+  const resolvedActiveBranchRef = listedActiveBranch ?? queriedActiveBranch ?? null;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
@@ -639,6 +640,12 @@ export function BranchToolbarBranchSelector({
     resolvedActiveBranchIsRemote,
     startFromOrigin,
     worktreeBranch,
+    reuseSelectedBranch:
+      isSelectingWorktreeBase &&
+      !startFromOrigin &&
+      !worktreeBranch &&
+      resolvedActiveBranchRef?.isRemote === false &&
+      resolvedActiveBranchRef.worktreePath === null,
   });
 
   // Branch status is the fallback when this thread has no linked pull requests.
@@ -891,7 +898,7 @@ export function BranchToolbarBranchSelector({
                 onComposerFocusRequest?.();
               }}
             >
-              Use generated branch name
+              Reuse selected branch when available
             </Button>
           ) : null}
           {isSelectingWorktreeBase ? (
@@ -954,8 +961,8 @@ export function BranchToolbarBranchSelector({
                 }
               />
               <TooltipPopup side="top" className="max-w-72 whitespace-normal leading-tight">
-                Creates the worktree from the latest matching branch on origin instead of your local
-                branch.
+                Create a new worktree branch from the latest matching branch on origin instead of
+                reusing your local branch.
               </TooltipPopup>
             </Tooltip>
           ) : null}

@@ -178,6 +178,19 @@ describe("resolveBranchToolbarValue", () => {
 });
 
 describe("resolveBranchTriggerLabel", () => {
+  it("shows an available branch directly when the worktree will reuse it", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "jm/bugfix/existing",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: false,
+        reuseSelectedBranch: true,
+      }),
+    ).toBe("jm/bugfix/existing");
+  });
+
   it("shows the origin ref when a new worktree will start from origin", () => {
     expect(
       resolveBranchTriggerLabel({
@@ -186,6 +199,7 @@ describe("resolveBranchTriggerLabel", () => {
         resolvedActiveBranch: "main",
         resolvedActiveBranchIsRemote: false,
         startFromOrigin: true,
+        reuseSelectedBranch: true,
       }),
     ).toBe("From origin/main");
   });
