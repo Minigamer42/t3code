@@ -22,6 +22,8 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -33,10 +35,12 @@ import {
   buildTemporaryWorktreeBranchName,
   flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
+  resolveAutoBranchName,
   WORKTREE_BRANCH_PREFIX,
 } from "@t3tools/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -214,6 +218,9 @@ const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const projectVcsConfig = yield* VcsProjectConfig.VcsProjectConfig;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
@@ -354,8 +361,27 @@ const make = Effect.gen(function* () {
                   yield* providerRegistry.getProviders,
                   input.projectId,
                 );
+          const instructions = yield* fs
+            .readFileString(path.join(cwd, ".t3code", "commit-message.md"))
+            .pipe(
+              Effect.map((value) => value.trim()),
+              Effect.orElseSucceed(() => ""),
+            );
+          const naming = yield* projectVcsConfig.resolveBranchNaming({
+            cwd,
+            fallback: { defaultPrefix: null, preserveNamespaces: true },
+          });
           return yield* textGeneration
             .generateBranchName({
+              ...(instructions
+                ? {
+                    policy: {
+                      kind: "custom" as const,
+                      branchInstructions: instructions,
+                      inferRepositoryConventions: false,
+                    },
+                  }
+                : {}),
               naming: {
                 mode: settings.branchNamingMode,
                 prefix: settings.branchNamePrefix,
@@ -369,7 +395,7 @@ const make = Effect.gen(function* () {
             })
             .pipe(
               Effect.map((result) => ({
-                branch: result.branch,
+                branch: resolveAutoBranchName([], result.branch, naming),
                 exactName: settings.branchNamingMode === "custom",
               })),
             );
@@ -1097,4 +1123,6 @@ const make = Effect.gen(function* () {
   return ThreadLaunchService.of({ launch, checkWorktreeBase, retryPreparation, prepareRun });
 });
 
-export const layer = Layer.effect(ThreadLaunchService, make);
+export const layer = Layer.effect(ThreadLaunchService, make).pipe(
+  Layer.provide(VcsProjectConfig.layer),
+);
