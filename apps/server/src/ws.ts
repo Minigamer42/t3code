@@ -1019,9 +1019,7 @@ const makeWsRpcLayer = (
               : Effect.succeed(false);
 
           const cleanupCreatedWorktree = () =>
-            createdWorktree
-              ? gitWorkflow.rollbackWorktreeCreation(createdWorktree)
-              : Effect.void;
+            createdWorktree ? gitWorkflow.rollbackWorktreeCreation(createdWorktree) : Effect.void;
 
           const recordSetupScriptFailure = (input: {
             readonly error: ProjectSetupScriptRunner.ProjectSetupScriptRunnerError;

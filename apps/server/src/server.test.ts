@@ -10776,7 +10776,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           }),
       );
-      const rollbackWorktreeCreation = vi.fn(() => Effect.void);
+      const rollbackWorktreeCreation = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["rollbackWorktreeCreation"]>[0]) =>
+          Effect.succeed(input).pipe(Effect.asVoid),
+      );
       const runForThread = vi.fn(
         (
           input: Parameters<
