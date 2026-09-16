@@ -2233,6 +2233,18 @@ describe("ProviderCommandReactor", () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
     const prompt = `Add a safer reconnect backoff. ${serializeAssistantCitation(assistantCitation)}`;
+    const worktreePath = NodePath.join(harness.stateDir, "provider-project-worktree");
+    const branchInstructions =
+      "Create feature branches as jm/feature/... and bug fixes as jm/bugfix/....";
+    NodeFS.mkdirSync(NodePath.join(worktreePath, ".t3code"), { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(worktreePath, ".t3code", "commit-message.md"),
+      branchInstructions,
+    );
+    NodeFS.writeFileSync(
+      NodePath.join(worktreePath, ".t3code", "vcs.json"),
+      JSON.stringify({ branchNaming: { defaultPrefix: null, preserveNamespaces: true } }),
+    );
     const statusRefreshed = await harness.runEffect(Deferred.make<void>());
     const refreshStatus = harness.refreshStatus.getMockImplementation()!;
     harness.refreshStatus.mockImplementation((cwd) =>
@@ -2245,23 +2257,12 @@ describe("ProviderCommandReactor", () => {
         commandId: CommandId.make("cmd-thread-branch"),
         threadId: ThreadId.make("thread-1"),
         branch: "t3code/1234abcd",
-        worktreePath: "/tmp/provider-project-worktree",
+        worktreePath,
       }),
     );
 
-    harness.generateBranchName.mockImplementation((input: unknown) =>
-      Effect.succeed({
-        branch:
-          typeof input === "object" &&
-          input !== null &&
-          "modelSelection" in input &&
-          typeof input.modelSelection === "object" &&
-          input.modelSelection !== null &&
-          "model" in input.modelSelection &&
-          typeof input.modelSelection.model === "string"
-            ? `feature/${input.modelSelection.model}`
-            : "feature/generated",
-      }),
+    harness.generateBranchName.mockImplementation(() =>
+      Effect.succeed({ branch: "jm/bugfix/reconnect-backoff" }),
     );
 
     await harness.runEffect(
@@ -2287,12 +2288,20 @@ describe("ProviderCommandReactor", () => {
       `Add a safer reconnect backoff. ${assistantQuoteText}`,
     );
     expect(harness.generateBranchName.mock.calls[0]?.[0].message).not.toContain("t3-citation://");
-    expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe("/tmp/provider-project-worktree");
+    expect(harness.generateBranchName.mock.calls[0]?.[0].policy?.branchInstructions).toBe(
+      branchInstructions,
+    );
+    expect(harness.renameBranch).toHaveBeenCalledWith({
+      cwd: worktreePath,
+      oldBranch: "t3code/1234abcd",
+      newBranch: "jm/bugfix/reconnect-backoff",
+    });
+    expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe(worktreePath);
     const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.branch).toBe("jm/bugfix/reconnect-backoff");
     expect(
-      readModel.threads
-        .find((entry) => entry.id === ThreadId.make("thread-1"))
-        ?.messages.find((entry) => entry.id === asMessageId("user-message-branch-model"))?.text,
+      thread?.messages.find((entry) => entry.id === asMessageId("user-message-branch-model"))?.text,
     ).toBe(prompt);
   });
 
