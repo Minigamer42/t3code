@@ -398,7 +398,11 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     Effect.fn("AntigravityTextGeneration.generateBranchName")(function* (input) {
       const generated = yield* runAntigravityJson({
         operation: "generateBranchName",
-        ...buildBranchNamePrompt({ message: input.message, attachments: input.attachments }),
+        ...buildBranchNamePrompt({
+          message: input.message,
+          attachments: input.attachments,
+          policy: input.policy,
+        }),
         modelSelection: input.modelSelection,
       });
       return { branch: sanitizeBranchFragment(generated.branch) };
