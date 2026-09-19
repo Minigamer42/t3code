@@ -247,7 +247,7 @@ function parseNoIndexNumstatEntries(
   const records = stdout.split("\0");
   const entries: Array<{ path: string; insertions: number; deletions: number }> = [];
 
-  for (let index = 0; index < records.length;) {
+  for (let index = 0; index < records.length; ) {
     const header = records[index++] ?? "";
     if (header.length === 0) continue;
     const firstTab = header.indexOf("\t");
@@ -285,15 +285,17 @@ function parsePorcelainPath(line: string): string | null {
     return null;
   }
 
-  const tabIndex = line.indexOf("\t");
-  if (tabIndex >= 0) {
-    const fromTab = line.slice(tabIndex + 1);
-    const [filePath] = fromTab.split("\t");
-    return filePath?.trim().length ? filePath.trim() : null;
+  // Porcelain v2 paths are the remainder after a fixed number of metadata fields.
+  // Splitting the whole record on whitespace invents a second path for names that
+  // contain spaces when the numstat entry is merged into the status result.
+  const metadataFieldCount = line.startsWith("1 ") ? 8 : line.startsWith("2 ") ? 9 : 10;
+  let pathStart = 0;
+  for (let index = 0; index < metadataFieldCount; index += 1) {
+    pathStart = line.indexOf(" ", pathStart);
+    if (pathStart < 0) return null;
+    pathStart += 1;
   }
-
-  const parts = line.trim().split(/\s+/g);
-  const filePath = parts.at(-1) ?? "";
+  const filePath = line.slice(pathStart).split("\t", 1)[0]?.trim() ?? "";
   return filePath.length > 0 ? filePath : null;
 }
 
