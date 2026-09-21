@@ -2236,6 +2236,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const statusStdout = statusResult.stdout;
     let refName: string | null = null;
     let upstreamRef: string | null = null;
+    let hasResolvedUpstream = false;
     let aheadCount = 0;
     let behindCount = 0;
     let aheadOfDefaultCount = 0;
@@ -2253,7 +2254,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         upstreamRef = value.length > 0 ? value : null;
         continue;
       }
-      if (includeDivergence && line.startsWith("# branch.ab ")) {
+      if (line.startsWith("# branch.ab ")) {
+        hasResolvedUpstream = true;
         const value = line.slice("# branch.ab ".length).trim();
         const parsed = parseBranchAb(value);
         aheadCount = parsed.ahead;
@@ -2265,6 +2267,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         const pathValue = parsePorcelainPath(line);
         if (pathValue) changedFilesWithoutNumstat.add(pathValue);
       }
+    }
+
+    if (!includeDivergence && upstreamRef !== null) {
+      const resolved = yield* runGit({
+        operation: "GitVcsDriver.statusDetails.resolveUpstream",
+        cwd,
+        args: ["rev-parse", "--verify", "--quiet", "@{upstream}"],
+        allowNonZeroExit: true,
+      });
+      hasResolvedUpstream = resolved.exitCode === 0;
+    }
+    if (!hasResolvedUpstream) {
+      upstreamRef = null;
     }
 
     const fallbackAheadCount =
