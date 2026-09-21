@@ -759,10 +759,26 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         });
         assert.isNumber(error.exitCode);
         assert.isAbove(error.stderrLength ?? 0, 0);
+        assert.include(error.detail, "unknown option");
+        assert.include(error.detail, "<redacted>");
         assert.notInclude(error.detail, secret);
         assert.notInclude(error.message, secret);
         assert.notProperty(error, "args");
         assert.notProperty(error, "stderr");
+      }),
+    );
+
+    it.effect("surfaces the git diagnostic for a failed command", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const error = yield* driver.readRangeContext(cwd, "missing-base").pipe(Effect.flip);
+
+        assert.include(error.detail, "missing-base..HEAD");
+        assert.include(error.message, "missing-base..HEAD");
+        assert.notEqual(error.detail, "Git command exited with a non-zero status.");
       }),
     );
 
