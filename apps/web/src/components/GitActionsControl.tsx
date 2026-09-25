@@ -1049,6 +1049,7 @@ export default function GitActionsControl({
     activeServerThreadShell ?? activeServerThreadProjection?.projection.thread ?? null;
   const isLocalDraftThread = activeDraftThread !== null && activeServerThread === null;
   const canChangeThreadBranch = canWriteSourceControl && (isLocalDraftThread || canOperateThread);
+  const draftRefreshKey = isLocalDraftThread ? (draftId ?? activeThreadRef?.threadId ?? null) : null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [isSplitCommitDialogOpen, setIsSplitCommitDialogOpen] = useState(false);
@@ -1283,6 +1284,10 @@ export default function GitActionsControl({
 
     window.addEventListener("focus", scheduleRefreshCurrentGitStatus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    // A draft can reuse status from before an IDE checkout without a new window focus event.
+    if (draftRefreshKey !== null) {
+      scheduleRefreshCurrentGitStatus();
+    }
 
     return () => {
       if (refreshTimeout !== null) {
@@ -1291,7 +1296,7 @@ export default function GitActionsControl({
       window.removeEventListener("focus", scheduleRefreshCurrentGitStatus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeEnvironmentId, gitCwd, refreshVcsStatus]);
+  }, [activeEnvironmentId, draftRefreshKey, gitCwd, refreshVcsStatus]);
 
   // React 19.2 leaves useEffectEvent stale inside the memoized details panel.
   // Bind each render's actions to its checkout and thread, including retained toast actions.
