@@ -959,6 +959,8 @@ export default function GitActionsControl({
         : null,
   );
   const activeServerThread = useThreadShell(activeThreadRef);
+  const isDraftThread = activeDraftThread !== null && activeServerThread === null;
+  const draftRefreshKey = isDraftThread ? (draftId ?? activeThreadRef?.threadId ?? null) : null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [isSplitCommitDialogOpen, setIsSplitCommitDialogOpen] = useState(false);
@@ -1203,6 +1205,10 @@ export default function GitActionsControl({
 
     window.addEventListener("focus", scheduleRefreshCurrentGitStatus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    // A draft can reuse status from before an IDE checkout without a new window focus event.
+    if (draftRefreshKey !== null) {
+      scheduleRefreshCurrentGitStatus();
+    }
 
     return () => {
       if (refreshTimeout !== null) {
@@ -1211,7 +1217,7 @@ export default function GitActionsControl({
       window.removeEventListener("focus", scheduleRefreshCurrentGitStatus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeEnvironmentId, gitCwd, refreshVcsStatus]);
+  }, [activeEnvironmentId, draftRefreshKey, gitCwd, refreshVcsStatus]);
 
   const openExistingPr = useCallback(async () => {
     const openPr = gitStatusForActions?.pr?.state === "open" ? gitStatusForActions.pr : null;
