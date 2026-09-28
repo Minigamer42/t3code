@@ -55,6 +55,7 @@ const isPullRequestListPreferences = Schema.is(PullRequestListPreferences);
 export interface Preferences {
   readonly pullRequestHideTestFiles?: boolean;
   readonly pullRequestMergeMethod?: PullRequestMergeMethod;
+  readonly gitFilesGroupByDirectory?: boolean;
   readonly liveActivitiesEnabled?: boolean;
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
@@ -138,6 +139,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     pullRequestHideTestFiles?: boolean;
     pullRequestMergeMethod?: PullRequestMergeMethod;
+    gitFilesGroupByDirectory?: boolean;
     liveActivitiesEnabled?: boolean;
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
@@ -177,6 +179,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     preferences.pullRequestMergeMethod = parsed.pullRequestMergeMethod;
   }
 
+  if (typeof parsed.gitFilesGroupByDirectory === "boolean") {
+    preferences.gitFilesGroupByDirectory = parsed.gitFilesGroupByDirectory;
+  }
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
   }
