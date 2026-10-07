@@ -2734,15 +2734,20 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       for (const call of calls) {
         expect(call.command).toBe("glab");
         expect(call.args).toEqual([
-          "mr",
-          "list",
-          "--source-branch",
-          branch,
-          "--all",
-          "--per-page",
-          "20",
-          "--output",
-          "json",
+          "api",
+          "--method",
+          "GET",
+          "projects/:fullpath/merge_requests",
+          "--raw-field",
+          `source_branch=${branch}`,
+          "--raw-field",
+          "state=all",
+          "--raw-field",
+          "per_page=20",
+          "--raw-field",
+          "order_by=updated_at",
+          "--raw-field",
+          "sort=desc",
         ]);
       }
     }),
@@ -7930,7 +7935,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       );
 
       expect(errorMessage).toContain("Git command failed in GitVcsDriver.commit.commit");
-      expect(errorMessage).not.toContain("hook: fail");
+      expect(errorMessage).toContain("hook: fail");
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

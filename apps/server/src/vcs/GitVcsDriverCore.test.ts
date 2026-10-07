@@ -649,7 +649,7 @@ it.effect("invalidates a ref snapshot when a mutation fails after changing Git",
           if (!ChildProcess.isStandardCommand(command)) {
             return yield* Effect.die("expected a standard Git command");
           }
-          if (command.args[0] === "branch" && command.args[1] === "feature/partial-failure") {
+          if (command.args[0] === "branch" && command.args.includes("feature/partial-failure")) {
             const handle = yield* delegate.spawn(command);
             yield* handle.exitCode;
             return makeNonRepositoryHandle();
@@ -1177,7 +1177,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           reason: "branch_checked_out_in_worktree",
         });
         assert.include(error.message, "(branch_checked_out_in_worktree)");
-        assert.notInclude(error.message, firstWorktree);
+        assert.include(error.message, firstWorktree);
       }),
     );
 
@@ -2020,6 +2020,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* writeTextFile(cwd, "tab\tand\nnewline.txt", "unusual path\n");
         }
         yield* git(cwd, ["add", "."]);
+        yield* (yield* FileSystem.FileSystem).chmod(cwd + "/mode-only.sh", 0o755);
         yield* git(cwd, ["update-index", "--chmod=+x", "mode-only.sh"]);
         yield* git(cwd, ["commit", "-m", "rename and add files"]);
         const preview = yield* driver.getReviewDiffPreview({
@@ -2029,6 +2030,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const branch = preview.sources.find((source) => source.kind === "branch-range")!;
         for (const path of ["renamed.md", "[literal].txt", " leading.txt", "mode-only.sh"]) {
           const stat = branch.files!.find((file) => file.path === path)!;
+          assert.isDefined(stat, `Missing ${path}: ${JSON.stringify(branch.files)}`);
           const request = yield* Schema.decodeEffect(ReviewDiffPreviewInput)({
             cwd,
             baseRef: initialBranch,

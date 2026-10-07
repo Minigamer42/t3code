@@ -166,22 +166,20 @@ it.effect("starts a prompt using the active provider when the project default is
   }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
-for (const [field, expected] of [
-  ["title", ThreadCliTitleEmptyError],
-  ["prompt", ThreadCliPromptEmptyError],
-] as const) {
-  it.effect("rejects a blank " + field + " before creating anything", () =>
-    Effect.gen(function* () {
-      const error = yield* createThreadFromCliInput(
-        { ...flags, [field]: Option.some("  ") },
-        {
-          snapshot,
-          settings: DEFAULT_SERVER_SETTINGS,
-          createProject: () => Effect.die("Must not mutate"),
-          launchThread: () => Effect.die("Must not mutate"),
-        },
-      ).pipe(Effect.flip);
-      assert.strictEqual(error._tag, expected.name);
-    }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
-  );
-}
+it.effect.each([
+  { field: "title", expected: ThreadCliTitleEmptyError },
+  { field: "prompt", expected: ThreadCliPromptEmptyError },
+] as const)("rejects a blank $field before creating anything", ({ field, expected }) =>
+  Effect.gen(function* () {
+    const error = yield* createThreadFromCliInput(
+      { ...flags, [field]: Option.some("  ") },
+      {
+        snapshot,
+        settings: DEFAULT_SERVER_SETTINGS,
+        createProject: () => Effect.die("Must not mutate"),
+        launchThread: () => Effect.die("Must not mutate"),
+      },
+    ).pipe(Effect.flip);
+    assert.propertyVal(error, "_tag", expected.name);
+  }).pipe(Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
+);

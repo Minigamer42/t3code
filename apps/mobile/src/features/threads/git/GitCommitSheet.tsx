@@ -1,6 +1,6 @@
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import {
   buildCommitFileTree,
   flattenCommitFileTree,
@@ -223,13 +223,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
                           }
                         >
                           <SymbolView
-                            name={
-                              checked === "mixed"
-                                ? "minus.square"
-                                : checked
-                                  ? "checkmark.square"
-                                  : "square"
-                            }
+                            name={checked === "mixed" ? "minus" : checked ? "checkmark" : "circle"}
                             size={20}
                             tintColorClassName="accent-foreground"
                           />

@@ -5722,7 +5722,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     showWarningIndicator
       ? "text-warning"
       : workEntry.toolLifecycleStatus === "inProgress"
-        ? "text-sky-500 dark:text-sky-300/80"
+        ? "text-primary"
         : showDestructiveRowStyle
           ? "text-destructive"
           : showFailedIndicator

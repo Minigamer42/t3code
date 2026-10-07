@@ -1049,7 +1049,9 @@ export default function GitActionsControl({
     activeServerThreadShell ?? activeServerThreadProjection?.projection.thread ?? null;
   const isLocalDraftThread = activeDraftThread !== null && activeServerThread === null;
   const canChangeThreadBranch = canWriteSourceControl && (isLocalDraftThread || canOperateThread);
-  const draftRefreshKey = isLocalDraftThread ? (draftId ?? activeThreadRef?.threadId ?? null) : null;
+  const draftRefreshKey = isLocalDraftThread
+    ? (draftId ?? activeThreadRef?.threadId ?? null)
+    : null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [isSplitCommitDialogOpen, setIsSplitCommitDialogOpen] = useState(false);
@@ -1327,6 +1329,7 @@ export default function GitActionsControl({
       const actionCanCommit =
         action === "commit" || action === "commit_push" || action === "commit_push_pr";
       const includesCommit =
+        !featureBranchOnly &&
         actionCanCommit &&
         (action === "commit" || !!actionStatus?.hasWorkingTreeChanges || featureBranch);
       if (
@@ -1365,6 +1368,7 @@ export default function GitActionsControl({
         ...(commitMessage ? { commitMessage } : {}),
         ...(splitCommits ? { splitCommits: true } : {}),
         ...(featureBranch ? { featureBranch } : {}),
+        ...(featureBranchOnly ? { featureBranchOnly: true } : {}),
         ...(filePaths ? { filePaths } : {}),
         // A pull request the action opens is linked to the thread it ran beside. Drafts
         // have no server thread yet, so there is nothing to link to.
@@ -2161,33 +2165,35 @@ export default function GitActionsControl({
               commits.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
-            <div className="space-y-3 rounded-xl bg-zinc-25 p-3 text-sm ring-1 ring-black/5 dark:bg-white/[0.035] dark:ring-white/5">
-              <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
-                <span className="text-muted-foreground">Branch</span>
-                <span className="flex items-center justify-between gap-2">
-                  <span className="font-medium">
-                    {gitStatusForActions?.refName ?? "(detached HEAD)"}
+          <DialogPanel>
+            <div className="space-y-4">
+              <div className="space-y-3 rounded-xl bg-zinc-25 p-3 text-sm ring-1 ring-black/5 dark:bg-white/[0.035] dark:ring-white/5">
+                <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
+                  <span className="text-muted-foreground">Branch</span>
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {gitStatusForActions?.refName ?? "(detached HEAD)"}
+                    </span>
+                    {isDefaultRef && (
+                      <span className="text-right text-warning">Warning: default refName</span>
+                    )}
                   </span>
-                  {isDefaultRef && (
-                    <span className="text-right text-warning">Warning: default refName</span>
-                  )}
-                </span>
+                </div>
+                <CommitFileSelection
+                  files={allFiles}
+                  excludedFiles={excludedFiles}
+                  isEditing={isEditingFiles}
+                  onExcludedFilesChange={setExcludedFiles}
+                  onEditingChange={setIsEditingFiles}
+                  onOpenFile={openChangedFileInEditor}
+                  canOpenFile={canOperateThread}
+                />
               </div>
-              <CommitFileSelection
-                files={allFiles}
-                excludedFiles={excludedFiles}
-                isEditing={isEditingFiles}
-                onExcludedFilesChange={setExcludedFiles}
-                onEditingChange={setIsEditingFiles}
-                onOpenFile={openChangedFileInEditor}
-                canOpenFile={canOperateThread}
-              />
+              <p className="text-sm text-muted-foreground">
+                Separate Git diff hunks can go into different commits. Binary files, renames, mode
+                changes, and nearby edits that share one hunk stay together.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Separate Git diff hunks can go into different commits. Binary files, renames, mode
-              changes, and nearby edits that share one hunk stay together.
-            </p>
           </DialogPanel>
           <DialogFooter variant="bare">
             <Button
@@ -2237,32 +2243,34 @@ export default function GitActionsControl({
               branch.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-3">
-            <div className="rounded-xl bg-zinc-25 p-3 text-sm ring-1 ring-black/5 dark:bg-white/[0.035] dark:ring-white/5">
-              <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1">
-                <span className="text-muted-foreground">Branch</span>
-                <span className="truncate font-medium">
-                  {gitStatusForActions?.refName ?? "(detached HEAD)"}
-                </span>
-                {isDefaultRef ? (
-                  <>
-                    <span />
-                    <span className="text-warning">Warning: default refName</span>
-                  </>
-                ) : null}
-                <span className="text-muted-foreground">Commits</span>
-                <span>
-                  {gitStatusForActions?.aheadCount ?? 0} local,{" "}
-                  {gitStatusForActions?.behindCount ?? 0} upstream
-                </span>
+          <DialogPanel>
+            <div className="space-y-3">
+              <div className="rounded-xl bg-zinc-25 p-3 text-sm ring-1 ring-black/5 dark:bg-white/[0.035] dark:ring-white/5">
+                <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1">
+                  <span className="text-muted-foreground">Branch</span>
+                  <span className="truncate font-medium">
+                    {gitStatusForActions?.refName ?? "(detached HEAD)"}
+                  </span>
+                  {isDefaultRef ? (
+                    <>
+                      <span />
+                      <span className="text-warning">Warning: default refName</span>
+                    </>
+                  ) : null}
+                  <span className="text-muted-foreground">Commits</span>
+                  <span>
+                    {gitStatusForActions?.aheadCount ?? 0} local,{" "}
+                    {gitStatusForActions?.behindCount ?? 0} upstream
+                  </span>
+                </div>
               </div>
-            </div>
-            <div className="flex gap-2 rounded-lg border border-warning/25 bg-warning/8 p-3 text-sm">
-              <TriangleAlertIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
-              <p>
-                This rewrites the upstream branch. The lease prevents the push if it changed since
-                this environment last fetched it.
-              </p>
+              <div className="flex gap-2 rounded-lg border border-warning/25 bg-warning/8 p-3 text-sm">
+                <TriangleAlertIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+                <p>
+                  This rewrites the upstream branch. The lease prevents the push if it changed since
+                  this environment last fetched it.
+                </p>
+              </div>
             </div>
           </DialogPanel>
           <DialogFooter>
