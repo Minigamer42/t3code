@@ -1,6 +1,7 @@
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  buildBranchPickerItems,
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
@@ -12,6 +13,7 @@ import {
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
+  resolveNewRefBase,
   resolveLockedWorkspaceLabel,
   resolveLocalCheckoutBranchMismatch,
   resolvePreviousWorktreeLabel,
@@ -24,6 +26,105 @@ import {
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+
+describe("buildBranchPickerItems", () => {
+  it("offers the pasted new ref before existing refs that only match by substring", () => {
+    const query = "jm/indiv/verwaltung/mitarbeiterstatistik-fix-date-cutoff";
+    const createBranchItemValue = `__create_new_branch__:${query}`;
+    const matchingRef = `serverinsta${query}`;
+    const items = buildBranchPickerItems({
+      branchNames: [matchingRef],
+      createBranchItemValue,
+      hasExactBranchMatch: false,
+      checkoutPullRequestItemValue: null,
+    }).filter((itemValue) =>
+      shouldIncludeBranchPickerItem({
+        itemValue,
+        normalizedQuery: query,
+        createBranchItemValue,
+        checkoutPullRequestItemValue: null,
+      }),
+    );
+    expect(items).toEqual([createBranchItemValue, matchingRef]);
+    expect(sanitizeNewRefName(query)).toBe(query);
+  });
+
+  it("keeps exact existing refs selectable without offering duplicate creation", () => {
+    expect(
+      buildBranchPickerItems({
+        branchNames: ["feature/current"],
+        createBranchItemValue: "__create_new_branch__:feature/current",
+        hasExactBranchMatch: true,
+        checkoutPullRequestItemValue: null,
+      }),
+    ).toEqual(["feature/current"]);
+  });
+
+  it("keeps pull-request checkout first and only lists refs when choosing a base", () => {
+    expect(
+      buildBranchPickerItems({
+        branchNames: ["feature/123"],
+        createBranchItemValue: "__create_new_branch__:123",
+        hasExactBranchMatch: false,
+        checkoutPullRequestItemValue: "__checkout_pull_request__:123",
+      }),
+    ).toEqual(["__checkout_pull_request__:123", "__create_new_branch__:123", "feature/123"]);
+    expect(
+      buildBranchPickerItems({
+        branchNames: ["main", "feature/current"],
+        createBranchItemValue: null,
+        hasExactBranchMatch: false,
+        checkoutPullRequestItemValue: null,
+      }),
+    ).toEqual(["main", "feature/current"]);
+  });
+});
+
+describe("resolveNewRefBase", () => {
+  it("defaults to the repository default instead of the checked-out feature branch", () => {
+    expect(
+      resolveNewRefBase(
+        [
+          { name: "feature/current", isDefault: false },
+          { name: "main", isDefault: true },
+        ],
+        "feature/current",
+      ),
+    ).toBe("main");
+  });
+
+  it("uses a remote-only default ref and honors nonstandard defaults", () => {
+    expect(
+      resolveNewRefBase(
+        [
+          { name: "main", isDefault: false },
+          { name: "origin/trunk", isDefault: true },
+        ],
+        "feature/current",
+      ),
+    ).toBe("origin/trunk");
+  });
+
+  it("prefers main or master when the repository has no default-ref metadata", () => {
+    expect(
+      resolveNewRefBase(
+        [
+          { name: "master", isDefault: false },
+          { name: "main", isDefault: false },
+        ],
+        "feature/current",
+      ),
+    ).toBe("main");
+    expect(resolveNewRefBase([{ name: "master", isDefault: false }], "feature/current")).toBe(
+      "master",
+    );
+  });
+
+  it("falls back to the current checkout, including detached HEAD", () => {
+    expect(resolveNewRefBase([], "trunk")).toBe("trunk");
+    expect(resolveNewRefBase([], null)).toBe("HEAD");
+  });
+});
 
 describe("resolvePreviousWorktreeSeed", () => {
   it("picks the most recently updated worktree thread", () => {

@@ -2272,12 +2272,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     if (!includeDivergence && upstreamRef !== null) {
-      const resolved = yield* runGit({
-        operation: "GitVcsDriver.statusDetails.resolveUpstream",
+      const resolved = yield* executeGit(
+        "GitVcsDriver.statusDetails.resolveUpstream",
         cwd,
-        args: ["rev-parse", "--verify", "--quiet", "@{upstream}"],
-        allowNonZeroExit: true,
-      });
+        ["rev-parse", "--verify", "--quiet", "@{upstream}"],
+      );
       hasResolvedUpstream = resolved.exitCode === 0;
     }
     if (!hasResolvedUpstream) {
@@ -4277,10 +4276,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const createRef: GitVcsDriver.GitVcsDriver["Service"]["createRef"] = Effect.fn("createRef")(
     function* (input) {
-      yield* executeGit("GitVcsDriver.createRef", input.cwd, ["branch", input.refName], {
-        timeoutMs: 10_000,
-        fallbackErrorDetail: "git branch create failed",
-      });
+      yield* executeGit(
+        "GitVcsDriver.createRef",
+        input.cwd,
+        ["branch", "--", input.refName, ...(input.baseRefName ? [input.baseRefName] : [])],
+        {
+          timeoutMs: 10_000,
+          fallbackErrorDetail: "git branch create failed",
+        },
+      );
       if (input.switchRef) {
         yield* switchRef({ cwd: input.cwd, refName: input.refName });
       }
