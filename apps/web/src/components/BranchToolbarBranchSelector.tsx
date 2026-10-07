@@ -47,6 +47,7 @@ import { parsePullRequestReference } from "../pullRequestReference";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { composerFloatingLayerProps } from "./chat/composerEventScope";
 import {
+  buildBranchPickerItems,
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
@@ -54,6 +55,7 @@ import {
   resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  resolveNewRefBase,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
@@ -228,6 +230,8 @@ export function BranchToolbarBranchSelector({
   // ---------------------------------------------------------------------------
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
+  const [pendingNewRefName, setPendingNewRefName] = useState<string | null>(null);
+  const [selectedNewRefBase, setSelectedNewRefBase] = useState<string | null>(null);
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
   const branchStatusQuery = useEnvironmentQuery(
@@ -261,6 +265,17 @@ export function BranchToolbarBranchSelector({
   const isInitialBranchesLoadPending = branchRefState.isPending && branchRefState.data === null;
   const currentGitBranch =
     branchStatusQuery.data?.refName ?? refs.find((refName) => refName.current)?.name ?? null;
+  // Keep the default independent of the search used to choose a different base.
+  const newRefDefaultsQuery = useEnvironmentQuery(
+    pendingNewRefName !== null && branchCwd !== null
+      ? vcsEnvironment.listRefs({ environmentId, input: { cwd: branchCwd, limit: 100 } })
+      : null,
+  );
+  const newRefBase =
+    selectedNewRefBase ??
+    (newRefDefaultsQuery.data
+      ? resolveNewRefBase(newRefDefaultsQuery.data.refs, currentGitBranch)
+      : null);
   const sourceControlPresentation = useMemo(
     () => getSourceControlPresentation(branchStatusQuery.data?.sourceControlProvider),
     [branchStatusQuery.data?.sourceControlProvider],
@@ -284,9 +299,13 @@ export function BranchToolbarBranchSelector({
   const worktreeBranch = draftThread?.worktreeBranch ?? null;
   const worktreeName = draftThread?.worktreeName ?? null;
   const checkoutPullRequestItemValue =
-    prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
+    pendingNewRefName === null && prReference && onCheckoutPullRequestRequest
+      ? `__checkout_pull_request__:${prReference}`
+      : null;
   const canCreateBranch =
-    (!isSelectingWorktreeBase || draftThread !== null) && trimmedBranchQuery.length > 0;
+    pendingNewRefName === null &&
+    (!isSelectingWorktreeBase || draftThread !== null) &&
+    trimmedBranchQuery.length > 0;
   // The ref is created under its sanitized name, so the collision check has to
   // use that name too. Matching on the raw query would offer to create a ref
   // that already exists whenever sanitizing changes the name.
@@ -295,16 +314,16 @@ export function BranchToolbarBranchSelector({
   const createBranchItemValue = canCreateBranch
     ? `__create_new_branch__:${trimmedBranchQuery}`
     : null;
-  const branchPickerItems = useMemo(() => {
-    const items = [...branchNames];
-    if (createBranchItemValue && !hasExactBranchMatch) {
-      items.push(createBranchItemValue);
-    }
-    if (checkoutPullRequestItemValue) {
-      items.unshift(checkoutPullRequestItemValue);
-    }
-    return items;
-  }, [branchNames, checkoutPullRequestItemValue, createBranchItemValue, hasExactBranchMatch]);
+  const branchPickerItems = useMemo(
+    () =>
+      buildBranchPickerItems({
+        branchNames,
+        checkoutPullRequestItemValue,
+        createBranchItemValue,
+        hasExactBranchMatch,
+      }),
+    [branchNames, checkoutPullRequestItemValue, createBranchItemValue, hasExactBranchMatch],
+  );
   const filteredBranchPickerItems = useMemo(
     () =>
       normalizedDeferredBranchQuery.length === 0
@@ -473,17 +492,23 @@ export function BranchToolbarBranchSelector({
     });
   };
 
-  const createRef = (rawName: string) => {
+  const createRef = (rawName: string, baseRefName: string) => {
     const name = sanitizeNewRefName(rawName);
     if (!branchCwd || !name || isBranchActionPending) return;
 
     if (isSelectingWorktreeBase && draftThread) {
+      setThreadBranch(baseRefName, null);
       setDraftThreadContext(draftId ?? threadRef, { worktreeBranch: name });
+      setPendingNewRefName(null);
+      setSelectedNewRefBase(null);
       setBranchQuery("");
       return;
     }
 
     setIsBranchMenuOpen(false);
+    setPendingNewRefName(null);
+    setSelectedNewRefBase(null);
+    setBranchQuery("");
     onComposerFocusRequest?.();
 
     runBranchAction(async () => {
@@ -494,6 +519,7 @@ export function BranchToolbarBranchSelector({
         input: {
           cwd: branchCwd,
           refName: name,
+          baseRefName,
           switchRef: true,
         },
       });
@@ -553,6 +579,8 @@ export function BranchToolbarBranchSelector({
     setIsBranchMenuOpen(open);
     if (!open) {
       setBranchQuery("");
+      setPendingNewRefName(null);
+      setSelectedNewRefBase(null);
     }
   }, []);
 
@@ -719,9 +747,13 @@ export function BranchToolbarBranchSelector({
           index={index}
           value={itemValue}
           className="pe-1.5"
-          onClick={() => createRef(trimmedBranchQuery)}
+          onClick={() => {
+            setPendingNewRefName(newRefName);
+            setSelectedNewRefBase(null);
+            setBranchQuery("");
+          }}
         >
-          <span className="truncate">
+          <span className="block min-w-0 truncate">
             {isSelectingWorktreeBase ? "Create worktree branch" : "Create new ref"} &quot;
             {newRefName}&quot;
           </span>
@@ -750,7 +782,13 @@ export function BranchToolbarBranchSelector({
         index={index}
         value={itemValue}
         className="pe-1.5"
-        onClick={() => selectBranch(refName)}
+        onClick={() => {
+          if (pendingNewRefName !== null) {
+            setSelectedNewRefBase(refName.name);
+          } else {
+            selectBranch(refName);
+          }
+        }}
         onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       >
         <div className="flex w-full min-w-0 items-center justify-between gap-2">
@@ -776,9 +814,16 @@ export function BranchToolbarBranchSelector({
           animated: false,
         });
       }}
-      onOpenChange={handleOpenChange}
+      onOpenChange={(open, details) => {
+        // Actions close the picker themselves. Choosing a creation base keeps it open.
+        if (!open && details.reason === "item-press") {
+          details.cancel();
+          return;
+        }
+        handleOpenChange(open);
+      }}
       open={isBranchMenuOpen}
-      value={resolvedActiveBranch}
+      value={pendingNewRefName !== null ? newRefBase : resolvedActiveBranch}
     >
       <div
         className={cn("flex min-w-0 items-center gap-1", className)}
@@ -831,6 +876,15 @@ export function BranchToolbarBranchSelector({
         className="flex w-80 flex-col"
         {...composerFloatingLayerProps}
       >
+        {pendingNewRefName !== null ? (
+          <div className="shrink-0 border-b border-border/60 px-3 py-2">
+            <p className="break-all text-sm font-medium">
+              Create {isSelectingWorktreeBase ? "worktree branch" : "ref"} &quot;{pendingNewRefName}
+              &quot;
+            </p>
+            <p className="text-xs text-muted-foreground">Choose a base ref</p>
+          </div>
+        ) : null}
         <div className="shrink-0 px-3 pt-2.5">
           <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
             <SearchIcon
@@ -839,7 +893,7 @@ export function BranchToolbarBranchSelector({
             />
             <ComboboxInput
               className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-              inputClassName="rounded-none bg-transparent text-sm"
+              inputClassName="inline-flex w-full min-w-0 rounded-none bg-transparent text-sm"
               placeholder="Search refs..."
               showTrigger={false}
               size="sm"
@@ -887,7 +941,38 @@ export function BranchToolbarBranchSelector({
               />
             </ComboboxListVirtualized>
           </div>
-          {isSelectingWorktreeBase && worktreeBranch ? (
+          {pendingNewRefName !== null ? (
+            <div className="space-y-2 border-t border-border/60 px-3 py-2">
+              <p className="break-all text-xs text-muted-foreground">
+                {newRefBase
+                  ? `Based on ${newRefBase}`
+                  : (newRefDefaultsQuery.error ?? "Loading default ref...")}
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setBranchQuery(pendingNewRefName);
+                    setPendingNewRefName(null);
+                    setSelectedNewRefBase(null);
+                  }}
+                >
+                  Back
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={newRefBase === null || isBranchActionPending}
+                  onClick={() => {
+                    if (newRefBase !== null) createRef(pendingNewRefName, newRefBase);
+                  }}
+                >
+                  Create {isSelectingWorktreeBase ? "worktree branch" : "ref"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {pendingNewRefName === null && isSelectingWorktreeBase && worktreeBranch ? (
             <Button
               variant="ghost"
               size="xs"
@@ -901,7 +986,7 @@ export function BranchToolbarBranchSelector({
               Reuse selected branch when available
             </Button>
           ) : null}
-          {isSelectingWorktreeBase ? (
+          {pendingNewRefName === null && isSelectingWorktreeBase ? (
             <div
               className="space-y-1.5 border-t border-border/60 px-3 py-2"
               onKeyDown={(event) => event.stopPropagation()}
@@ -938,7 +1023,7 @@ export function BranchToolbarBranchSelector({
               </p>
             </div>
           ) : null}
-          {isSelectingWorktreeBase ? (
+          {pendingNewRefName === null && isSelectingWorktreeBase ? (
             <Tooltip>
               <TooltipTrigger
                 render={
