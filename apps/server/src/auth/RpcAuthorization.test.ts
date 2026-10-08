@@ -484,3 +484,7 @@ it.effect("denies manual cleanup before the handler without settings permission"
     expect(handled).toBe(false);
   }),
 );
+
+it("allows worktree discovery with orchestration read access", () => {
+  expect(requiredScopeForRpcMethod(WS_METHODS.vcsListWorktrees)).toBe(AuthOrchestrationReadScope);
+});
