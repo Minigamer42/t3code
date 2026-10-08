@@ -7,7 +7,7 @@ export interface CommandPaletteItem {
   readonly run: () => void;
 }
 
-/** `>` narrows to actions, matching the desktop palette. Stable ties retain recent-thread order. */
+/** `>` narrows to actions. Thread matches retain the input's recent-message order. */
 export function filterCommandPaletteItems(
   items: ReadonlyArray<CommandPaletteItem>,
   query: string,
@@ -28,13 +28,15 @@ export function filterCommandPaletteItems(
       )
         return [];
       const rank =
-        title === normalized
-          ? 3
-          : title.startsWith(normalized)
-            ? 2
-            : title.includes(normalized)
-              ? 1
-              : 0;
+        item.kind === "thread"
+          ? 0
+          : title === normalized
+            ? 3
+            : title.startsWith(normalized)
+              ? 2
+              : title.includes(normalized)
+                ? 1
+                : 0;
       return [{ item, rank, index }];
     })
     .sort((left, right) => right.rank - left.rank || left.index - right.index)

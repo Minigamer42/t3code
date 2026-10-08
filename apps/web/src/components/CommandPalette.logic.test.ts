@@ -367,7 +367,7 @@ describe("buildProjectActionItems", () => {
 });
 
 describe("buildThreadActionItems", () => {
-  it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
+  it("orders threads by the displayed latest user message time, falling back to updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));
 
@@ -378,6 +378,7 @@ describe("buildThreadActionItems", () => {
             id: ThreadId.make("thread-older"),
             title: "Older thread",
             updatedAt: "2026-03-24T12:00:00.000Z",
+            latestUserMessageAt: "2026-03-19T12:00:00.000Z",
           }),
           makeThread({
             id: ThreadId.make("thread-newer"),
@@ -393,17 +394,17 @@ describe("buildThreadActionItems", () => {
       });
 
       expect(items.map((item) => item.value)).toEqual([
-        "thread:thread-older",
         "thread:thread-newer",
+        "thread:thread-older",
       ]);
-      expect(items[0]?.timestamp).toBe("1d ago");
-      expect(items[1]?.timestamp).toBe("5d ago");
+      expect(items[0]?.timestamp).toBe("5d ago");
+      expect(items[1]?.timestamp).toBe("6d ago");
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("ranks thread title matches ahead of contextual project-name matches", () => {
+  it("orders title and contextual project-name matches by recency", () => {
     const threadItems = buildThreadActionItems({
       threads: [
         makeThread({
@@ -435,18 +436,19 @@ describe("buildThreadActionItems", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.value).toBe("threads-search");
     expect(groups[0]?.items.map((item) => item.value)).toEqual([
-      "thread:thread-title-match",
       "thread:thread-context-match",
+      "thread:thread-title-match",
     ]);
   });
 
-  it("orders title matches by recent activity before older prefix matches", () => {
+  it("orders content and title matches by recency regardless of the input sort order", () => {
     const threads = [
       makeThread({
         id: ThreadId.make("old-prefix"),
-        title: "Convex InvalidCursor in Convex threads query",
+        title: "Convex",
         createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-02T00:00:00.000Z",
+        updatedAt: "2026-03-26T00:00:00.000Z",
+        latestUserMessageAt: "2026-01-02T00:00:00.000Z",
       }),
       makeThread({
         id: ThreadId.make("recent-title"),
@@ -482,9 +484,9 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(groups[0]?.items.map((item) => item.value)).toEqual([
+      "thread:recent-content",
       "thread:recent-title",
       "thread:old-prefix",
-      "thread:recent-content",
     ]);
   });
 
@@ -632,7 +634,7 @@ describe("buildThreadActionItems", () => {
     expect(item?.description).toBe("T3 Code · #feat/search");
   });
 
-  it("surfaces threads when the query is their ID, without outranking title matches", () => {
+  it("orders thread ID and title matches by recency", () => {
     const idThread = makeThread({
       id: ThreadId.make("thread-alpha-1234"),
       title: "Unrelated work",
@@ -661,8 +663,8 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(groups.flatMap((group) => group.items)).toEqual([
-      expect.objectContaining({ value: `thread:${titleThread.id}` }),
       expect.objectContaining({ value: `thread:${idThread.id}` }),
+      expect.objectContaining({ value: `thread:${titleThread.id}` }),
     ]);
   });
 

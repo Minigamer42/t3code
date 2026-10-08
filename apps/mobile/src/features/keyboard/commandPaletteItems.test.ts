@@ -34,10 +34,10 @@ describe("filterCommandPaletteItems", () => {
     ]);
   });
 
-  it("matches query tokens across titles and metadata and ranks exact titles first", () => {
+  it("matches titles and metadata while keeping threads in recent-message order", () => {
     expect(
       filterCommandPaletteItems(items, " MOBILE app ", emptyMatches).map((item) => item.key),
-    ).toEqual(["project", "mac:one", "siva:one"]);
+    ).toEqual(["project", "siva:one", "mac:one"]);
     expect(
       filterCommandPaletteItems(items, "siva keyboard", emptyMatches).map((item) => item.key),
     ).toEqual(["siva:one"]);
@@ -62,6 +62,18 @@ describe("filterCommandPaletteItems", () => {
       filterCommandPaletteItems(items, "message content", matches).map((item) => item.key),
     ).toEqual(["siva:one"]);
     expect(filterCommandPaletteItems(items, "> message content", matches)).toEqual([]);
+  });
+
+  it("keeps newer content matches ahead of older exact title matches", () => {
+    const threads = [
+      item("recent", "Fix search", "thread"),
+      item("older", "message content", "thread"),
+    ];
+    expect(
+      filterCommandPaletteItems(threads, "message content", new Set(["recent"])).map(
+        (item) => item.key,
+      ),
+    ).toEqual(["recent", "older"]);
   });
 });
 

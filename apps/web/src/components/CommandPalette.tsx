@@ -1336,7 +1336,7 @@ function OpenCommandPaletteDialog(props: {
         threads,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
+        sortOrder: "updated_at",
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
         renderTrailingContent: (thread) => (
@@ -1399,7 +1399,6 @@ function OpenCommandPaletteDialog(props: {
       }),
     [
       activeThreadId,
-      clientSettings.sidebarThreadSortOrder,
       navigate,
       projectCwdById,
       projectByKey,

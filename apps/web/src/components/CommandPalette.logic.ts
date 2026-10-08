@@ -367,7 +367,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
           projectTitle ?? ``,
           thread.branch ?? ``,
           contentMatch?.snippet ?? ``,
-          // Last so pasted IDs never outrank title matches for shared substrings.
+          // Prefer title matches over IDs when threads are equally recent.
           thread.id,
         ],
         title: thread.title,
@@ -428,7 +428,7 @@ function rankCommandPaletteItemMatch(
     const fieldRank = rankSearchFieldMatch(field, normalizedQuery, queryTokens);
     if (fieldRank !== Number.NEGATIVE_INFINITY) {
       if (index === 0 && item.searchRecency !== undefined) {
-        // All non-exact thread title matches share a tier so recency breaks the tie.
+        // For equally recent threads, prefer exact titles to other title matches.
         return 1_000 + Number(fieldRank === 3);
       }
       return 1_000 - index * 100 + fieldRank;
@@ -506,8 +506,8 @@ export function filterCommandPaletteGroups(input: {
       .toSorted(
         (left, right) =>
           Number(left.item.secondary ?? false) - Number(right.item.secondary ?? false) ||
-          right.rank - left.rank ||
           (right.item.searchRecency ?? 0) - (left.item.searchRecency ?? 0) ||
+          right.rank - left.rank ||
           left.index - right.index,
       )
       .map((entry) => entry.item);
