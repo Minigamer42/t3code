@@ -42,6 +42,10 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("allows worktree discovery with orchestration read access", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.vcsListWorktrees)).toBe(AuthOrchestrationReadScope);
+  });
+
   it("authorizes background policy reporting and observation deliberately", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverReportClientActivity)).toBe(
       AuthOrchestrationReadScope,

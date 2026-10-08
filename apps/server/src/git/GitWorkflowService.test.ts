@@ -31,6 +31,15 @@ function layer(input: {
 }
 
 describe("GitWorkflowService", () => {
+  it.effect("returns no worktrees when no Git repository is detected", () =>
+    Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      assert.deepStrictEqual(yield* workflow.listWorktrees({ cwd: "/not-a-repo" }), {
+        worktrees: [],
+      });
+    }).pipe(Effect.provide(layer({ detect: () => Effect.succeed(null) }))),
+  );
+
   it.effect("reports a non-Git VCS repository as not a Git repository", () =>
     Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;

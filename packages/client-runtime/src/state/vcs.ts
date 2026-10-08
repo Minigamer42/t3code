@@ -17,6 +17,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 
 import {
   createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
   createEnvironmentSubscriptionAtomFamily,
 } from "./runtime.ts";
@@ -280,6 +281,12 @@ export function createVcsEnvironmentAtoms<R, E>(
 
   return {
     listRefs,
+    listWorktrees: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:vcs:list-worktrees",
+      tag: WS_METHODS.vcsListWorktrees,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",
       idleTtlMs: VCS_STATUS_IDLE_TTL_MS,
