@@ -1054,6 +1054,7 @@ export default function GitActionsControl({
     : null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
+  const [isRefreshingQuickAction, setIsRefreshingQuickAction] = useState(false);
   const [isSplitCommitDialogOpen, setIsSplitCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
@@ -1325,7 +1326,7 @@ export default function GitActionsControl({
         return;
       const actionStatus = statusOverride ?? gitStatusForActions;
       const actionBranch = actionStatus?.refName ?? null;
-      const actionIsDefaultBranch = featureBranch ? false : isDefaultRef;
+      const actionIsDefaultBranch = featureBranch ? false : (actionStatus?.isDefaultRef ?? false);
       const actionCanCommit =
         action === "commit" || action === "commit_push" || action === "commit_push_pr";
       const includesCommit =
@@ -1532,31 +1533,66 @@ export default function GitActionsControl({
     });
   };
 
-  const runQuickAction = () => {
-    if (quickAction.kind === "open_commit_dialog") {
+  const runQuickAction = async () => {
+    if (
+      activeEnvironmentId === null ||
+      gitCwd === null ||
+      !canWriteSourceControl ||
+      isGitActionRunning ||
+      isRefreshingQuickAction
+    ) {
+      return;
+    }
+
+    setIsRefreshingQuickAction(true);
+    const result = await refreshVcsStatus({
+      environmentId: activeEnvironmentId,
+      input: { cwd: gitCwd },
+    }).finally(() => setIsRefreshingQuickAction(false));
+    if (result._tag === "Failure") {
+      if (isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Git status refresh failed",
+        description: error instanceof Error ? error.message : "An error occurred.",
+        data: threadToastData,
+      });
+      return;
+    }
+
+    const status = result.value;
+    const refreshedQuickAction = resolveQuickAction(
+      status,
+      false,
+      status.isDefaultRef,
+      status.hasPrimaryRemote,
+    );
+    if (refreshedQuickAction.kind === "open_commit_dialog") {
       setExcludedFiles(new Set());
       setIsEditingFiles(false);
       setIsCommitDialogOpen(true);
       return;
     }
-    if (quickAction.kind === "create_branch") {
+    if (refreshedQuickAction.kind === "create_branch") {
       void runGitActionWithToast({
         action: "commit",
         featureBranch: true,
         featureBranchOnly: true,
         skipDefaultBranchPrompt: true,
+        statusOverride: status,
       });
       return;
     }
-    if (quickAction.kind === "open_publish") {
+    if (refreshedQuickAction.kind === "open_publish") {
       setIsPublishDialogOpen(true);
       return;
     }
-    if (quickAction.kind === "open_push_dialog") {
+    if (refreshedQuickAction.kind === "open_push_dialog") {
       setIsForcePushDialogOpen(true);
       return;
     }
-    if (quickAction.kind === "run_pull") {
+    if (refreshedQuickAction.kind === "run_pull") {
       void (async () => {
         setInlineSuccess(null);
         const result = await pullAction.run();
@@ -1604,17 +1640,17 @@ export default function GitActionsControl({
       })();
       return;
     }
-    if (quickAction.kind === "show_hint") {
+    if (refreshedQuickAction.kind === "show_hint") {
       toastManager.add({
         type: "info",
-        title: quickAction.label,
-        description: quickAction.hint,
+        title: refreshedQuickAction.label,
+        description: refreshedQuickAction.hint,
         data: threadToastData,
       });
       return;
     }
-    if (quickAction.action) {
-      void runGitActionWithToast({ action: quickAction.action });
+    if (refreshedQuickAction.action) {
+      void runGitActionWithToast({ action: refreshedQuickAction.action, statusOverride: status });
     }
   };
 
@@ -1859,7 +1895,12 @@ export default function GitActionsControl({
             <MenuItem
               density={presentation === "menu" ? "touch" : "default"}
 
-              disabled={isGitActionRunning || quickAction.disabled || !!quickActionDisabledReason}
+              disabled={
+                isRefreshingQuickAction ||
+                isGitActionRunning ||
+                quickAction.disabled ||
+                !!quickActionDisabledReason
+              }
               onClick={runQuickAction}
             >
               <GitQuickActionIcon
@@ -1971,7 +2012,12 @@ export default function GitActionsControl({
               size="xs"
               part="primary"
               panel={isPanel}
-              disabled={!canWriteSourceControl || isGitActionRunning || quickAction.disabled}
+              disabled={
+                !canWriteSourceControl ||
+                isRefreshingQuickAction ||
+                isGitActionRunning ||
+                quickAction.disabled
+              }
               onClick={runQuickAction}
             >
               <GitQuickActionIcon
