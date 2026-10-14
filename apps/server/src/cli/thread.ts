@@ -190,7 +190,7 @@ function resolveModelSelection(input: {
   });
 }
 
-const threadCliUuid = Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
+const threadCliUuid = Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4()));
 
 const threadCreateFlags = {
   ...projectLocationFlags,

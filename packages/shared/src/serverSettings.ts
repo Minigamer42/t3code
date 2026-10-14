@@ -116,16 +116,19 @@ export function fallbackTextGenerationModelSelection(
   const defaults = TEXT_GENERATION_FALLBACK_DRIVERS.map(
     (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
   );
-  const configured = options?.includeConfiguredInstances === true
-    ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-        options.configuredInstancesFirst === true || TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
-          ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
-          : [],
-      )
-    : [];
-  const candidates = options?.configuredInstancesFirst === true
-    ? [...configured, ...defaults]
-    : [...defaults, ...configured];
+  const configured =
+    options?.includeConfiguredInstances === true
+      ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
+          options.configuredInstancesFirst === true ||
+          TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
+            ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
+            : [],
+        )
+      : [];
+  const candidates =
+    options?.configuredInstancesFirst === true
+      ? [...configured, ...defaults]
+      : [...defaults, ...configured];
   const match = candidates.find(([instanceId, driver]) => isEnabled(instanceId, driver));
   if (match === undefined) return null;
   const [instanceId, driver] = match;

@@ -6712,7 +6712,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterProtocolError({
+                  new ProviderAdapter.ProviderAdapterProtocolError({
                     driver: CODEX_PROVIDER,
                     detail: "Failed to stop a Codex background command.",
                     cause: normalizeCodexCause(cause),

@@ -64,7 +64,10 @@ import {
   ForgejoPullRequestSchema,
   toForgejoChangeRequest,
 } from "@t3tools/source-control-forgejo/server/forgejoPullRequests";
-import type { SourceControlProvider, SourceControlProviderContext } from "@t3tools/source-control-core/server/SourceControlProvider";
+import type {
+  SourceControlProvider,
+  SourceControlProviderContext,
+} from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -857,14 +860,22 @@ function makeManager(input?: {
       );
     }).pipe(
       Effect.map((baseProvider) => {
-        const provider = input?.sourceControlProviderKind === "unknown"
-          ? { ...baseProvider, kind: SourceControlProviderKind.make("unknown"),
-              listChangeRequests: (request: { readonly cwd: string }) => Effect.fail(new SourceControlProviderFailure({
-                provider: SourceControlProviderKind.make("unknown"), operation: "listChangeRequests", cwd: request.cwd,
-                detail: "No unknown source control provider is registered.",
-              })),
-            }
-          : baseProvider;
+        const provider =
+          input?.sourceControlProviderKind === "unknown"
+            ? {
+                ...baseProvider,
+                kind: SourceControlProviderKind.make("unknown"),
+                listChangeRequests: (request: { readonly cwd: string }) =>
+                  Effect.fail(
+                    new SourceControlProviderFailure({
+                      provider: SourceControlProviderKind.make("unknown"),
+                      operation: "listChangeRequests",
+                      cwd: request.cwd,
+                      detail: "No unknown source control provider is registered.",
+                    }),
+                  ),
+              }
+            : baseProvider;
         return SourceControlProviderRegistry.SourceControlProviderRegistry.of({
           resolveLink: (input) => provider.resolveLink?.(input),
           get: () => Effect.succeed(provider),
@@ -881,7 +892,6 @@ function makeManager(input?: {
           discover: Effect.succeed([]),
         });
       }),
-      ),
     ),
   );
 
@@ -1598,7 +1608,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const { manager } = yield* makeManager({
         resolvedSourceControlContext: {
           provider: {
-            kind: "gitlab",
+            kind: SourceControlProviderKind.make("gitlab"),
             name: "Company GitLab",
             baseUrl: "https://code.example.com",
           },
@@ -2710,7 +2720,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const provider = yield* GitLabSourceControlProvider.make.pipe(
         Effect.provide(
           GitLabCli.layer.pipe(
-            Layer.provide(
+            Layer.provideMerge(
               TestSourceControlHost.layer({
                 process: {
                   run: (input) =>
@@ -4627,6 +4637,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* runGit(repoDir, ["branch", branch]);
       }
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nnamespace-collision\n");
+
+      NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"), { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(repoDir, ".t3code", "vcs.json"),
+        JSON.stringify({
+          branchNaming: { preserveNamespaces: true },
+        }),
+      );
 
       const { manager } = yield* makeManager({
         textGeneration: {

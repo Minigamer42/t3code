@@ -140,11 +140,10 @@ it.effect("starts a prompt using the active provider when the project default is
       },
       providerInstances: {
         ...DEFAULT_SERVER_SETTINGS.providerInstances,
-        codex: { driver: ProviderDriverKind.make("codex"), enabled: false },
-      },
-      providers: {
-        ...DEFAULT_SERVER_SETTINGS.providers,
-        codex: { ...DEFAULT_SERVER_SETTINGS.providers.codex, enabled: false },
+        [ProviderInstanceId.make("codex")]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: false,
+        },
       },
     };
     const output = yield* createThreadFromCliInput(

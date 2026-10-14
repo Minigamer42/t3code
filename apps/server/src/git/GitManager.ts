@@ -2011,6 +2011,7 @@ export const make = Effect.gen(function* () {
       | "isCrossRepository"
     >,
   ) {
+    const provider = yield* sourceControlProvider(cwd);
     const probe = headBranchProbe(provider, headContext.headSelectors, "open");
     for (const headSelector of probe.headSelectors) {
       const pullRequests = yield* provider.listChangeRequests({
@@ -3620,10 +3621,11 @@ export const make = Effect.gen(function* () {
         providerRegistry.getProviders.pipe(
           Effect.map((providers) => ({
             modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
-              resolved,
+              resolved.settings,
               providers,
+              resolved.projectId,
             ),
-            style: resolved.sourceControlWritingStyle,
+            style: resolved.settings.sourceControlWritingStyle,
           })),
         ),
       ),

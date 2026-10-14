@@ -2,6 +2,7 @@ import { assert, describe, it, vi } from "@effect/vitest";
 import {
   type ChatAttachment,
   CommandId,
+  EventId,
   MessageId,
   ProjectId,
   ProviderDriverKind,
@@ -26,8 +27,6 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
-import * as IdAllocator from "./IdAllocator.ts";
-import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
@@ -104,7 +103,6 @@ function makeHarness(
   return {
     layer: Layer.mergeAll(
       layerOrchestrator,
-      IdAllocator.layer,
       layerThreadManagement,
       layerTitleRegeneration,
       layerOutbox,
@@ -253,7 +251,6 @@ describe("ThreadTitleRegenerationService", () => {
           const threads = yield* ThreadManagement.ThreadManagementService;
           const service = yield* ThreadTitleRegeneration.ThreadTitleRegenerationService;
           const sink = yield* EventSink.EventSinkV2;
-          const ids = yield* IdAllocator.IdAllocatorV2;
           const outbox = yield* EffectOutbox.EffectOutboxV2;
           const threadId = yield* createThread({
             command: "create:first-turn",
@@ -302,7 +299,7 @@ describe("ThreadTitleRegenerationService", () => {
           yield* sink.write({
             events: [
               {
-                id: yield* ids.allocate.event({ threadId }),
+                id: EventId.make("event:assistant-first-turn"),
                 type: "message.updated",
                 threadId,
                 occurredAt: now,
@@ -316,7 +313,7 @@ describe("ThreadTitleRegenerationService", () => {
                 },
               },
               {
-                id: yield* ids.allocate.event({ threadId }),
+                id: EventId.make("event:first-turn-completed"),
                 type: "run.updated",
                 threadId,
                 runId: run.id,

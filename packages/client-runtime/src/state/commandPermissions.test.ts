@@ -10,7 +10,6 @@ import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
-  AuthSourceControlWriteScope,
   ThreadId,
   EnvironmentId,
   ScheduledTaskId,

@@ -1374,7 +1374,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                           collapsed={userInputCollapsed}
                           onToggleCollapsed={handleToggleUserInputCollapsed}
                           onStopThread={props.onStopThread}
-                        isInterruptPending={props.isInterruptPending}
+                          isInterruptPending={props.isInterruptPending}
                           cardProgress={userInputCardProgress}
                           cardCoverage={userInputCardCoverage}
                           onInputFocusChange={handleOwnedInputFocusChange}
@@ -1448,7 +1448,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         queueCount={props.selectedThreadQueueCount}
                         activeThreadBusy={props.activeThreadBusy}
                         canStopThread={props.canStopThread}
-                      isInterruptPending={props.isInterruptPending}
+                        isInterruptPending={props.isInterruptPending}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
                         // Follow-ups typed before the server creates the thread wait in

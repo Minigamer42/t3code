@@ -208,19 +208,17 @@ export const layer: Layer.Layer<
           );
           const session = Option.isSome(loaded.session)
             ? loaded.session
-            : yield* sessions
-                .get(input.providerSessionId)
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderTurnControlError({
-                        threadId: input.threadId,
-                        providerTurnId: input.providerTurnId,
-                        operation: "terminate-command",
-                        cause,
-                      }),
-                  ),
-                );
+            : yield* sessions.get(input.providerSessionId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderTurnControlError({
+                      threadId: input.threadId,
+                      providerTurnId: input.providerTurnId,
+                      operation: "terminate-command",
+                      cause,
+                    }),
+                ),
+              );
           if (Option.isNone(session)) return;
           if (session.value.terminateCommand === undefined)
             return yield* new ProviderTurnControlError({

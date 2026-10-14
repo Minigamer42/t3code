@@ -194,11 +194,20 @@ it.effect("caches missing provider executables across availability checks", () =
       },
     });
 
-    assert.strictEqual(yield* registry.isAvailable("gitlab"), false);
-    assert.strictEqual(yield* registry.isAvailable("gitlab"), false);
+    assert.strictEqual(
+      yield* registry.isAvailable(SourceControlProviderKind.make("gitlab")),
+      false,
+    );
+    assert.strictEqual(
+      yield* registry.isAvailable(SourceControlProviderKind.make("gitlab")),
+      false,
+    );
     yield* TestClock.adjust("31 seconds");
-    assert.strictEqual(yield* registry.isAvailable("gitlab"), false);
-    assert.strictEqual(yield* registry.isAvailable("github"), true);
+    assert.strictEqual(
+      yield* registry.isAvailable(SourceControlProviderKind.make("gitlab")),
+      false,
+    );
+    assert.strictEqual(yield* registry.isAvailable(SourceControlProviderKind.make("github")), true);
     assert.deepStrictEqual(glabProbes, [
       "source-control.discovery.probe --version",
       "source-control.discovery.probe --version",

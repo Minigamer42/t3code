@@ -7141,7 +7141,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     if (canInterrupt) handleInterruptPrimaryAction();
                     else if (showResumeAction) onResume();
                     // Compacting first is only sent from the labeled button, so expand to show it.
-                    else if (props.resumeCompactionTokens !== null && !props.keepFullHistory) expandMobileComposer();
+                    else if (props.resumeCompactionTokens !== null && !props.keepFullHistory)
+                      expandMobileComposer();
                     else submitComposer();
                   }}
                 >

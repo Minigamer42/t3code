@@ -75,35 +75,37 @@ function readTemplateBlob(input: {
     );
 }
 
-export const detect = Effect.fn("detect")(
-  function* (cwd: string, treeish: string, executeGit: ExecuteGit) {
-    return yield* Effect.gen(function* () {
-      const result = yield* executeGit({
-        operation: "gitLabChangeRequestTemplate.listTemplates",
-        cwd,
-        args: ["ls-tree", "-r", "-z", "--full-tree", treeish, "--", ...GITLAB_TEMPLATE_PATHS],
-        maxOutputBytes: TREE_LIST_MAX_BYTES,
-        appendTruncationMarker: true,
-      });
-      if (result.stdoutTruncated) {
-        return Option.none();
-      }
-
-      const entriesByPath = new Map(
-        parseTemplateTreeEntries(result.stdout).map((entry) => [entry.path, entry]),
-      );
-      for (const templatePath of GITLAB_TEMPLATE_PATHS) {
-        const entry = entriesByPath.get(templatePath);
-        if (!entry) {
-          continue;
-        }
-        const template = yield* readTemplateBlob({ cwd, executeGit, entry });
-        if (Option.isSome(template)) {
-          return template;
-        }
-      }
-
+export const detect = Effect.fn("detect")(function* (
+  cwd: string,
+  treeish: string,
+  executeGit: ExecuteGit,
+) {
+  return yield* Effect.gen(function* () {
+    const result = yield* executeGit({
+      operation: "gitLabChangeRequestTemplate.listTemplates",
+      cwd,
+      args: ["ls-tree", "-r", "-z", "--full-tree", treeish, "--", ...GITLAB_TEMPLATE_PATHS],
+      maxOutputBytes: TREE_LIST_MAX_BYTES,
+      appendTruncationMarker: true,
+    });
+    if (result.stdoutTruncated) {
       return Option.none();
-    }).pipe(Effect.orElseSucceed(() => Option.none()));
-  },
-);
+    }
+
+    const entriesByPath = new Map(
+      parseTemplateTreeEntries(result.stdout).map((entry) => [entry.path, entry]),
+    );
+    for (const templatePath of GITLAB_TEMPLATE_PATHS) {
+      const entry = entriesByPath.get(templatePath);
+      if (!entry) {
+        continue;
+      }
+      const template = yield* readTemplateBlob({ cwd, executeGit, entry });
+      if (Option.isSome(template)) {
+        return template;
+      }
+    }
+
+    return Option.none();
+  }).pipe(Effect.orElseSucceed(() => Option.none()));
+});

@@ -298,7 +298,7 @@ export const probeSourceControlProviderAvailability = Effect.fn(
   "probeSourceControlProviderAvailability",
 )(function* (input: {
   readonly spec: SourceControlProviderDiscoverySpec;
-  readonly process: VcsProcess.VcsProcess["Service"];
+  readonly process: SourceControlHost.SourceControlHost["Service"]["process"];
   readonly cwd: string;
 }) {
   if (input.spec.type === "api") {

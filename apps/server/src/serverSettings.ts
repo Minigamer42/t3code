@@ -481,7 +481,8 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
   const fallback = fallbackTextGenerationModelSelection(
     settings.providerInstances,
     (instanceId, driver) =>
-      driver !== ACP_REGISTRY_DRIVER && resolveProviderInstanceEnabled(
+      driver !== ACP_REGISTRY_DRIVER &&
+      resolveProviderInstanceEnabled(
         settings.providerInstances[instanceId] ?? { driver, config: {} },
       ),
     {
