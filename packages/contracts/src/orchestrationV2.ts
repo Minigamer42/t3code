@@ -58,6 +58,7 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { GenerationSpeedMeasurement } from "./usage.ts";
 import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -1245,6 +1246,7 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   turnTokenUsage: Schema.optional(TurnTokenUsage),
   /** The model the provider reported running this turn's root agent, which can differ from the requested one. */
   model: Schema.optional(TrimmedNonEmptyString),
+  generationSpeed: Schema.optional(GenerationSpeedMeasurement),
 });
 export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
 

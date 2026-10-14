@@ -1,3 +1,11 @@
+import { useAtomValue } from "@effect/atom-react";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { environmentThreadDetails } from "../../state/threads";
+import {
+  GENERATION_SPEED_DESCRIPTION,
+  runGenerationSpeedLabel,
+} from "@t3tools/client-runtime/generation-speed";
+import type { ThreadId } from "@t3tools/contracts";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MessageId, type RunId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -260,6 +268,12 @@ function AssistantMessageMeta({
           </TooltipPopup>
         </Tooltip>
       )}
+      {!message.streaming && projectedItem?.item.runId ? (
+        <AssistantGenerationSpeed
+          sourceThreadId={projectedItem.sourceThreadId}
+          runId={projectedItem.item.runId}
+        />
+      ) : null}
     </div>
   );
 }
@@ -306,6 +320,31 @@ function AssistantReplyButton({ message, itemId }: { message: ChatMessage; itemI
         <ReplyIcon className="size-3" />
       </TooltipTrigger>
       <TooltipPopup side="top">Reply to this response</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function AssistantGenerationSpeed({
+  sourceThreadId,
+  runId,
+}: {
+  sourceThreadId: ThreadId;
+  runId: RunId;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const label = useAtomValue(
+    environmentThreadDetails.threadAtom(
+      scopeThreadRef(ctx.activeThreadEnvironmentId, sourceThreadId),
+    ),
+    (thread) => runGenerationSpeedLabel(thread?.projection, runId),
+  );
+  if (label === null) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="text-xs text-muted-foreground tabular-nums" />}>
+        {label}
+      </TooltipTrigger>
+      <TooltipPopup>{GENERATION_SPEED_DESCRIPTION}</TooltipPopup>
     </Tooltip>
   );
 }

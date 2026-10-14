@@ -1,3 +1,7 @@
+import {
+  CodexGenerationSpeed,
+  generationSpeedMeasurement,
+} from "../../provider/GenerationSpeed.ts";
 import { pipe } from "effect/Function";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
@@ -1302,6 +1306,7 @@ interface ActiveCodexTurnContext {
   readonly rootNodeId: OrchestrationV2ExecutionNode["id"];
   readonly subagent: CodexSubagentThreadContext | null;
   readonly startedAt: DateTime.Utc;
+  readonly generationSpeed: CodexGenerationSpeed;
   readonly runningCompactionItemIds: Set<string>;
   readonly runningWebSearchItems: Map<string, CodexWebSearchItem>;
   // Modern approval requests omit paths; keep the kinds without retaining patch bodies.
@@ -2468,6 +2473,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             messagePhases: new Map(),
             runningCompactionItemIds: new Set(),
             runningWebSearchItems: new Map(),
+            generationSpeed: new CodexGenerationSpeed(),
           };
           const nativeThreadId = input.turnInput.providerThread.nativeThreadRef?.nativeId;
           const continuation =
@@ -3105,6 +3111,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               messagePhases: new Map(),
               runningCompactionItemIds: new Set(),
               runningWebSearchItems: new Map(),
+              generationSpeed: new CodexGenerationSpeed(),
             };
             beginTurnTokenUsage(activeContext);
             endSessionApprovalsOnModeChange(activeContext);
@@ -4981,15 +4988,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("thread/tokenUsage/updated", (payload) =>
           Effect.gen(function* () {
-            accumulateCodexTurnTokenUsage(
-              usageStateForThread(payload.threadId),
-              payload.turnId,
-              payload.tokenUsage,
-            );
+            const usageState = usageStateForThread(payload.threadId);
+            const previousOutput = usageState.byTurnId.get(payload.turnId)?.outputTokens ?? 0;
+            const previousReasoning = usageState.byTurnId.get(payload.turnId)?.reasoningTokens ?? 0;
+            accumulateCodexTurnTokenUsage(usageState, payload.turnId, payload.tokenUsage);
             const context = yield* awaitActiveTurn(payload.turnId);
             if (context === undefined) {
               return;
             }
+            const accumulated = usageState.byTurnId.get(payload.turnId);
+            context.generationSpeed.completeResponse(
+              (accumulated?.outputTokens ?? 0) - previousOutput,
+              (accumulated?.reasoningTokens ?? 0) - previousReasoning,
+            );
             const now = yield* DateTime.now;
             yield* emitProviderEvent({
               type: "provider_turn.updated",
@@ -5357,6 +5368,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
 
+            if (payload.item.type !== "subAgentActivity" || payload.item.kind === "started") {
+              context.generationSpeed.startItem(payload.item.type, payload.startedAtMs);
+            }
             if (payload.item.type === "contextCompaction") {
               yield* emitCompactionItem(
                 context,
@@ -5531,6 +5545,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
             const { context, settled } = resolved;
+            if (!settled)
+              context.generationSpeed.completeItem(payload.item.type, payload.completedAtMs);
 
             if (payload.item.type === "reasoning") {
               yield* completeReasoning(payload.turnId, payload.item);
@@ -5865,6 +5881,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload,
               );
             }
+            context.generationSpeed.pause(DateTime.toEpochMillis(yield* DateTime.now));
             const allowance = sessionAllowance(payload.threadId, context);
             if (allowance.has("command")) {
               return {
@@ -5936,6 +5953,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload,
               );
             }
+            context.generationSpeed.pause(DateTime.toEpochMillis(yield* DateTime.now));
             const allowance = sessionAllowance(payload.threadId, context);
             if (allowance.has("file-change")) {
               return {
@@ -6008,6 +6026,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload,
               );
             }
+            context.generationSpeed.pause(DateTime.toEpochMillis(yield* DateTime.now));
 
             const requestKind = providerRequestKindFromPermissions(payload.permissions);
             const artifacts = yield* buildApprovalRequestArtifacts({
@@ -6290,6 +6309,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload,
               );
             }
+            context.generationSpeed.pause(DateTime.toEpochMillis(yield* DateTime.now));
 
             const artifacts = yield* buildUserInputRequestArtifacts({
               context,
@@ -6864,6 +6884,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 status: input.status,
                 startedAt: input.context.startedAt,
                 completedAt: input.completedAt,
+                ...(input.context.generationSpeed.summary() === undefined
+                  ? {}
+                  : {
+                      generationSpeed: generationSpeedMeasurement(
+                        input.context.generationSpeed.summary(),
+                        input.context.input.modelSelection,
+                        "codex",
+                      ),
+                    }),
                 turnTokenUsage: completeCodexTurnTokenUsage(
                   usageStateForThread(
                     input.context.providerThread.nativeThreadRef?.nativeId ??
@@ -7358,6 +7387,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             messagePhases: new Map(),
             runningCompactionItemIds: new Set(),
             runningWebSearchItems: new Map(),
+            generationSpeed: new CodexGenerationSpeed(),
           };
           const providerTurn = {
             id: context.providerTurnId,
