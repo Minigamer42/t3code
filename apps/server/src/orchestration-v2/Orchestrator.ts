@@ -2861,6 +2861,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             archivedAt: now,
             titleRegeneration: null,
+            titleRefreshMessageId: null,
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             updatedAt: now,
           };
@@ -3056,6 +3057,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : command.regenerateTitle === false || command.title !== undefined
                 ? { titleRegeneration: null }
                 : {}),
+            ...(command.regenerateTitle !== undefined || command.title !== undefined
+              ? { titleRefreshMessageId: null }
+              : {}),
             updatedAt: now,
           };
         }
@@ -4726,6 +4730,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...projection.thread,
           title: command.titleSeed ?? projection.thread.title,
           titleRegeneration: { requestId: command.commandId, startedAt: now },
+          titleRefreshMessageId: command.messageId,
           updatedAt: now,
         };
         yield* emit(
@@ -11347,6 +11352,43 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : threadDispatch.withLock(parentThreadId, dispatch);
     });
 
+  const refreshTitleAfterFirstTurn = Effect.fn("orchestrationV2.refreshTitleAfterFirstTurn")(
+    function* (run: OrchestrationV2Run) {
+      if (run.status !== "completed") return;
+      const thread = yield* projectionStore.getThread(run.threadId);
+      if (
+        thread.titleRefreshMessageId !== run.userMessageId ||
+        thread.archivedAt !== null ||
+        thread.deletedAt !== null
+      )
+        return;
+
+      const now = yield* DateTime.now;
+      const commandId = CommandId.make(`command:thread-title.after-first-turn:${run.id}`);
+      // Consume the refresh and queue generation together. A slow initial
+      // generation becomes stale, and a manual rename can still cancel this one.
+      yield* eventSink.writeWithEffects({
+        commandId,
+        events: [
+          {
+            id: yield* idAllocator.allocate.event({ threadId: thread.id, commandId }),
+            type: "thread.metadata-updated",
+            threadId: thread.id,
+            providerInstanceId: thread.providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...thread,
+              titleRefreshMessageId: null,
+              titleRegeneration: { requestId: commandId, startedAt: now },
+              updatedAt: now,
+            },
+          },
+        ],
+        effects: [pendingThreadTitleGenerationEffect(commandId, thread.id, { type: "regenerate" })],
+      });
+    },
+  );
+
   const handleTerminalRun = (stored: OrchestrationV2StoredEvent) =>
     Effect.gen(function* () {
       const threadId = stored.event.threadId;
@@ -11357,6 +11399,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // child lock here would invert that order, and the keyed executor's
       // semaphores are neither reentrant nor deadlock-aware.
       if (stored.event.type === "run.updated") {
+        yield* threadDispatch.withLock(threadId, refreshTitleAfterFirstTurn(stored.event.payload));
         yield* threadDispatch.withLock(
           threadId,
           finalizeDelegatedCompletionDelivery(threadId, stored.event.payload.id),
