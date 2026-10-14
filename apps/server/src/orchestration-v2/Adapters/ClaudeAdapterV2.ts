@@ -1,3 +1,8 @@
+import {
+  ClaudeGenerationSpeed,
+  generationSpeedMeasurement,
+} from "../../provider/GenerationSpeed.ts";
+import * as Clock from "effect/Clock";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
   dynamicToolTitle,
@@ -3031,6 +3036,7 @@ interface ActiveClaudeTurnContext {
   // Usage of the results that steers ended, oldest first. The final result's
   // usage covers only its own segment, so the turn bills these as well.
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
+  readonly generationSpeed: ClaudeGenerationSpeed;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
@@ -6031,6 +6037,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     status: input.status,
                     completedAt: input.completedAt,
                   }),
+                  ...(input.context.generationSpeed.summary() === undefined
+                    ? {}
+                    : {
+                        generationSpeed: generationSpeedMeasurement(
+                          input.context.generationSpeed.summary(),
+                          input.context.input.modelSelection,
+                          "claude",
+                        ),
+                      }),
                   turnTokenUsage: normalizeClaudeTurnTokenUsage(
                     input.result,
                     input.context.subagentsByTaskId.size > 0 ||
@@ -6909,6 +6924,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           // Subagent narration belongs to its child thread, never the parent log.
           if (message.type === "stream_event" && !message.parent_tool_use_id) {
             const event = message.event;
+            if (input.replayed !== true) {
+              if (event.type === "message_start") {
+                context.generationSpeed.startResponse(
+                  yield* Clock.currentTimeMillis,
+                  event.message.usage?.output_tokens ?? 0,
+                );
+              } else if (
+                event.type === "content_block_delta" &&
+                (event.delta.type === "text_delta" ||
+                  event.delta.type === "thinking_delta" ||
+                  event.delta.type === "input_json_delta")
+              ) {
+                context.generationSpeed.contentDelta(yield* Clock.currentTimeMillis);
+              } else if (event.type === "message_delta") {
+                context.generationSpeed.completeResponse(event.usage.output_tokens);
+              }
+            }
             const reasoning = context.reasoning;
             if (event.type === "message_start") {
               reasoning.messageId = event.message.id;
@@ -8710,6 +8742,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               rateLimitResetTimes: new Map(),
               latestAssistantRateLimited: false,
               steeredSegmentUsage: [],
+              generationSpeed: new ClaudeGenerationSpeed(),
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
               subagentNodesByTaskId: new Map(),

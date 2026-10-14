@@ -1,5 +1,6 @@
 import { ChatGptUsageSummary } from "./ChatGptUsageSummary";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import { GenerationSpeedStats } from "./GenerationSpeedStats";
 import { EnvironmentId, USAGE_CONTRACT_VERSION, type UsageProviderKind } from "@t3tools/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { cursorKeychainAccessEnvironments } from "@t3tools/client-runtime/state/usage";
@@ -382,6 +383,12 @@ export function UsageRouteScreen() {
                     <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
                     <CostSection merged={merged} />
                     <ModelsSection merged={merged} metric={metric} />
+                    {metric === "tokens" ? (
+                      <GenerationSpeedStats
+                        environments={selectedEnvironments}
+                        timeZone={window.timeZone}
+                      />
+                    ) : null}
                   </UsageUpdating>
                 </>
               )}

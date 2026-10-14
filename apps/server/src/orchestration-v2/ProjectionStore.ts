@@ -639,6 +639,9 @@ export function upsertProviderTurn(
     ...((next.tokenUsage ?? current?.tokenUsage) === undefined
       ? {}
       : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
+    ...((next.generationSpeed ?? current?.generationSpeed) === undefined
+      ? {}
+      : { generationSpeed: next.generationSpeed ?? current?.generationSpeed }),
   });
 }
 
@@ -2278,8 +2281,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             break;
           }
           case "provider-turn.updated": {
+            // Generation speed is recorded at completion. Live context reports
+            // need no extra read to preserve a measurement they cannot yet have.
             const existingRows =
-              event.payload.tokenUsage === undefined
+              event.payload.tokenUsage === undefined ||
+              (event.payload.generationSpeed === undefined && event.payload.status !== "running")
                 ? yield* sql<PayloadRow>`
                     SELECT payload_json
                     FROM orchestration_v2_projection_provider_turns

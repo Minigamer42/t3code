@@ -42,6 +42,38 @@ export const UsageProviderKind = Schema.Literals([
 ]);
 export type UsageProviderKind = typeof UsageProviderKind.Type;
 
+/** Tokens and time from completed model responses, excluding tools and request waits. */
+export const GenerationSpeed = Schema.Struct({
+  outputTokens: NonNegativeInt,
+  durationMs: NonNegativeInt,
+  responses: NonNegativeInt,
+  startedAt: TrimmedNonEmptyString,
+});
+export type GenerationSpeed = typeof GenerationSpeed.Type;
+
+export const GenerationSpeedMeasurement = Schema.Struct({
+  ...GenerationSpeed.fields,
+  provider: UsageProviderKind,
+  model: TrimmedNonEmptyString,
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+  serviceTier: Schema.optional(TrimmedNonEmptyString),
+});
+export type GenerationSpeedMeasurement = typeof GenerationSpeedMeasurement.Type;
+
+export const GenerationSpeedBucket = Schema.Struct({
+  day: TrimmedNonEmptyString,
+  hourStart: Schema.optional(TrimmedNonEmptyString),
+  ...GenerationSpeedMeasurement.fields,
+});
+export type GenerationSpeedBucket = typeof GenerationSpeedBucket.Type;
+
+export const GenerationSpeedHistory = Schema.Struct({
+  sourceId: TrimmedNonEmptyString,
+  trackingStartedAt: TrimmedNonEmptyString,
+  buckets: ForwardCompatibleArray(GenerationSpeedBucket),
+});
+export type GenerationSpeedHistory = typeof GenerationSpeedHistory.Type;
+
 /**
  * A calendar day in the reporting time zone, formatted `YYYY-MM-DD`.
  *
@@ -244,6 +276,7 @@ export const UsageSummary = Schema.Struct({
   pricing: UsagePricing,
   /** Wall-clock cost of the scan, surfaced in diagnostics. */
   scanDurationMs: NonNegativeInt,
+  generationSpeed: Schema.optional(GenerationSpeedHistory),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

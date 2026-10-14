@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./generation-speed": {
+      "types": "./src/generationSpeed.ts",
+      "default": "./src/generationSpeed.ts"
+    },
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
