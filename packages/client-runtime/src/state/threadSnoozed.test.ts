@@ -331,13 +331,16 @@ describe("resolveSnoozePresets", () => {
     );
     expect(presets.find((preset) => preset.id === "three-hours")?.label).toBe("In 3 hours");
     expect(presets.find((preset) => preset.id === "evening")?.label).toBe("This evening");
+    expect(presets.find((preset) => preset.id === "evening")?.snoozedUntil).toBe(
+      localDate(2026, 4, 8, 17).toISOString(),
+    );
     expect(
       new Date(presets.find((preset) => preset.id === "tomorrow")!.snoozedUntil).getHours(),
     ).toBe(9);
   });
 
   it("drops the evening choice once evening is near or past", () => {
-    expect(resolveSnoozePresets(localDate(2026, 4, 8, 17, 30)).map((preset) => preset.id)).toEqual([
+    expect(resolveSnoozePresets(localDate(2026, 4, 8, 16)).map((preset) => preset.id)).toEqual([
       "hour",
       "three-hours",
       "tomorrow",

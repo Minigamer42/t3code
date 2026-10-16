@@ -21,7 +21,7 @@ describe("resolveSnoozePresets", () => {
     const threeHours = presets.find((preset) => preset.id === "three-hours");
     expect(new Date(threeHours!.snoozedUntil).getHours()).toBe(13);
     const evening = presets.find((preset) => preset.id === "evening");
-    expect(new Date(evening!.snoozedUntil).getHours()).toBe(18);
+    expect(new Date(evening!.snoozedUntil).getHours()).toBe(17);
     const tomorrow = presets.find((preset) => preset.id === "tomorrow");
     const tomorrowDate = new Date(tomorrow!.snoozedUntil);
     expect(tomorrowDate.getDate()).toBe(9);
@@ -66,7 +66,7 @@ describe("resolveSnoozePresets", () => {
     const twentyFourHour = resolveSnoozePresets(localDate(2026, 4, 8, 10), "24-hour");
 
     expect(twelveHour.find((preset) => preset.id === "evening")!.whenLabel).toMatch(/PM/i);
-    expect(twentyFourHour.find((preset) => preset.id === "evening")!.whenLabel).toBe("18:00");
+    expect(twentyFourHour.find((preset) => preset.id === "evening")!.whenLabel).toBe("17:00");
   });
 });
 

@@ -64,8 +64,8 @@ const linkedPullRequest = {
 
 describe("resolveThreadListV2SnoozeMenuSelection", () => {
   it("accepts a displayed evening preset while its wake time is still future", () => {
-    const menuOpenedAt = new Date(2026, 4, 8, 16, 59, 30);
-    const selectedAt = new Date(2026, 4, 8, 17, 0, 30);
+    const menuOpenedAt = new Date(2026, 4, 8, 15, 59, 30);
+    const selectedAt = new Date(2026, 4, 8, 16, 0, 30);
     const displayedPresets = resolveSnoozePresets(menuOpenedAt);
 
     const selection = resolveThreadListV2SnoozeMenuSelection({
@@ -81,13 +81,13 @@ describe("resolveThreadListV2SnoozeMenuSelection", () => {
   });
 
   it("expires a displayed preset once its wake time has passed", () => {
-    const displayedPresets = resolveSnoozePresets(new Date(2026, 4, 8, 16, 59, 30));
+    const displayedPresets = resolveSnoozePresets(new Date(2026, 4, 8, 15, 59, 30));
 
     expect(
       resolveThreadListV2SnoozeMenuSelection({
         event: "snooze:evening",
         displayedPresets,
-        now: new Date(2026, 4, 8, 18, 0, 1),
+        now: new Date(2026, 4, 8, 17, 0, 1),
       }),
     ).toEqual({ _tag: "expired" });
   });
