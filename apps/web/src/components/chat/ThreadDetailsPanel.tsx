@@ -161,7 +161,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 {props.activeProjectName ? (
                   <GitActionsControl
                     displayMode="panel"
-                    compact={density !== "full"}
                     gitCwd={props.gitCwd}
                     activeThreadRef={activeThreadRef}
                     {...(props.draftId ? { draftId: props.draftId } : {})}
