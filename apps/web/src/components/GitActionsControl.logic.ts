@@ -12,11 +12,12 @@ export type GitActionIconName = "branch" | "commit" | "push" | "pr";
 export type GitDialogAction = "create_branch" | "commit" | "push" | "create_pr";
 
 export interface GitActionMenuItem {
-  id: "branch" | "commit" | "push" | "pr";
+  id: "branch" | "commit" | "commit_dialog" | "push" | "pr";
   label: string;
   disabled: boolean;
   icon: GitActionIconName;
-  kind: "open_dialog";
+  kind: "open_dialog" | "run_action";
+  action?: GitStackedAction;
   dialogAction?: GitDialogAction;
 }
 
@@ -210,14 +211,24 @@ export function buildMenuItems(
     !isBehind &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
 
-  const commitItem: GitActionMenuItem = {
-    id: "commit",
-    label: "Commit",
-    disabled: !canCommit,
-    icon: "commit",
-    kind: "open_dialog",
-    dialogAction: "commit",
-  };
+  const commitItems: GitActionMenuItem[] = [
+    {
+      id: "commit",
+      label: "Commit",
+      disabled: !canCommit || !hasBranch || gitStatus.isDefaultRef,
+      icon: "commit",
+      kind: "run_action",
+      action: "commit",
+    },
+    {
+      id: "commit_dialog",
+      label: "Commit dialog",
+      disabled: !canCommit,
+      icon: "commit",
+      kind: "open_dialog",
+      dialogAction: "commit",
+    },
+  ];
 
   if (!hasBranch) {
     return [
@@ -229,7 +240,7 @@ export function buildMenuItems(
         kind: "open_dialog",
         dialogAction: "create_branch",
       },
-      commitItem,
+      ...commitItems,
       ...(hasPrimaryRemote
         ? [
             {
@@ -254,7 +265,7 @@ export function buildMenuItems(
   }
 
   if (!hasPrimaryRemote) {
-    return [commitItem];
+    return commitItems;
   }
 
   const pushItem: GitActionMenuItem = {
@@ -269,11 +280,11 @@ export function buildMenuItems(
   // An open change request is surfaced by the standalone attribution row, so
   // the menu offers no change-request entry at all while one is open.
   if (hasOpenPr) {
-    return [commitItem, pushItem];
+    return [...commitItems, pushItem];
   }
 
   return [
-    commitItem,
+    ...commitItems,
     pushItem,
     {
       id: "pr",

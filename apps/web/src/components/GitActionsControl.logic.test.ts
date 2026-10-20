@@ -84,6 +84,53 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   };
 }
 
+describe("commit menu actions", () => {
+  it("offers direct commit and the dialog on feature refs, including local-only repositories", () => {
+    for (const hasPrimaryRemote of [true, false]) {
+      const items = buildMenuItems(
+        status({ hasWorkingTreeChanges: true, hasPrimaryRemote }),
+        false,
+        hasPrimaryRemote,
+      );
+      assert.deepInclude(
+        items.find((item) => item.id === "commit"),
+        {
+          disabled: false,
+          kind: "run_action",
+          action: "commit",
+        },
+      );
+      assert.deepInclude(
+        items.find((item) => item.id === "commit_dialog"),
+        {
+          disabled: false,
+          kind: "open_dialog",
+          dialogAction: "commit",
+        },
+      );
+    }
+  });
+
+  it("requires the dialog on default refs and detached HEADs", () => {
+    for (const overrides of [{ refName: "main", isDefaultRef: true }, { refName: null }]) {
+      const items = buildMenuItems(status({ hasWorkingTreeChanges: true, ...overrides }), false);
+      assert.isTrue(items.find((item) => item.id === "commit")?.disabled);
+      assert.isFalse(items.find((item) => item.id === "commit_dialog")?.disabled);
+    }
+  });
+
+  it("disables both actions while busy or when the worktree is clean", () => {
+    for (const { hasWorkingTreeChanges, isBusy } of [
+      { hasWorkingTreeChanges: true, isBusy: true },
+      { hasWorkingTreeChanges: false, isBusy: false },
+    ]) {
+      const items = buildMenuItems(status({ hasWorkingTreeChanges }), isBusy);
+      assert.isTrue(items.find((item) => item.id === "commit")?.disabled);
+      assert.isTrue(items.find((item) => item.id === "commit_dialog")?.disabled);
+    }
+  });
+});
+
 describe("git action progress presentation", () => {
   it("keeps the phase on the first row and hook output on the second", () => {
     assert.deepEqual(
@@ -217,6 +264,14 @@ describe("when: ref is clean and has an open PR", () => {
         label: "Commit",
         disabled: true,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: true,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -249,6 +304,14 @@ describe("when: actions are busy", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: true,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: true,
         icon: "commit",
         kind: "open_dialog",
@@ -331,6 +394,14 @@ describe("when: ref is clean, ahead, and has an open PR", () => {
         label: "Commit",
         disabled: true,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: true,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -362,6 +433,14 @@ describe("when: ref is clean, ahead, and has no open PR", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: true,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: true,
         icon: "commit",
         kind: "open_dialog",
@@ -406,10 +485,13 @@ describe("when: source control provider uses merge requests", () => {
       action: "create_pr",
       label: "Push & create MR",
     });
-    assert.deepInclude(items[2], {
-      id: "pr",
-      label: "Create MR",
-    });
+    assert.deepInclude(
+      items.find((item) => item.id === "pr"),
+      {
+        id: "pr",
+        label: "Create MR",
+      },
+    );
   });
 });
 
@@ -456,6 +538,14 @@ describe("when: ref is clean, up to date, and has no open PR", () => {
         label: "Commit",
         disabled: true,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: true,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -491,6 +581,14 @@ describe("when: ref is behind upstream", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: true,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: true,
         icon: "commit",
         kind: "open_dialog",
@@ -607,6 +705,14 @@ describe("when: working tree has local changes", () => {
         label: "Commit",
         disabled: false,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: false,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -647,6 +753,14 @@ describe("when: working tree has local changes", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: false,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: false,
         icon: "commit",
         kind: "open_dialog",
@@ -722,6 +836,14 @@ describe("when: working tree has local changes and ref is behind upstream", () =
         label: "Commit",
         disabled: false,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: false,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -772,6 +894,14 @@ describe("when: HEAD is detached and there are no local changes", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: true,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: true,
         icon: "commit",
         kind: "open_dialog",
@@ -882,6 +1012,14 @@ describe("when: ref has no upstream configured", () => {
         label: "Commit",
         disabled: true,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: true,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -947,6 +1085,14 @@ describe("when: ref has no upstream configured", () => {
         label: "Commit",
         disabled: true,
         icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
+        disabled: true,
+        icon: "commit",
         kind: "open_dialog",
         dialogAction: "commit",
       },
@@ -979,6 +1125,14 @@ describe("when: ref has no upstream configured", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: true,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: true,
         icon: "commit",
         kind: "open_dialog",
@@ -1039,6 +1193,14 @@ describe("when: ref has no upstream configured", () => {
       {
         id: "commit",
         label: "Commit",
+        disabled: true,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit",
+      },
+      {
+        id: "commit_dialog",
+        label: "Commit dialog",
         disabled: true,
         icon: "commit",
         kind: "open_dialog",

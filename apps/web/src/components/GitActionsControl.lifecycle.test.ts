@@ -4,6 +4,17 @@ import { AsyncResult } from "effect/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
+  gitStatus: {
+    sourceControlProviders: [],
+    isRepo: true,
+    refName: "main",
+    isDefaultRef: false,
+    hasPrimaryRemote: true,
+    hasWorkingTreeChanges: true,
+    workingTree: {
+      files: [{ path: "file.ts", status: "modified", insertions: 1, deletions: 0 }],
+    },
+  },
   actions: [] as {
     scope: { environmentId: string | null; cwd: string | null };
     input: { threadId?: string; action: string };
@@ -30,7 +41,10 @@ vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: (command: unknown) 
 vi.mock("~/state/server", () => ({ serverEnvironment: { configValueAtom: () => null } }));
 vi.mock("~/state/sourceControl", () => ({ sourceControlEnvironment: { discovery: () => null } }));
 vi.mock("~/state/vcs", () => ({
-  vcsEnvironment: { status: () => null },
+  vcsEnvironment: {
+    status: () => null,
+    refreshStatus: async () => AsyncResult.success(state.gitStatus),
+  },
   vcsActionManager: { stateAtom: () => "vcs-state" },
 }));
 vi.mock("~/state/threads", () => ({
@@ -38,17 +52,7 @@ vi.mock("~/state/threads", () => ({
 }));
 vi.mock("~/state/query", () => ({
   useEnvironmentQuery: () => ({
-    data: {
-      sourceControlProviders: [],
-      isRepo: true,
-      refName: "main",
-      isDefaultRef: false,
-      hasPrimaryRemote: true,
-      hasWorkingTreeChanges: true,
-      workingTree: {
-        files: [{ path: "file.ts", status: "modified", insertions: 1, deletions: 0 }],
-      },
-    },
+    data: state.gitStatus,
     error: null,
   }),
 }));
@@ -159,7 +163,8 @@ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 const renderers: ReturnType<typeof create>[] = [];
 // ThreadDetailsPanel keeps this component mounted behind React.memo when threads change.
 const MemoGitActionsControl = memo(GitActionsControl);
-const props = (thread: string, cwd: string) => ({
+const props = (thread: string, cwd: string, displayMode: "toolbar" | "panel" = "toolbar") => ({
+  displayMode,
   gitCwd: cwd,
   activeThreadRef: {
     environmentId: EnvironmentId.make("environment"),
@@ -167,20 +172,29 @@ const props = (thread: string, cwd: string) => ({
   },
 });
 
-async function renderActions(thread: string, cwd: string) {
+async function renderActions(
+  thread: string,
+  cwd: string,
+  displayMode: "toolbar" | "panel" = "toolbar",
+) {
   let renderer!: ReturnType<typeof create>;
   await act(async () => {
-    renderer = create(createElement(MemoGitActionsControl, props(thread, cwd)));
+    renderer = create(createElement(MemoGitActionsControl, props(thread, cwd, displayMode)));
   });
   renderers.push(renderer);
   return renderer;
 }
 
-async function clickQuickAction(renderer: ReturnType<typeof create>) {
+async function clickCommitAction(renderer: ReturnType<typeof create>) {
   const button = renderer.root
     .findAllByType("button")
-    .find((button) => button.props.onClick && !button.props.disabled);
+    .find(
+      (button) =>
+        button.findAll((node) => node.type === "span" && node.children.includes("Commit")).length >
+        0,
+    );
   expect(button).toBeDefined();
+  expect(button!.props.disabled).toBe(false);
   await act(async () => {
     button!.props.onClick({});
   });
@@ -202,7 +216,7 @@ afterEach(async () => {
 describe("Git action targets across thread navigation", () => {
   it("runs a retained PR toast in the thread that produced it", async () => {
     const renderer = await renderActions("first", "/first");
-    await clickQuickAction(renderer);
+    await clickCommitAction(renderer);
     const toast = state.toasts.find((toast) => toast.actionProps)!;
     expect(toast).toBeDefined();
     await act(async () => {
@@ -217,18 +231,21 @@ describe("Git action targets across thread navigation", () => {
     });
   });
 
-  it("runs the memoized panel button in the current thread after navigation", async () => {
-    const renderer = await renderActions("first", "/first");
+  it("runs the memoized panel commit in the current thread after navigation", async () => {
+    const renderer = await renderActions("first", "/first", "panel");
     for (const [thread, cwd] of [
       ["first", "/first"],
       ["second", "/second"],
       ["first", "/first"],
     ] as const) {
       await act(async () => {
-        renderer.update(createElement(MemoGitActionsControl, props(thread, cwd)));
+        renderer.update(createElement(MemoGitActionsControl, props(thread, cwd, "panel")));
       });
-      await clickQuickAction(renderer);
-      expect(state.actions.at(-1)).toMatchObject({ scope: { cwd }, input: { threadId: thread } });
+      await clickCommitAction(renderer);
+      expect(state.actions.at(-1)).toMatchObject({
+        scope: { cwd },
+        input: { threadId: thread, action: "commit" },
+      });
     }
   });
 });
