@@ -300,6 +300,28 @@ function createBareRemote(): Effect.Effect<
   });
 }
 
+const createStackedBranches = Effect.fnUntraced(function* () {
+  const cwd = yield* makeTempDir("t3code-stacked-base-");
+  yield* initRepo(cwd);
+  const remote = yield* createBareRemote();
+  yield* runGit(cwd, ["remote", "add", "origin", remote]);
+  yield* runGit(cwd, ["push", "-u", "origin", "main"]);
+  for (const branch of ["stack/first", "stack/second", "stack/feature"]) {
+    yield* runGit(cwd, ["checkout", "-b", branch]);
+    const name = branch.slice("stack/".length);
+    NodeFS.writeFileSync(NodePath.join(cwd, `${name}.txt`), `${name}\n`);
+    yield* runGit(cwd, ["add", `${name}.txt`]);
+    yield* runGit(cwd, ["commit", "-m", `Add ${name}`]);
+    if (branch === "stack/feature") {
+      NodeFS.writeFileSync(NodePath.join(cwd, "feature-test.txt"), "test\n");
+      yield* runGit(cwd, ["add", "feature-test.txt"]);
+      yield* runGit(cwd, ["commit", "-m", "Test feature"]);
+    }
+    yield* runGit(cwd, ["push", "-u", "origin", branch]);
+  }
+  return cwd;
+});
+
 function configureRemote(
   cwd: string,
   remoteName: string,
@@ -6063,6 +6085,264 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             call.includes("pr create --base trunk --head feature/legacy-base"),
           ),
         ).toBe(true);
+      }),
+  );
+
+  it.effect.each([
+    { name: "nearest open review", second: "OPEN", first: "OPEN", base: "stack/second" },
+    { name: "older open review", second: "CLOSED", first: "OPEN", base: "stack/first" },
+    { name: "merged reviews", second: "MERGED", first: "MERGED", base: "main" },
+    { name: "no reviews", second: null, first: null, base: "main" },
+    {
+      name: "explicit target",
+      second: "OPEN",
+      first: "OPEN",
+      base: "stack/second",
+      explicit: true,
+    },
+  ])("scopes the description for $name while preserving the MR target", (scenario) =>
+    Effect.gen(function* () {
+      const cwd = yield* createStackedBranches();
+      if (scenario.explicit) {
+        yield* runGit(cwd, ["config", "branch.stack/feature.gh-merge-base", "main"]);
+      }
+      const prListByHeadSelector: Record<string, string> = {};
+      for (const [head, state] of [
+        ["stack/first", scenario.first],
+        ["stack/second", scenario.second],
+      ]) {
+        if (!head || !state) continue;
+        prListByHeadSelector[head] = JSON.stringify([
+          {
+            number: head === "stack/first" ? 1 : 2,
+            title: head,
+            url: `https://github.com/example/repo/pull/${head === "stack/first" ? 1 : 2}`,
+            headRefName: head,
+            baseRefName: "main",
+            state,
+            isCrossRepository: false,
+          },
+        ]);
+      }
+      let generated: Parameters<FakeGitTextGeneration["generatePrContent"]>[0] | undefined;
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: { prListByHeadSelector },
+        textGeneration: {
+          generatePrContent: (input) => {
+            generated = input;
+            return Effect.succeed({ title: "Feature", body: "Feature only" });
+          },
+        },
+      });
+
+      const result = yield* runStackedAction(manager, { cwd, action: "create_pr" });
+
+      expect(result.pr).toMatchObject({ status: "created", baseBranch: "main" });
+      expect(generated?.baseBranch).toBe("main");
+      expect(generated?.commitSummary).toContain("Add feature");
+      expect(generated?.commitSummary).toContain("Test feature");
+      expect(generated?.diffPatch).toContain("+feature");
+      if (scenario.base === "stack/second") {
+        expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
+        expect(generated?.diffSummary).not.toContain("first.txt");
+        expect(generated?.diffPatch).not.toContain("second.txt");
+        expect(generated?.policy?.changeRequestInstructions).toContain(
+          "This change request targets main. Describe only the supplied commits and diff above stack/second",
+        );
+        expect(ghCalls.some((call) => call.includes("--head stack/first"))).toBe(false);
+      }
+      expect(
+        ghCalls.some((call) => call.startsWith("pr create --base main --head stack/feature")),
+      ).toBe(true);
+    }),
+  );
+
+  it.effect("creates a GitLab stacked MR from only the two commits above its parent", () =>
+    Effect.gen(function* () {
+      const cwd = yield* createStackedBranches();
+      const git = yield* GitVcsDriver.GitVcsDriver;
+      const calls: SourceControlHost.SourceControlProcessInput[] = [];
+      let created = false;
+      const provider = yield* GitLabSourceControlProvider.make.pipe(
+        Effect.provide(
+          GitLabCli.layer.pipe(
+            Layer.provideMerge(
+              TestSourceControlHost.layer({
+                git: { execute: git.execute },
+                process: {
+                  run: (input) =>
+                    Effect.sync(() => {
+                      calls.push(input);
+                      if (input.args.includes("POST")) {
+                        created = true;
+                        return fakeGhOutput("{}");
+                      }
+                      if (input.args.includes("projects/:fullpath/merge_requests")) {
+                        const parent = input.args.includes("source_branch=stack/second");
+                        const feature = input.args.includes("source_branch=stack/feature");
+                        return fakeGhOutput(
+                          encodeCliJson(
+                            parent || (feature && created)
+                              ? [
+                                  {
+                                    iid: parent ? 2 : 3,
+                                    title: parent ? "Second layer" : "Feature",
+                                    web_url: `https://gitlab.example/group/repo/-/merge_requests/${parent ? 2 : 3}`,
+                                    source_branch: parent ? "stack/second" : "stack/feature",
+                                    target_branch: "main",
+                                    state: "opened",
+                                    source_project_id: 1,
+                                    target_project_id: 1,
+                                  },
+                                ]
+                              : [],
+                          ),
+                        );
+                      }
+                      if (input.args.includes("projects/:fullpath")) {
+                        return fakeGhOutput(
+                          encodeCliJson({
+                            default_branch: "main",
+                            remove_source_branch_after_merge: false,
+                          }),
+                        );
+                      }
+                      throw new Error(`Unexpected GitLab call: ${input.args.join(" ")}`);
+                    }),
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+      let generated: Parameters<FakeGitTextGeneration["generatePrContent"]>[0] | undefined;
+      const { manager } = yield* makeManager({
+        sourceControlProvider: provider,
+        textGeneration: {
+          generatePrContent: (input) => {
+            generated = input;
+            return Effect.succeed({ title: "Feature", body: "Feature only" });
+          },
+        },
+      });
+
+      const result = yield* runStackedAction(manager, { cwd, action: "create_pr" });
+
+      expect(result.pr).toMatchObject({ status: "created", baseBranch: "main", number: 3 });
+      expect(generated?.baseBranch).toBe("main");
+      expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
+      expect(generated?.diffPatch).toContain("+feature");
+      expect(generated?.diffPatch).not.toContain("second.txt");
+      expect(calls.find((call) => call.args.includes("POST"))?.args).toContain(
+        "target_branch=main",
+      );
+    }),
+  );
+
+  it.effect(
+    "requires an explicit description base when equally close ancestors have open reviews",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* createStackedBranches();
+        yield* runGit(cwd, ["push", "origin", "stack/second:stack/alias"]);
+        const prListByHeadSelector: Record<string, string> = {};
+        for (const [index, head] of ["stack/second", "stack/alias"].entries()) {
+          prListByHeadSelector[head] = JSON.stringify([
+            {
+              number: index + 1,
+              title: head,
+              url: `https://github.com/example/repo/pull/${index + 1}`,
+              headRefName: head,
+              baseRefName: "main",
+            },
+          ]);
+        }
+        const { manager, ghCalls } = yield* makeManager({ ghScenario: { prListByHeadSelector } });
+
+        const error = yield* runStackedAction(manager, { cwd, action: "create_pr" }).pipe(
+          Effect.flip,
+        );
+
+        expect(error).toMatchObject({ operation: "resolveDescriptionBaseBranch" });
+        expect(ghCalls.some((call) => call.startsWith("pr create "))).toBe(false);
+      }),
+  );
+
+  it.effect.each(["stack/first", "missing", "unrelated"])(
+    "validates the explicit description base %s without changing the target",
+    (descriptionBase) =>
+      Effect.gen(function* () {
+        const cwd = yield* createStackedBranches();
+        yield* runGit(cwd, ["checkout", "-b", "unrelated", "main"]);
+        yield* runGit(cwd, ["commit", "--allow-empty", "-m", "Unrelated"]);
+        yield* runGit(cwd, ["checkout", "stack/feature"]);
+        yield* runGit(cwd, ["config", "branch.stack/feature.t3-description-base", descriptionBase]);
+        let generated: Parameters<FakeGitTextGeneration["generatePrContent"]>[0] | undefined;
+        const { manager, ghCalls } = yield* makeManager({
+          textGeneration: {
+            generatePrContent: (input) => {
+              generated = input;
+              return Effect.succeed({ title: "Feature", body: "Feature only" });
+            },
+          },
+        });
+
+        const result = yield* runStackedAction(manager, { cwd, action: "create_pr" }).pipe(
+          Effect.result,
+        );
+
+        if (descriptionBase === "stack/first") {
+          expect(Result.isSuccess(result)).toBe(true);
+          if (Result.isSuccess(result)) {
+            expect(result.success.pr).toMatchObject({ baseBranch: "main" });
+          }
+          expect(generated?.commitSummary).toContain("Add second");
+          expect(generated?.commitSummary).not.toContain("Add first");
+        } else {
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure).toMatchObject({ operation: "resolveDescriptionBaseBranch" });
+          }
+          expect(generated).toBeUndefined();
+          expect(ghCalls.some((call) => call.startsWith("pr create "))).toBe(false);
+        }
+      }),
+  );
+
+  it.effect(
+    "ignores unrelated branches, merged ancestors, and fork reviews when detecting a stack",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* createStackedBranches();
+        yield* runGit(cwd, ["push", "origin", "stack/first:main"]);
+        yield* runGit(cwd, ["checkout", "-b", "unrelated", "main"]);
+        yield* runGit(cwd, ["commit", "--allow-empty", "-m", "Unrelated change"]);
+        yield* runGit(cwd, ["push", "origin", "unrelated"]);
+        yield* runGit(cwd, ["checkout", "stack/feature"]);
+        const { manager, ghCalls } = yield* makeManager({
+          ghScenario: {
+            prListByHeadSelector: {
+              "stack/second": JSON.stringify([
+                {
+                  number: 2,
+                  title: "Fork's second branch",
+                  url: "https://github.com/example/repo/pull/2",
+                  headRefName: "stack/second",
+                  baseRefName: "main",
+                  isCrossRepository: true,
+                  headRepositoryNameWithOwner: "another/fork",
+                  headRepositoryOwnerLogin: "another",
+                },
+              ]),
+            },
+          },
+        });
+
+        const result = yield* runStackedAction(manager, { cwd, action: "create_pr" });
+
+        expect(result.pr).toMatchObject({ status: "created", baseBranch: "main" });
+        expect(ghCalls.some((call) => call.includes("--head unrelated"))).toBe(false);
+        expect(ghCalls.some((call) => call.includes("--head stack/first"))).toBe(false);
       }),
   );
 
