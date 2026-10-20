@@ -1497,8 +1497,12 @@ export default function GitActionsControl({
     }
   };
 
-  const openDialogForMenuItem = (item: GitActionMenuItem) => {
+  const runMenuItem = (item: GitActionMenuItem) => {
     if (item.disabled) return;
+    if (item.kind === "run_action" && item.action) {
+      void runGitActionWithToast({ action: item.action });
+      return;
+    }
     if (item.dialogAction === "create_branch") {
       void runGitActionWithToast({
         action: "commit",
@@ -1652,7 +1656,7 @@ export default function GitActionsControl({
             key={`${item.id}-${item.label}`}
             disabled={!canWriteSourceControl || item.disabled}
             onClick={() => {
-              openDialogForMenuItem(item);
+              runMenuItem(item);
             }}
           >
             <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
