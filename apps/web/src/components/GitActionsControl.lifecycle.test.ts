@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
     scope: { environmentId: string | null; cwd: string | null };
     input: { threadId?: string; action: string };
   }[],
+  refreshes: [] as { environmentId: string; input: { cwd: string } }[],
   toasts: [] as { type?: string; description?: string; actionProps?: { onClick: () => void } }[],
   scopes: new Set<string>(),
   primaryScopes: new Set<string>(),
@@ -29,7 +30,8 @@ vi.mock("@effect/atom-react", () => ({
 }));
 vi.mock("~/state/entities", () => ({
   useThreadProjection: () => null,
-  useThreadShell: (ref: { threadId: string }) => ({ branch: "main", id: ref.threadId }),
+  useThreadShell: (ref: { threadId: string } | null) =>
+    ref ? { branch: "main", id: ref.threadId } : null,
 }));
 vi.mock("~/state/session", () => ({
   useEnvironmentScope: (environmentId: unknown, scope: string) =>
@@ -43,7 +45,10 @@ vi.mock("~/state/sourceControl", () => ({ sourceControlEnvironment: { discovery:
 vi.mock("~/state/vcs", () => ({
   vcsEnvironment: {
     status: () => null,
-    refreshStatus: async () => AsyncResult.success(state.gitStatus),
+    refreshStatus: async (target: { environmentId: string; input: { cwd: string } }) => {
+      state.refreshes.push(target);
+      return AsyncResult.success(state.gitStatus);
+    },
   },
   vcsActionManager: { stateAtom: () => "vcs-state" },
 }));
@@ -204,6 +209,7 @@ beforeEach(() => {
   state.scopes = new Set([AuthSourceControlWriteScope]);
   state.primaryScopes = new Set([AuthSourceControlWriteScope]);
   state.actions = [];
+  state.refreshes = [];
   state.toasts = [];
 });
 
@@ -211,9 +217,77 @@ afterEach(async () => {
   await act(async () => {
     for (const renderer of renderers.splice(0)) renderer.unmount();
   });
+  vi.useRealTimers();
 });
 
 describe("Git action targets across thread navigation", () => {
+  it("refreshes status on thread switches even when the checkout stays the same", async () => {
+    vi.useFakeTimers();
+    const renderer = await renderActions("first", "/repo", "panel");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(state.refreshes).toEqual([{ environmentId: "environment", input: { cwd: "/repo" } }]);
+
+    await act(async () => {
+      renderer.update(createElement(MemoGitActionsControl, props("first", "/repo", "panel")));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(state.refreshes).toHaveLength(1);
+
+    await act(async () => {
+      renderer.update(createElement(MemoGitActionsControl, props("second", "/repo", "panel")));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(state.refreshes).toEqual([
+      { environmentId: "environment", input: { cwd: "/repo" } },
+      { environmentId: "environment", input: { cwd: "/repo" } },
+    ]);
+  });
+
+  it("cancels pending refreshes when switching checkouts or leaving the thread", async () => {
+    vi.useFakeTimers();
+    const renderer = await renderActions("first", "/first", "panel");
+    await act(async () => {
+      renderer.update(
+        createElement(MemoGitActionsControl, {
+          ...props("second", "/second", "panel"),
+          activeThreadRef: {
+            environmentId: EnvironmentId.make("remote-environment"),
+            threadId: ThreadId.make("second"),
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(state.refreshes).toEqual([
+      { environmentId: "remote-environment", input: { cwd: "/second" } },
+    ]);
+
+    await act(async () => {
+      renderer.update(createElement(MemoGitActionsControl, props("third", "/third", "panel")));
+    });
+    await act(async () => {
+      renderer.update(
+        createElement(MemoGitActionsControl, {
+          ...props("third", "/third", "panel"),
+          gitCwd: null,
+          activeThreadRef: null,
+        }),
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(state.refreshes).toHaveLength(1);
+  });
+
   it("runs a retained PR toast in the thread that produced it", async () => {
     const renderer = await renderActions("first", "/first");
     await clickCommitAction(renderer);
