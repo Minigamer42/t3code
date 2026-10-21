@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import { VcsRepositoryDetectionError } from "@t3tools/contracts";
+import { ProjectId, VcsRepositoryDetectionError } from "@t3tools/contracts";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as FileSystem from "effect/FileSystem";
@@ -13,6 +13,7 @@ import * as ServerConfig from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitManager from "./GitManager.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
+import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
@@ -20,6 +21,7 @@ function layer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
 }) {
   return GitWorkflowService.layer.pipe(
+    Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
     Layer.provide(
       Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
         detect: input.detect,
@@ -31,6 +33,57 @@ function layer(input: {
 }
 
 describe("GitWorkflowService", () => {
+  it.effect("regenerates and saves only the existing change request description", () => {
+    const pullRequest = {
+      number: 42,
+      title: "Existing title",
+      url: "https://gitlab.com/group/subgroup/repo/-/merge_requests/42",
+      baseBranch: "release",
+      headBranch: "feature",
+      state: "open" as const,
+    };
+    const update = vi.fn(() => Effect.void);
+    const invalidate = vi.fn(() => Effect.void);
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const result = yield* workflow.regeneratePullRequestDescription({
+        cwd: "/repo",
+        projectId: ProjectId.make("project"),
+      });
+      expect(result).toEqual({ pullRequest });
+      expect(update).toHaveBeenCalledExactlyOnceWith({
+        projectId: "project",
+        host: "gitlab.com",
+        repository: "group/subgroup/repo",
+        number: 42,
+        body: "Fresh description from branch changes",
+      });
+      expect(invalidate).toHaveBeenCalledExactlyOnceWith("/repo");
+    }).pipe(
+      Effect.provide(
+        GitWorkflowService.layer.pipe(
+          Layer.provide(
+            Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+              resolve: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
+            }),
+          ),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            Layer.mock(GitManager.GitManager)({
+              generatePullRequestDescription: () =>
+                Effect.succeed({
+                  pullRequest,
+                  body: "Fresh description from branch changes",
+                }),
+              invalidateRemoteStatus: invalidate,
+            }),
+          ),
+          Layer.provide(Layer.mock(PullRequestService.PullRequestService)({ update })),
+        ),
+      ),
+    );
+  });
+
   it.effect("returns no worktrees when no Git repository is detected", () =>
     Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;
@@ -132,6 +185,7 @@ describe("GitWorkflowService", () => {
     const status = vi.fn();
 
     const layerTest = GitWorkflowService.layer.pipe(
+      Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
       Layer.provide(
         Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
           detect: () => Effect.succeed(null),
@@ -259,6 +313,7 @@ describe("GitWorkflowService", () => {
       Effect.scoped,
       Effect.provide(
         GitWorkflowService.layer.pipe(
+          Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
           Layer.provide(
             Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
               resolve: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),

@@ -105,6 +105,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
 import { threadEnvironment } from "~/state/threads";
+import { gitEnvironment } from "~/state/git";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "~/state/vcs";
 import { randomUUID } from "~/lib/utils";
@@ -1057,6 +1058,14 @@ export default function GitActionsControl({
   const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [isRewriteCommitMessagesDialogOpen, setIsRewriteCommitMessagesDialogOpen] = useState(false);
+  const [isRegeneratingDescription, setIsRegeneratingDescription] = useState(false);
+  const regenerateDescription = useAtomCommand(gitEnvironment.regeneratePullRequestDescription, {
+    reportFailure: false,
+  });
+  const canRegenerateDescription = useAtomValue(
+    gitEnvironment.regeneratePullRequestDescription.permissionAtom(activeEnvironmentId),
+  );
+  const projectId = activeServerThread?.projectId ?? activeDraftThread?.projectId ?? null;
   const [inlineSuccess, setInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
   const [isForcePushDialogOpen, setIsForcePushDialogOpen] = useState(false);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
@@ -1199,10 +1208,57 @@ export default function GitActionsControl({
   const initAction = useVcsInitAction(sourceControlScope);
   const runImmediateGitAction = useGitStackedAction(sourceControlScope);
   const pullAction = useVcsPullAction(sourceControlScope);
-  const isGitActionRunning = useSourceControlActionRunning(
+  const isSourceControlActionRunning = useSourceControlActionRunning(
     sourceControlScope,
     RUNNING_SOURCE_CONTROL_ACTIONS,
   );
+  const isGitActionRunning = isSourceControlActionRunning || isRegeneratingDescription;
+  const runRegenerateDescription = async () => {
+    if (
+      !activeEnvironmentId ||
+      !gitCwd ||
+      !projectId ||
+      !canRegenerateDescription ||
+      isGitActionRunning
+    ) {
+      return;
+    }
+    setIsRegeneratingDescription(true);
+    const toastId = toastManager.add({
+      type: "loading",
+      title: `Regenerating ${changeRequestTerminology.shortLabel} description...`,
+    });
+    try {
+      const result = await regenerateDescription({
+        environmentId: activeEnvironmentId,
+        input: {
+          cwd: gitCwd,
+          projectId,
+          ...(activeServerThread ? { threadId: activeServerThread.id } : {}),
+        },
+      });
+      if (result._tag === "Failure") {
+        if (isAtomCommandInterrupted(result)) {
+          toastManager.close(toastId);
+          return;
+        }
+        const error = squashAtomCommandFailure(result);
+        toastManager.update(toastId, {
+          type: "error",
+          title: `Failed to regenerate ${changeRequestTerminology.shortLabel} description`,
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+        return;
+      }
+      requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
+      toastManager.update(toastId, {
+        type: "success",
+        title: `${changeRequestTerminology.shortLabel} description updated`,
+      });
+    } finally {
+      setIsRegeneratingDescription(false);
+    }
+  };
   const isSelectingWorktreeBase =
     !activeServerThread &&
     activeDraftThread?.envMode === "worktree" &&
@@ -1855,6 +1911,24 @@ export default function GitActionsControl({
         <GitCommitIcon />
         <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
           Regenerate commit messages...
+        </GitItemLabel>
+      </GitItemControl>
+      <GitItemControl
+        {...gitItemProps}
+        disabled={
+          !canRegenerateDescription ||
+          isGitActionRunning ||
+          !projectId ||
+          !gitStatusForActions?.refName ||
+          gitStatusForActions.pr?.state !== "open"
+        }
+        onClick={() => void runRegenerateDescription()}
+      >
+        <SourceControlIcon />
+        <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
+          {isRegeneratingDescription
+            ? `Regenerating ${changeRequestTerminology.shortLabel} description...`
+            : `Regenerate ${changeRequestTerminology.shortLabel} description`}
         </GitItemLabel>
       </GitItemControl>
       {canPublishRepository ? (

@@ -31,5 +31,11 @@ export function createGitEnvironmentAtoms<R, E>(
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
     }),
+    regeneratePullRequestDescription: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:regenerate-pull-request-description",
+      tag: WS_METHODS.gitRegeneratePullRequestDescription,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
   };
 }

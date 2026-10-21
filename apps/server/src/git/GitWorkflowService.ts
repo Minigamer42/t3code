@@ -28,6 +28,7 @@ import {
   type GitRunStackedActionResult,
   type GitRewriteCommitMessagesInput,
   type GitRewriteCommitMessagesResult,
+  type GitRegeneratePullRequestDescriptionInput,
   type VcsStatusInput,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
@@ -37,6 +38,8 @@ import {
 import * as GitManager from "./GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import * as PullRequestService from "../pullRequest/PullRequestService.ts";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
@@ -79,6 +82,9 @@ export class GitWorkflowService extends Context.Service<
     readonly rewriteCommitMessages: (
       input: GitRewriteCommitMessagesInput,
     ) => Effect.Effect<GitRewriteCommitMessagesResult, GitManagerServiceError>;
+    readonly regeneratePullRequestDescription: (
+      input: GitRegeneratePullRequestDescriptionInput,
+    ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
     readonly resolvePullRequest: (
       input: GitPullRequestRefInput,
     ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
@@ -183,6 +189,7 @@ export const make = Effect.gen(function* () {
   const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
+  const pullRequests = yield* PullRequestService.PullRequestService;
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -382,6 +389,41 @@ export const make = Effect.gen(function* () {
       "GitWorkflowService.rewriteCommitMessages",
       gitManager.rewriteCommitMessages,
     ),
+    regeneratePullRequestDescription: Effect.fn(
+      "GitWorkflowService.regeneratePullRequestDescription",
+    )(function* (input) {
+      yield* ensureGit("regeneratePullRequestDescription", input.cwd);
+      const generated = yield* gitManager.generatePullRequestDescription(input);
+      const reference = parseChangeRequestUrl(generated.pullRequest.url);
+      if (!reference) {
+        return yield* new GitManagerError({
+          operation: "regeneratePullRequestDescription",
+          cwd: input.cwd,
+          detail: "Cannot resolve the change request to update.",
+        });
+      }
+      yield* pullRequests
+        .update({
+          projectId: input.projectId,
+          host: reference.host,
+          repository: reference.repository,
+          number: reference.number,
+          body: generated.body,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitManagerError({
+                operation: "regeneratePullRequestDescription",
+                cwd: input.cwd,
+                detail: "Failed to update the change request description.",
+                cause,
+              }),
+          ),
+        );
+      yield* gitManager.invalidateRemoteStatus(input.cwd);
+      return { pullRequest: generated.pullRequest };
+    }),
     resolvePullRequest: routeGitManager(
       "GitWorkflowService.resolvePullRequest",
       gitManager.resolvePullRequest,

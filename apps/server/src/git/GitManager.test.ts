@@ -58,6 +58,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
+import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ForgejoSourceControlProvider from "@t3tools/source-control-forgejo/server/ForgejoSourceControlProvider";
 import * as GitLabSourceControlProvider from "@t3tools/source-control-gitlab/server/GitLabSourceControlProvider";
 import {
@@ -977,6 +978,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       let remoteReads = 0;
       const workflowContext = yield* Layer.build(
         GitWorkflowService.layer.pipe(
+          Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
           Layer.provide(
             Layer.succeed(GitManager.GitManager, {
               ...manager,
@@ -6036,6 +6038,115 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect(
+    "regenerates a description from local branch commits against the existing PR target",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir("t3code-regenerate-pr-");
+        yield* initRepo(cwd);
+        NodeFS.mkdirSync(NodePath.join(cwd, ".github"));
+        NodeFS.mkdirSync(NodePath.join(cwd, ".t3code"));
+        NodeFS.writeFileSync(
+          NodePath.join(cwd, ".github/pull_request_template.md"),
+          "## Summary\n\n## Testing",
+        );
+        NodeFS.writeFileSync(
+          NodePath.join(cwd, ".t3code/change-request.md"),
+          "Explain the user impact.",
+        );
+        yield* runGit(cwd, ["add", "."]);
+        yield* runGit(cwd, ["commit", "-m", "Add repository instructions"]);
+        const remote = yield* createBareRemote();
+        yield* runGit(cwd, ["remote", "add", "origin", remote]);
+        yield* runGit(cwd, ["push", "-u", "origin", "main"]);
+        yield* runGit(cwd, ["checkout", "-b", "release"]);
+        NodeFS.writeFileSync(NodePath.join(cwd, "release.txt"), "release only\n");
+        yield* runGit(cwd, ["add", "."]);
+        yield* runGit(cwd, ["commit", "-m", "Release changes"]);
+        yield* runGit(cwd, ["push", "-u", "origin", "release"]);
+        yield* runGit(cwd, ["checkout", "-b", "feature"]);
+        NodeFS.writeFileSync(NodePath.join(cwd, "feature.txt"), "original\n");
+        yield* runGit(cwd, ["add", "."]);
+        yield* runGit(cwd, ["commit", "-m", "Original feature"]);
+        yield* runGit(cwd, ["push", "-u", "origin", "feature"]);
+        NodeFS.writeFileSync(NodePath.join(cwd, "feature.txt"), "current branch state\n");
+        yield* runGit(cwd, ["add", "."]);
+        yield* runGit(cwd, ["commit", "-m", "Updated feature"]);
+        NodeFS.writeFileSync(NodePath.join(cwd, "feature.txt"), "uncommitted\n");
+        let generated: TextGeneration.PrContentGenerationInput | undefined;
+        const { manager, ghCalls } = yield* makeManager({
+          textGeneration: {
+            generatePrContent: (input) => {
+              generated = input;
+              return Effect.succeed({ title: "New title", body: "Fresh description" });
+            },
+          },
+          ghScenario: {
+            prListSequence: [
+              JSON.stringify([
+                {
+                  number: 42,
+                  title: "Existing title",
+                  url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+                  baseRefName: "release",
+                  headRefName: "feature",
+                },
+              ]),
+            ],
+          },
+        });
+        const result = yield* manager.generatePullRequestDescription({
+          cwd,
+          projectId: ProjectId.make("project"),
+        });
+        expect(result.body).toBe("Fresh description");
+        expect(result.pullRequest).toMatchObject({
+          number: 42,
+          title: "Existing title",
+          baseBranch: "release",
+        });
+        expect(generated?.baseBranch).toBe("release");
+        expect(generated?.commitSummary).toContain("Updated feature");
+        expect(generated?.diffPatch).toContain("+current branch state");
+        expect(generated?.diffPatch).not.toContain("release only");
+        expect(generated?.diffPatch).not.toContain("+uncommitted");
+        expect(generated?.changeRequestTemplate).toBe("## Summary\n\n## Testing");
+        expect(generated?.policy?.changeRequestInstructions).toContain("Explain the user impact.");
+        expect(ghCalls.some((call) => call.startsWith("pr create"))).toBe(false);
+      }),
+  );
+
+  it.effect.each(["missing PR", "detached HEAD"])(
+    "refuses to regenerate a description with %s",
+    (scenario) =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir("t3code-regenerate-pr-");
+        yield* initRepo(cwd);
+        if (scenario === "detached HEAD") yield* runGit(cwd, ["checkout", "--detach"]);
+        let generated = false;
+        const { manager } = yield* makeManager({
+          ghScenario: { prListSequence: ["[]"] },
+          textGeneration: {
+            generatePrContent: () => {
+              generated = true;
+              return Effect.succeed({ title: "Unused", body: "Unused" });
+            },
+          },
+        });
+        const failure = yield* manager
+          .generatePullRequestDescription({
+            cwd,
+            projectId: ProjectId.make("project"),
+          })
+          .pipe(Effect.flip);
+        expect(failure._tag).toBe("GitManagerError");
+        expect(failure.message).toContain(
+          scenario === "detached HEAD" ? "detached HEAD" : "no open change request",
+        );
+        expect(generated).toBe(false);
+      }),
+  );
+
   it.effect.each(["commit", "short-commit", "tag", "revision"] as const)(
     "creates a PR against the default branch with a legacy %s base setting",
     (kind) =>
@@ -6097,10 +6208,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       name: "explicit target",
       second: "OPEN",
       first: "OPEN",
-      base: "stack/second",
+      base: "main",
       explicit: true,
     },
-  ])("scopes the description for $name while preserving the MR target", (scenario) =>
+  ])("selects the stacked MR target and description base for $name", (scenario) =>
     Effect.gen(function* () {
       const cwd = yield* createStackedBranches();
       if (scenario.explicit) {
@@ -6137,8 +6248,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
       const result = yield* runStackedAction(manager, { cwd, action: "create_pr" });
 
-      expect(result.pr).toMatchObject({ status: "created", baseBranch: "main" });
-      expect(generated?.baseBranch).toBe("main");
+      expect(result.pr).toMatchObject({ status: "created", baseBranch: scenario.base });
+      expect(generated?.baseBranch).toBe(scenario.base);
       expect(generated?.commitSummary).toContain("Add feature");
       expect(generated?.commitSummary).toContain("Test feature");
       expect(generated?.diffPatch).toContain("+feature");
@@ -6146,13 +6257,12 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
         expect(generated?.diffSummary).not.toContain("first.txt");
         expect(generated?.diffPatch).not.toContain("second.txt");
-        expect(generated?.policy?.changeRequestInstructions).toContain(
-          "This change request targets main. Describe only the supplied commits and diff above stack/second",
-        );
         expect(ghCalls.some((call) => call.includes("--head stack/first"))).toBe(false);
       }
       expect(
-        ghCalls.some((call) => call.startsWith("pr create --base main --head stack/feature")),
+        ghCalls.some((call) =>
+          call.startsWith(`pr create --base ${scenario.base} --head stack/feature`),
+        ),
       ).toBe(true);
     }),
   );
@@ -6189,7 +6299,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                                     title: parent ? "Second layer" : "Feature",
                                     web_url: `https://gitlab.example/group/repo/-/merge_requests/${parent ? 2 : 3}`,
                                     source_branch: parent ? "stack/second" : "stack/feature",
-                                    target_branch: "main",
+                                    target_branch: parent ? "main" : "stack/second",
                                     state: "opened",
                                     source_project_id: 1,
                                     target_project_id: 1,
@@ -6228,85 +6338,53 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
       const result = yield* runStackedAction(manager, { cwd, action: "create_pr" });
 
-      expect(result.pr).toMatchObject({ status: "created", baseBranch: "main", number: 3 });
-      expect(generated?.baseBranch).toBe("main");
+      expect(result.pr).toMatchObject({ status: "created", baseBranch: "stack/second", number: 3 });
+      expect(generated?.baseBranch).toBe("stack/second");
       expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
       expect(generated?.diffPatch).toContain("+feature");
       expect(generated?.diffPatch).not.toContain("second.txt");
       expect(calls.find((call) => call.args.includes("POST"))?.args).toContain(
-        "target_branch=main",
+        "target_branch=stack/second",
       );
+
+      const regenerated = yield* manager.generatePullRequestDescription({
+        cwd,
+        projectId: ProjectId.make("project"),
+      });
+
+      expect(regenerated.pullRequest.baseBranch).toBe("stack/second");
+      expect(generated?.baseBranch).toBe("stack/second");
+      expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
+      expect(generated?.diffPatch).not.toContain("second.txt");
+      expect(calls.filter((call) => call.args.includes("POST"))).toHaveLength(1);
     }),
   );
 
-  it.effect(
-    "requires an explicit description base when equally close ancestors have open reviews",
-    () =>
-      Effect.gen(function* () {
-        const cwd = yield* createStackedBranches();
-        yield* runGit(cwd, ["push", "origin", "stack/second:stack/alias"]);
-        const prListByHeadSelector: Record<string, string> = {};
-        for (const [index, head] of ["stack/second", "stack/alias"].entries()) {
-          prListByHeadSelector[head] = JSON.stringify([
-            {
-              number: index + 1,
-              title: head,
-              url: `https://github.com/example/repo/pull/${index + 1}`,
-              headRefName: head,
-              baseRefName: "main",
-            },
-          ]);
-        }
-        const { manager, ghCalls } = yield* makeManager({ ghScenario: { prListByHeadSelector } });
-
-        const error = yield* runStackedAction(manager, { cwd, action: "create_pr" }).pipe(
-          Effect.flip,
-        );
-
-        expect(error).toMatchObject({ operation: "resolveDescriptionBaseBranch" });
-        expect(ghCalls.some((call) => call.startsWith("pr create "))).toBe(false);
-      }),
-  );
-
-  it.effect.each(["stack/first", "missing", "unrelated"])(
-    "validates the explicit description base %s without changing the target",
-    (descriptionBase) =>
-      Effect.gen(function* () {
-        const cwd = yield* createStackedBranches();
-        yield* runGit(cwd, ["checkout", "-b", "unrelated", "main"]);
-        yield* runGit(cwd, ["commit", "--allow-empty", "-m", "Unrelated"]);
-        yield* runGit(cwd, ["checkout", "stack/feature"]);
-        yield* runGit(cwd, ["config", "branch.stack/feature.t3-description-base", descriptionBase]);
-        let generated: Parameters<FakeGitTextGeneration["generatePrContent"]>[0] | undefined;
-        const { manager, ghCalls } = yield* makeManager({
-          textGeneration: {
-            generatePrContent: (input) => {
-              generated = input;
-              return Effect.succeed({ title: "Feature", body: "Feature only" });
-            },
+  it.effect("requires an explicit target when equally close ancestors have open reviews", () =>
+    Effect.gen(function* () {
+      const cwd = yield* createStackedBranches();
+      yield* runGit(cwd, ["push", "origin", "stack/second:stack/alias"]);
+      const prListByHeadSelector: Record<string, string> = {};
+      for (const [index, head] of ["stack/second", "stack/alias"].entries()) {
+        prListByHeadSelector[head] = JSON.stringify([
+          {
+            number: index + 1,
+            title: head,
+            url: `https://github.com/example/repo/pull/${index + 1}`,
+            headRefName: head,
+            baseRefName: "main",
           },
-        });
+        ]);
+      }
+      const { manager, ghCalls } = yield* makeManager({ ghScenario: { prListByHeadSelector } });
 
-        const result = yield* runStackedAction(manager, { cwd, action: "create_pr" }).pipe(
-          Effect.result,
-        );
+      const error = yield* runStackedAction(manager, { cwd, action: "create_pr" }).pipe(
+        Effect.flip,
+      );
 
-        if (descriptionBase === "stack/first") {
-          expect(Result.isSuccess(result)).toBe(true);
-          if (Result.isSuccess(result)) {
-            expect(result.success.pr).toMatchObject({ baseBranch: "main" });
-          }
-          expect(generated?.commitSummary).toContain("Add second");
-          expect(generated?.commitSummary).not.toContain("Add first");
-        } else {
-          expect(Result.isFailure(result)).toBe(true);
-          if (Result.isFailure(result)) {
-            expect(result.failure).toMatchObject({ operation: "resolveDescriptionBaseBranch" });
-          }
-          expect(generated).toBeUndefined();
-          expect(ghCalls.some((call) => call.startsWith("pr create "))).toBe(false);
-        }
-      }),
+      expect(error).toMatchObject({ operation: "resolveStackedBaseBranch" });
+      expect(ghCalls.some((call) => call.startsWith("pr create "))).toBe(false);
+    }),
   );
 
   it.effect(
