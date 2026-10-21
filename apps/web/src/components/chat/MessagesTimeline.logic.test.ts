@@ -3012,6 +3012,10 @@ describe("deriveMessagesTimelineRows", () => {
     );
 
     expect(assistantRows.map((row) => row.showAssistantMeta)).toEqual([false, true]);
+    expect(assistantRows.map((row) => row.assistantLabel)).toEqual([
+      "Commentary",
+      "Final response",
+    ]);
   });
 
   it("withholds assistant metadata while the active turn is still in progress", () => {
@@ -3050,8 +3054,57 @@ describe("deriveMessagesTimelineRows", () => {
     );
 
     expect(assistantRow?.showAssistantMeta).toBe(false);
+    expect(assistantRow?.assistantLabel).toBe("Commentary");
     expect(assistantRow?.showAssistantCopyButton).toBe(false);
     expect(rows.at(-1)).toMatchObject({ kind: "thinking" });
+  });
+
+  it.each([
+    ["completed", "Final response"],
+    ["interrupted", "Incomplete response"],
+    ["failed", "Incomplete response"],
+    ["cancelled", "Incomplete response"],
+  ] as const)("updates the response label when the run becomes %s", (status, label) => {
+    const runId = RunId.make("labelled-run");
+    const createdAt = "2026-01-01T00:00:00Z";
+    const input = {
+      timelineEntries: [
+        {
+          kind: "message" as const,
+          id: "response",
+          createdAt,
+          message: {
+            id: MessageId.make("response"),
+            role: "assistant" as const,
+            text: "Checking the workspace.",
+            runId,
+            streaming: false,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        },
+      ],
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    };
+    const active = deriveMessagesTimelineRowsWithState({
+      ...input,
+      latestRun: { runId, status: "running", startedAt: createdAt, completedAt: null },
+    });
+    expect(active.rows.find((row) => row.id === "response")).toMatchObject({
+      assistantLabel: "Commentary",
+    });
+    const settled = deriveMessagesTimelineRowsWithState(
+      {
+        ...input,
+        latestRun: { runId, status, startedAt: createdAt, completedAt: createdAt },
+      },
+      active,
+    );
+    expect(settled.rows.find((row) => row.id === "response")).toMatchObject({
+      assistantLabel: label,
+    });
   });
 
   it.each([

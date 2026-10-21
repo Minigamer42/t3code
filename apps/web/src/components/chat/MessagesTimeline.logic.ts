@@ -1,4 +1,5 @@
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+import { assistantMessageLabel } from "@t3tools/client-runtime/assistant-message";
 export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
 import * as DateTime from "effect/DateTime";
@@ -612,6 +613,7 @@ type MessagesTimelineRowContent =
       message: ChatMessage;
       projectedItem?: OrchestrationV2ProjectedTurnItem;
       durationStart: string;
+      assistantLabel?: ReturnType<typeof assistantMessageLabel>;
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
@@ -1904,6 +1906,20 @@ export function deriveMessagesTimelineRows(input: {
         ? {}
         : { projectedItem: timelineEntry.projectedItem }),
       durationStart,
+      ...(timelineEntry.message.role === "assistant"
+        ? {
+            assistantLabel: assistantMessageLabel({
+              isTerminal: terminalAssistantMessageIds.has(timelineEntry.message.id),
+              isInProgress: assistantResponseStillInProgress || timelineEntry.message.streaming,
+              runStatus:
+                timelineEntry.message.runId && failedRunIds.has(timelineEntry.message.runId)
+                  ? "failed"
+                  : input.latestRun?.runId === timelineEntry.message.runId
+                    ? input.latestRun?.status
+                    : undefined,
+            }),
+          }
+        : {}),
       showAssistantMeta,
       showAssistantCopyButton: showAssistantMeta,
       assistantCopyStreaming: timelineEntry.message.streaming || assistantResponseStillInProgress,
@@ -2357,6 +2373,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.message === bm.message &&
         a.projectedItem === bm.projectedItem &&
         a.durationStart === bm.durationStart &&
+        a.assistantLabel === bm.assistantLabel &&
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&

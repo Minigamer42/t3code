@@ -2280,8 +2280,8 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 
 // Screen readers skim a transcript by heading, so every message announces its
 // author as one. The thread title in ChatHeader is an <h2>; headings written
-// inside a message are exposed below this level. Visually hidden and excluded
-// from selection so sighted users and copied text are unaffected.
+// inside a message are exposed below this level. User headings are hidden;
+// assistant headings visibly distinguish commentary from the final response.
 const MESSAGE_HEADING_LEVEL = 3;
 
 function MessageAuthorHeading({ children }: { children: string }) {
@@ -2852,11 +2852,27 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const isCommentary = row.assistantLabel === "Commentary";
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+      <div
+        className={cn(
+          "relative min-w-0",
+          isCommentary
+            ? "border-s-2 border-border/70 py-0.5 ps-3 pe-1"
+            : "mt-2 border-t border-border px-1 pt-3 pb-0.5",
+        )}
+      >
+        <h3
+          className={cn(
+            "mb-2 select-none text-xs font-medium",
+            isCommentary ? "text-muted-foreground" : "text-foreground",
+          )}
+          aria-label={`T3 Code: ${row.assistantLabel}`}
+        >
+          {row.assistantLabel}
+        </h3>
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}
