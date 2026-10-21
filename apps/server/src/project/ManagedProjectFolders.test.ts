@@ -27,6 +27,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -40,6 +41,7 @@ import * as ManagedProjectFolders from "./ManagedProjectFolders.ts";
 
 const layerGitWorkflow = (vcsProcess?: Layer.Layer<VcsProcess.VcsProcess>) =>
   GitWorkflow.layer.pipe(
+    Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
     Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(vcsProcess ?? VcsProcess.layer))),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
   );

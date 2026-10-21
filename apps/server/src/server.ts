@@ -460,6 +460,7 @@ const layerGit = Layer.empty.pipe(
 );
 
 const layerGitWorkflow = GitWorkflowService.layer.pipe(
+  Layer.provide(layerPullRequestService.pipe(Layer.provide(RuntimeLayer.layerProjectService))),
   Layer.provideMerge(layerVcsDriverRegistry),
   Layer.provideMerge(layerGit),
 );
