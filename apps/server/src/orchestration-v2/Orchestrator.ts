@@ -143,6 +143,7 @@ export class OrchestratorDispatchError extends Schema.TaggedError<OrchestratorDi
   {
     commandId: CommandId,
     commandType: Schema.String,
+    reason: Schema.optional(Schema.Literal("stale-snapshot")),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -2636,6 +2637,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           commandId: command.commandId,
           commandType: command.type,
           cause: `Thread ${command.threadId} changed before pull request discovery.`,
+          reason: "stale-snapshot",
         });
       }
     }
