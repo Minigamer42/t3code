@@ -1,8 +1,16 @@
 import type {
   GitRunStackedActionResult,
   GitStackedAction,
+  ThreadLinkedPullRequest,
+  ThreadPullRequestLink,
   VcsStatusResult,
 } from "@t3tools/contracts";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
+import {
+  threadPullRequestKeyOf,
+  threadPullRequestsOf,
+  visibleThreadPullRequests,
+} from "@t3tools/shared/threadPullRequests";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import type { ChangeRequestTerminology } from "@t3tools/client-runtime/source-control-clients";
@@ -75,6 +83,51 @@ export function canRewriteCommitMessages(gitStatus: VcsStatusResult | null): boo
     return false;
   }
   return Math.max(gitStatus.aheadCount, gitStatus.aheadOfDefaultCount ?? 0) > 0;
+}
+
+export interface RegeneratePullRequestCandidate {
+  readonly url: string;
+  readonly number: number;
+  readonly title: string;
+  readonly repository: string;
+  readonly headBranch: string | null;
+  readonly baseBranch: string | null;
+}
+
+export function resolveRegeneratePullRequestCandidates(
+  gitStatus: VcsStatusResult | null,
+  thread: {
+    readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
+    readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  } | null,
+): ReadonlyArray<RegeneratePullRequestCandidate> {
+  const candidates = new Map<string, RegeneratePullRequestCandidate>();
+  const branchPr = gitStatus?.pr;
+  const branchReference = branchPr ? parseChangeRequestUrl(branchPr.url) : null;
+  if (branchPr?.state === "open" && branchReference) {
+    candidates.set(threadPullRequestKeyOf(branchReference), {
+      url: branchPr.url,
+      number: branchPr.number,
+      title: branchPr.title,
+      repository: branchReference.repository,
+      headBranch: branchPr.headRef,
+      baseBranch: branchPr.baseRef,
+    });
+  }
+  for (const link of visibleThreadPullRequests(threadPullRequestsOf(thread ?? {}))) {
+    if (link.snapshot !== null && link.snapshot.state !== "open") continue;
+    const key = threadPullRequestKeyOf(link);
+    if (candidates.has(key)) continue;
+    candidates.set(key, {
+      url: link.url,
+      number: link.number,
+      title: link.snapshot?.title ?? link.repository,
+      repository: link.repository,
+      headBranch: link.snapshot?.headBranch ?? null,
+      baseBranch: link.snapshot?.baseBranch ?? null,
+    });
+  }
+  return [...candidates.values()];
 }
 
 function resolveChangeRequestTerminology(

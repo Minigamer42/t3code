@@ -1,5 +1,5 @@
 import { SourceControlProviderKind } from "@t3tools/contracts";
-import type { VcsStatusResult } from "@t3tools/contracts";
+import type { VcsStatusResult, ThreadPullRequestLink } from "@t3tools/contracts";
 import { assert, describe, it } from "vite-plus/test";
 import {
   buildGitActionProgressStages,
@@ -15,6 +15,7 @@ import {
   resolveGitActionResultToastTiming,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,
+  resolveRegeneratePullRequestCandidates,
   resolveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
 } from "./GitActionsControl.logic";
@@ -1549,5 +1550,86 @@ describe("resolveAutoFeatureBranchName", () => {
   it("falls back to feature/update when no preferred name is provided", () => {
     const ref = resolveAutoFeatureBranchName(["main"]);
     assert.equal(ref, "feature/update");
+  });
+});
+
+describe("resolveRegeneratePullRequestCandidates", () => {
+  function link(
+    number: number,
+    overrides: Partial<ThreadPullRequestLink> = {},
+  ): ThreadPullRequestLink {
+    return {
+      host: "gitlab.com",
+      repository: "group/repo",
+      number,
+      url: `https://gitlab.com/group/repo/-/merge_requests/${number}`,
+      source: "manual",
+      linkedAt: "2026-01-01T00:00:00.000Z",
+      stack: null,
+      snapshot: null,
+      ...overrides,
+    };
+  }
+
+  it("combines the branch request with linked requests without duplicating it", () => {
+    const candidates = resolveRegeneratePullRequestCandidates(
+      status({
+        pr: {
+          number: 1,
+          title: "Branch request",
+          url: link(1).url,
+          headRef: "feature",
+          baseRef: "main",
+          state: "open",
+        },
+      }),
+      { pullRequests: [link(1), link(2, { source: "stack" })] },
+    );
+    assert.deepEqual(
+      candidates.map(({ number }) => number),
+      [1, 2],
+    );
+    assert.equal(candidates[0]?.title, "Branch request");
+  });
+
+  it("offers linked requests even when the checkout has no request", () => {
+    assert.equal(
+      resolveRegeneratePullRequestCandidates(status(), { pullRequests: [link(2)] }).length,
+      1,
+    );
+  });
+
+  it("omits dismissed, closed and merged requests", () => {
+    const closed = link(2, {
+      snapshot: {
+        title: "Closed",
+        state: "closed",
+        headBranch: "old",
+        baseBranch: "main",
+        isDraft: false,
+        updatedAt: null,
+        syncedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    const merged = link(3, { snapshot: { ...closed.snapshot!, state: "merged" } });
+    assert.deepEqual(
+      resolveRegeneratePullRequestCandidates(status(), {
+        pullRequests: [link(1, { source: "stack-dismissed" }), closed, merged],
+      }),
+      [],
+    );
+  });
+
+  it("keeps requests with the same number in different repositories distinct", () => {
+    const candidates = resolveRegeneratePullRequestCandidates(status(), {
+      pullRequests: [
+        link(1),
+        link(1, {
+          repository: "group/other",
+          url: "https://gitlab.com/group/other/-/merge_requests/1",
+        }),
+      ],
+    });
+    assert.equal(candidates.length, 2);
   });
 });
