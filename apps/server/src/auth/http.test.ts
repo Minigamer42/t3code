@@ -10,11 +10,14 @@ import {
 import { RelayClientTracer } from "@t3tools/shared/relayTracing";
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import { HttpServerRequest } from "effect/http";
@@ -74,6 +77,52 @@ const postJson = (path: string, body: unknown, headers?: Readonly<Record<string,
     headers: { "content-type": "application/json", ...headers },
     body: encodeJson(body),
   });
+
+it.effect(
+  "logs request cancellation at debug and preserves failures with safe request context",
+  () =>
+    Effect.gen(function* () {
+      const logs: Array<{ level: string; message: ReadonlyArray<unknown> }> = [];
+      const logger = Logger.make(({ logLevel, message }) => {
+        logs.push({ level: logLevel, message: Array.isArray(message) ? message : [message] });
+      });
+      const request = HttpServerRequest.fromWeb(
+        new Request("https://environment.example.test/api/auth/session?credential=secret", {
+          method: "GET",
+          headers: { authorization: "Bearer secret" },
+        }),
+      );
+      const run = (cause: Cause.Cause<Error>) =>
+        Effect.scoped(
+          AuthHttp.annotateEnvironmentRequest("HttpApiEndpoint").pipe(
+            Effect.andThen(Effect.failCause(cause)),
+          ),
+        ).pipe(Effect.exit, Effect.provideService(HttpServerRequest.HttpServerRequest, request));
+
+      yield* Effect.gen(function* () {
+        yield* run(Cause.interrupt());
+        yield* run(Cause.fail(new Error("failed")));
+        yield* run(Cause.combine(Cause.interrupt(), Cause.die(new Error("defect"))));
+      }).pipe(
+        Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
+        Effect.provideService(References.MinimumLogLevel, "Debug"),
+      );
+
+      expect(logs.map((entry) => [entry.level, entry.message[0]])).toEqual([
+        ["Debug", "environment api request cancelled"],
+        ["Warn", "environment api request failed"],
+        ["Warn", "environment api request failed"],
+      ]);
+      expect(logs[1]?.message[1]).toMatchObject({
+        endpoint: "HttpApiEndpoint",
+        method: "GET",
+        path: "/api/auth/session",
+        cause: expect.stringContaining("failed"),
+      });
+      expect(logs[2]?.message[1]).toMatchObject({ cause: expect.stringContaining("defect") });
+      expect(JSON.stringify(logs)).not.toContain("secret");
+    }),
+);
 
 it.effect("sets the selected browser session cookies through the HTTP route", () =>
   Effect.gen(function* () {
