@@ -1819,98 +1819,109 @@ export default function GitActionsControl({
       );
     })();
   };
-  const gitItems = (
-    <>
-      {gitActionMenuItems.map((item) => {
-        const disabledReason = getMenuActionDisabledReason({
-          item,
-          gitStatus: gitStatusForActions,
-          isBusy: isGitActionRunning,
-          hasPrimaryRemote,
-        });
-        if (item.disabled && disabledReason && presentation === "menu") {
-          return (
-            <div key={`${item.id}-${item.label}`}>
-              <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
-                <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-                <MenuItemLabel>{item.label}</MenuItemLabel>
-              </MenuItem>
-              <p className="max-w-64 px-2 pb-2 text-xs text-muted-foreground">{disabledReason}</p>
-            </div>
-          );
-        }
-        if (item.disabled && disabledReason) {
-          return (
-            <Popover key={`${item.id}-${item.label}`}>
-              <PopoverTrigger
-                openOnHover
-                nativeButton={false}
-                render={<span className="block w-full cursor-not-allowed" />}
-              >
-                <GitItemControl {...gitItemProps} className="w-full" disabled>
-                  <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-                  <GitItemLabel
-                    className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}
-                  >
-                    {item.label}
-                  </GitItemLabel>
-                </GitItemControl>
-              </PopoverTrigger>
-              <PopoverPopup tooltipStyle side="left" align="center">
-                {disabledReason}
-              </PopoverPopup>
-            </Popover>
-          );
-        }
-
-        return (
-          <GitItemControl
-            {...gitItemProps}
-            key={`${item.id}-${item.label}`}
-            disabled={!canWriteSourceControl || item.disabled}
-            onClick={() => {
-              runMenuItem(item);
-            }}
-          >
+  const renderGitMenuItem = (item: GitActionMenuItem) => {
+    const disabledReason = getMenuActionDisabledReason({
+      item,
+      gitStatus: gitStatusForActions,
+      isBusy: isGitActionRunning,
+      hasPrimaryRemote,
+    });
+    if (item.disabled && disabledReason && presentation === "menu") {
+      return (
+        <div key={`${item.id}-${item.label}`}>
+          <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
             <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-            <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
-              {item.label}
-            </GitItemLabel>
-          </GitItemControl>
-        );
-      })}
+            <MenuItemLabel>{item.label}</MenuItemLabel>
+          </MenuItem>
+          <p className="max-w-64 px-2 pb-2 text-xs text-muted-foreground">{disabledReason}</p>
+        </div>
+      );
+    }
+    if (item.disabled && disabledReason) {
+      return (
+        <Popover key={`${item.id}-${item.label}`}>
+          <PopoverTrigger
+            openOnHover
+            nativeButton={false}
+            render={<span className="block w-full cursor-not-allowed" />}
+          >
+            <GitItemControl {...gitItemProps} className="w-full" disabled>
+              <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
+              <GitItemLabel
+                className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}
+              >
+                {item.label}
+              </GitItemLabel>
+            </GitItemControl>
+          </PopoverTrigger>
+          <PopoverPopup tooltipStyle side="left" align="center">
+            {disabledReason}
+          </PopoverPopup>
+        </Popover>
+      );
+    }
+
+    return (
       <GitItemControl
         {...gitItemProps}
-        disabled={
-          !canWriteSourceControl ||
-          isGitActionRunning ||
-          !gitStatusForActions?.hasWorkingTreeChanges
-        }
+        key={`${item.id}-${item.label}`}
+        disabled={!canWriteSourceControl || item.disabled}
         onClick={() => {
-          setExcludedFiles(new Set());
-          setIsEditingFiles(false);
-          setIsSplitCommitDialogOpen(true);
+          runMenuItem(item);
         }}
       >
-        <GitCommitIcon />
+        <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
         <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
-          Split into logical commits...
+          {item.label}
         </GitItemLabel>
       </GitItemControl>
-      <GitItemControl
-        {...gitItemProps}
-        disabled={
-          !canWriteSourceControl ||
-          isGitActionRunning ||
-          !canRewriteCommitMessages(gitStatusForActions)
-        }
-        onClick={() => setIsRewriteCommitMessagesDialogOpen(true)}
-      >
-        <GitCommitIcon />
-        <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
-          Regenerate commit messages...
-        </GitItemLabel>
-      </GitItemControl>
+    );
+  };
+  const splitCommitItem = (
+    <GitItemControl
+      key="split-commits"
+      {...gitItemProps}
+      disabled={
+        !canWriteSourceControl || isGitActionRunning || !gitStatusForActions?.hasWorkingTreeChanges
+      }
+      onClick={() => {
+        setExcludedFiles(new Set());
+        setIsEditingFiles(false);
+        setIsSplitCommitDialogOpen(true);
+      }}
+    >
+      <GitCommitIcon />
+      <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
+        Split into logical commits...
+      </GitItemLabel>
+    </GitItemControl>
+  );
+  const rewriteCommitMessagesItem = (
+    <GitItemControl
+      key="rewrite-commit-messages"
+      {...gitItemProps}
+      disabled={
+        !canWriteSourceControl ||
+        isGitActionRunning ||
+        !canRewriteCommitMessages(gitStatusForActions)
+      }
+      onClick={() => setIsRewriteCommitMessagesDialogOpen(true)}
+    >
+      <GitCommitIcon />
+      <GitItemLabel className={inlineActions ? THREAD_DETAILS_PANEL_LABEL_CLASS : undefined}>
+        Regenerate commit messages...
+      </GitItemLabel>
+    </GitItemControl>
+  );
+  const gitItems = (
+    <>
+      {gitActionMenuItems.length === 0
+        ? [splitCommitItem, rewriteCommitMessagesItem]
+        : gitActionMenuItems.flatMap((item) =>
+            item.id === "commit_dialog"
+              ? [splitCommitItem, renderGitMenuItem(item), rewriteCommitMessagesItem]
+              : [renderGitMenuItem(item)],
+          )}
       <GitItemControl
         {...gitItemProps}
         disabled={
