@@ -119,6 +119,15 @@ export function classifyRelayClientOutput(line: string): "connected" | "warning"
   if (/\bRegistered tunnel connection\b/iu.test(line)) {
     return "connected";
   }
+  // T3 forwards HTTP/WebSocket traffic; cloudflared's optional ping proxy is unused.
+  if (
+    /\bWRN\b/u.test(line) &&
+    /\b(?:The user running cloudflared process has a GID \(group ID\) that is not within ping_group_range|ICMP proxy feature is disabled)\b/u.test(
+      line,
+    )
+  ) {
+    return "debug";
+  }
   // cloudflared uses zerolog level tokens. FTL (fatal) and PNC (panic) are more
   // severe than ERR, so they must surface at least as loudly — without them a
   // fatal connector failure would be logged at debug and hidden.
