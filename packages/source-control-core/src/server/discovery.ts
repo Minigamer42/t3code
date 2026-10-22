@@ -328,6 +328,11 @@ export const refineUnknownRemoteProvider = Effect.fn("refineUnknownRemoteProvide
       return input.context;
     }
     const context = input.context;
+    const timedOutProbes: Array<{
+      readonly provider: SourceControlProviderKind;
+      readonly cwd: string;
+      readonly timeoutMs: number;
+    }> = [];
 
     const providers = yield* Effect.forEach(input.specs, (spec) => {
       if (spec.type === "managed-cli") {
@@ -353,10 +358,33 @@ export const refineUnknownRemoteProvider = Effect.fn("refineUnknownRemoteProvide
               auth,
             }),
           ),
+          Effect.catchTags({
+            VcsProcessTimeoutError: (error) => {
+              timedOutProbes.push({
+                provider: spec.kind,
+                cwd: input.cwd,
+                timeoutMs: error.timeoutMs,
+              });
+              return Effect.succeed(null);
+            },
+          }),
           Effect.orElseSucceed(() => null),
         );
     });
     const provider = providers.find((candidate) => candidate !== null);
+    // Optional CLIs may fail even when another provider identifies the host.
+    // Only unresolved detection needs attention, and a timeout is not an unsupported host.
+    if (provider === undefined) {
+      yield* Effect.forEach(
+        timedOutProbes,
+        (attributes) =>
+          Effect.logWarning(
+            "Source control provider detection timed out; provider remains unresolved",
+            attributes,
+          ),
+        { discard: true },
+      );
+    }
 
     return provider ? { ...context, provider } : context;
   },
