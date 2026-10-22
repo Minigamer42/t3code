@@ -3627,6 +3627,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         })
         .pipe(Effect.flip);
       assert.instanceOf(staleProjectWorkspace, Orchestrator.OrchestratorDispatchError);
+      assert.equal(staleProjectWorkspace.reason, "stale-snapshot");
       yield* moveProject(projectId, project.workspaceRoot, "2026-09-07T00:02:00.000Z");
       // An unrelated thread event during discovery must not drop the branch pull request.
       yield* orchestrator.dispatch({
@@ -3691,6 +3692,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         })
         .pipe(Effect.flip);
       assert.instanceOf(staleLinkedPullRequestReplacement, Orchestrator.OrchestratorDispatchError);
+      assert.equal(stalePullRequestSync.reason, "stale-snapshot");
       yield* orchestrator.dispatch({
         type: "thread.runtime-mode.set",
         commandId: CommandId.make("runtime-layer-lifecycle-runtime"),
