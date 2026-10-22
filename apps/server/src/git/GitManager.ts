@@ -183,7 +183,7 @@ export class GitManager extends Context.Service<
     readonly generatePullRequestDescription: (
       input: GitRegeneratePullRequestDescriptionInput,
     ) => Effect.Effect<
-      GitResolvePullRequestResult & { readonly body: string },
+      GitResolvePullRequestResult & { readonly title: string; readonly body: string },
       GitManagerServiceError
     >;
     readonly rewriteCommitMessages: (
@@ -2668,10 +2668,11 @@ export const make = Effect.gen(function* () {
     cwd: string,
     baseBranch: string,
     headBranch: string,
+    refs?: { readonly base: string; readonly head: string },
   ) {
     const provider = yield* sourceControlProvider(cwd);
-    const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
-    const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
+    const baseRangeRef = refs?.base ?? (yield* resolveBaseRangeRef(cwd, baseBranch));
+    const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef, refs?.head);
     const stylePolicy = yield* resolveStylePolicy(cwd, settings);
     const repositoryChangeRequestInstructions = yield* readRepositoryInstructions(
       cwd,
@@ -3906,24 +3907,80 @@ export const make = Effect.gen(function* () {
   const generatePullRequestDescription: GitManager["Service"]["generatePullRequestDescription"] =
     Effect.fn("GitManager.generatePullRequestDescription")(function* (input) {
       const details = yield* gitCore.statusDetails(input.cwd);
-      if (!details.branch) {
+      if (!details.branch && input.reference === undefined) {
         return yield* new GitManagerError({
           operation: "generatePullRequestDescription",
           cwd: input.cwd,
           detail: "Cannot regenerate a change request description from detached HEAD.",
         });
       }
-      const headContext = yield* resolveBranchHeadContext(input.cwd, {
-        branch: details.branch,
-        upstreamRef: details.upstreamRef,
-      });
-      const existing = yield* findOpenPr(input.cwd, headContext);
-      if (!existing) {
+      const headContext = details.branch
+        ? yield* resolveBranchHeadContext(input.cwd, {
+            branch: details.branch,
+            upstreamRef: details.upstreamRef,
+          })
+        : null;
+      const provider = yield* sourceControlProvider(input.cwd);
+      const existing =
+        input.reference !== undefined
+          ? toPullRequestInfo(
+              yield* provider.getChangeRequest({
+                cwd: input.cwd,
+                reference: normalizePullRequestReference(input.reference),
+              }),
+            )
+          : headContext === null
+            ? null
+            : yield* findOpenPr(input.cwd, headContext);
+      if (!existing || existing.state !== "open") {
         return yield* new GitManagerError({
           operation: "generatePullRequestDescription",
           cwd: input.cwd,
-          detail: "The current branch has no open change request to update.",
+          detail:
+            input.reference !== undefined
+              ? "The selected change request is no longer open."
+              : "The current branch has no open change request to update.",
         });
+      }
+      // Other linked requests can belong to another branch or fork. Read their remote
+      // commits without switching branches or moving any local branch refs.
+      let refs: { readonly base: string; readonly head: string } | undefined;
+      if (headContext === null || !matchesBranchHeadContext(existing, headContext)) {
+        const reference = parseChangeRequestUrl(existing.url);
+        const headRepository =
+          existing.headRepositoryNameWithOwner ??
+          (existing.isCrossRepository ? null : reference?.repository);
+        if (!reference || !headRepository) {
+          return yield* new GitManagerError({
+            operation: "generatePullRequestDescription",
+            cwd: input.cwd,
+            detail: "Cannot resolve the change request's source repository.",
+          });
+        }
+        const fetchCommit = Effect.fn("GitManager.generatePullRequestDescription.fetchCommit")(
+          function* (repository: string, branch: string) {
+            const urls = yield* provider.getRepositoryCloneUrls({ cwd: input.cwd, repository });
+            const originUrl = yield* gitCore.readConfigValue(input.cwd, "remote.origin.url");
+            yield* gitCore.execute({
+              operation: "generatePullRequestDescription.fetchCommit",
+              cwd: input.cwd,
+              args: [
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "--",
+                shouldPreferSshRemote(originUrl) ? urls.sshUrl : urls.url,
+                `refs/heads/${branch}`,
+              ],
+            });
+            return (yield* gitCore.resolveCommit({ cwd: input.cwd, revision: "FETCH_HEAD" }))
+              .commitSha;
+          },
+        );
+        refs = {
+          base: yield* fetchCommit(reference.repository, existing.baseRefName),
+          head: yield* fetchCommit(headRepository, existing.headRefName),
+        };
       }
       const resolved = yield* projectSettingsFor(input).pipe(
         Effect.mapError(
@@ -3948,7 +4005,8 @@ export const make = Effect.gen(function* () {
         },
         input.cwd,
         existing.baseRefName,
-        headContext.headBranch,
+        existing.headRefName,
+        refs,
       );
       return {
         pullRequest: {
@@ -3959,6 +4017,7 @@ export const make = Effect.gen(function* () {
           headBranch: existing.headRefName,
           state: existing.state,
         },
+        title: generated.title,
         body: generated.body,
       };
     });

@@ -33,7 +33,7 @@ function layer(input: {
 }
 
 describe("GitWorkflowService", () => {
-  it.effect("regenerates and saves only the existing change request description", () => {
+  it.effect("regenerates and saves the selected change request title and description", () => {
     const pullRequest = {
       number: 42,
       title: "Existing title",
@@ -49,13 +49,15 @@ describe("GitWorkflowService", () => {
       const result = yield* workflow.regeneratePullRequestDescription({
         cwd: "/repo",
         projectId: ProjectId.make("project"),
+        reference: pullRequest.url,
       });
-      expect(result).toEqual({ pullRequest });
+      expect(result).toEqual({ pullRequest: { ...pullRequest, title: "Fresh title" } });
       expect(update).toHaveBeenCalledExactlyOnceWith({
         projectId: "project",
         host: "gitlab.com",
         repository: "group/subgroup/repo",
         number: 42,
+        title: "Fresh title",
         body: "Fresh description from branch changes",
       });
       expect(invalidate).toHaveBeenCalledExactlyOnceWith("/repo");
@@ -73,6 +75,7 @@ describe("GitWorkflowService", () => {
               generatePullRequestDescription: () =>
                 Effect.succeed({
                   pullRequest,
+                  title: "Fresh title",
                   body: "Fresh description from branch changes",
                 }),
               invalidateRemoteStatus: invalidate,
