@@ -474,6 +474,15 @@ export const refineUnknownRemoteProvider = Effect.fn("refineUnknownRemoteProvide
       if (Result.isFailure(result)) settled = false;
       else if (result.success !== null) return { provider: result.success, settled };
     }
+    for (const [index, result] of results.entries()) {
+      if (Result.isFailure(result) && Schema.is(VcsProcessTimeoutError)(result.failure)) {
+        yield* Effect.logWarning("Source control provider detection timed out; provider remains unresolved", {
+          provider: input.specs[index]!.kind,
+          cwd: input.cwd,
+          timeoutMs: result.failure.timeoutMs,
+        });
+      }
+    }
     return { provider: null, settled };
   },
 );
