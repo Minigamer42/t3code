@@ -100,22 +100,24 @@ export const layerWith = (
         const delayMaxMs = stallMs(readings);
         if (delayMaxMs === undefined) return;
         const { utilization, usage, rssBytes } = readings;
+        const attributes = {
+          delayMaxMs,
+          utilization: Math.round(utilization * 100) / 100,
+          cpuUserMs: Math.round(usage.userCPUTime / 1000),
+          cpuSystemMs: Math.round(usage.systemCPUTime / 1000),
+          majorPageFaults: usage.majorPageFault,
+          minorPageFaults: usage.minorPageFault,
+          involuntaryContextSwitches: usage.involuntaryContextSwitches,
+          rssMb: Math.round(rssBytes / 1024 / 1024),
+        };
         // Root, as the stall has no caller to attach to. Warn level keeps it when
         // T3CODE_TRACE_MIN_LEVEL is raised to cut trace noise.
         yield* Effect.logWarning(`event loop stalled for ${delayMaxMs} ms`).pipe(
+          Effect.annotateLogs(attributes),
           Effect.withSpan("server.eventLoop.stall", {
             root: true,
             level: "Warn",
-            attributes: {
-              delayMaxMs,
-              utilization: Math.round(utilization * 100) / 100,
-              cpuUserMs: Math.round(usage.userCPUTime / 1000),
-              cpuSystemMs: Math.round(usage.systemCPUTime / 1000),
-              majorPageFaults: usage.majorPageFault,
-              minorPageFaults: usage.minorPageFault,
-              involuntaryContextSwitches: usage.involuntaryContextSwitches,
-              rssMb: Math.round(rssBytes / 1024 / 1024),
-            },
+            attributes,
           }),
         );
       });

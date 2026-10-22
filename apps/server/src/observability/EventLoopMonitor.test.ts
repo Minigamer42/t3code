@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as References from "effect/References";
 import * as Tracer from "effect/Tracer";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -29,6 +31,15 @@ describe("EventLoopMonitor", () => {
   it.effect("records a warning span only for samples that saw a stall", () =>
     Effect.gen(function* () {
       const spans: Array<Tracer.NativeSpan> = [];
+      const warnings: Array<unknown> = [];
+      const logger = Logger.make(({ logLevel, message, fiber }) => {
+        if (logLevel === "Warn") {
+          warnings.push([
+            Array.isArray(message) ? message[0] : message,
+            fiber.getRef(References.CurrentLogAnnotations),
+          ]);
+        }
+      });
       const tracer = Tracer.make({
         span: (options) => {
           const span = new Tracer.NativeSpan(options);
@@ -46,7 +57,11 @@ describe("EventLoopMonitor", () => {
         yield* TestClock.adjust("60 seconds");
         assert.lengthOf(spans, 0);
         yield* TestClock.adjust("30 seconds");
-      }).pipe(Effect.scoped, Effect.withTracer(tracer));
+      }).pipe(
+        Effect.scoped,
+        Effect.withTracer(tracer),
+        Effect.provide(Logger.layer([logger, Logger.tracerLogger], { mergeWithExisting: false })),
+      );
 
       assert.deepStrictEqual(
         spans.map((span) => span.name),
@@ -63,6 +78,9 @@ describe("EventLoopMonitor", () => {
         involuntaryContextSwitches: 57,
         rssMb: 1536,
       });
+      assert.deepStrictEqual(warnings, [
+        ["event loop stalled for 4950 ms", Object.fromEntries(span!.attributes)],
+      ]);
       assert.deepStrictEqual(
         span!.events.map(([name, , attributes]) => [name, attributes["effect.logLevel"]]),
         [["event loop stalled for 4950 ms", "WARN"]],
