@@ -2280,8 +2280,8 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 
 // Screen readers skim a transcript by heading, so every message announces its
 // author as one. The thread title in ChatHeader is an <h2>; headings written
-// inside a message are exposed below this level. Only final response headings
-// are visible; author headings for users and commentary are hidden.
+// inside a message are exposed below this level. Author headings are hidden;
+// incomplete responses additionally show their status.
 const MESSAGE_HEADING_LEVEL = 3;
 
 function MessageAuthorHeading({ children }: { children: string }) {
@@ -2864,15 +2864,15 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             : "mt-2 border-t border-border px-1 pt-3 pb-0.5",
         )}
       >
-        {isCommentary ? (
-          <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
-        ) : (
+        {row.assistantLabel === "Incomplete response" ? (
           <h3
             className="mb-2 select-none text-xs font-medium text-foreground"
             aria-label={`T3 Code: ${row.assistantLabel}`}
           >
             {row.assistantLabel}
           </h3>
+        ) : (
+          <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
         )}
         <div data-thread-find-text="true">
           <AssistantCitationSource
