@@ -143,7 +143,7 @@ minimumReleaseAgeExclude:
   - expo-sharing@58.0.13
   - expo-sqlite@58.0.8
   - expo-symbols@58.0.3
-  - electron@44.4.5
+  - electron@44.4.5 || 44.5.0 || 44.9.1
   - "@anthropic-ai/claude-agent-sdk@0.3.276"
   - "@alchemy.run/cloudflare-runtime@2.0.0-beta.80"
   - "@alchemy.run/floci@2.0.0-beta.80"
@@ -191,6 +191,37 @@ minimumReleaseAgeExclude:
   - "@opencode/protocol@2.0.28"
   - "@opencode/schema@2.0.28"
   - "@muse-code/sdk@1.4.6"
+  - xml2js@0.5.0
+  - path-to-regexp@6.3.0
+  - uuid@11.1.1
+  - valibot@1.4.2
+  - decode-uri-component@0.4.3 || 0.5.1
+  - node-forge@1.4.1
+  - smol-toml@1.8.1
+  - katex@0.18.2
+  - seroval@1.6.1 || 1.6.3 || 1.6.8
+  - source-map-js@1.2.2
+  - proxy-addr@2.0.8
+  - sharp@0.35.5
+  - shell-quote@1.11.0
+  - '@modelcontextprotocol/sdk@1.30.1 || 1.31.0 || 1.32.0'
+  - hono@4.13.11
+  - vite-plus@1.0.1 || 1.3.0
+  - '@vitest/browser@5.0.5'
+  - '@vitest/ui@5.0.5'
+  - '@vitest/mocker@5.0.3'
+  - stream-json@3.6.1
+  - dompurify@3.4.17
+  - ip-address@10.7.4
+  - zod@4.6.6
+  - body-parser@2.4.0
+  - undici@6.29.1 || 7.30.1 || 8.12.2
+  - fast-uri@3.1.9
+  - deepmerge@4.3.2
+  - '@hono/node-server@2.1.3'
+  - qs@6.16.1
+  - minimatch@11.0.1
+  - glob@14.0.2
 
 overrides:
   # Keep jsdom's optional peer consistent so Vite+ has one test-runner instance.
@@ -322,6 +353,6 @@ publicHoistPattern:
   - "@cursor/sdk-*"
 
 supportedArchitectures:
-  cpu: [current, x64]
-  libc: [current, glibc]
-  os: [current, linux]
+  cpu: [ current, x64 ]
+  libc: [ current, glibc ]
+  os: [ current, linux ]

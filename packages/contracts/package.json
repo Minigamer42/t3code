@@ -25,10 +25,10 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
-    "effect": "catalog:"
+    "effect": "4.0.4"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "vite-plus": "catalog:"
+    "@effect/vitest": "4.0.4",
+    "vite-plus": "1.4.0"
   }
 }

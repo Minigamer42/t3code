@@ -15,9 +15,9 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@t3tools/source-control-core": "workspace:*",
-    "effect": "catalog:"
+    "effect": "4.0.4"
   },
   "devDependencies": {
-    "@types/node": "catalog:"
+    "@types/node": "24.12.4"
   }
 }

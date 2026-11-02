@@ -496,7 +496,7 @@
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
     "@t3tools/contracts": "workspace:*",
-    "effect": "catalog:",
+    "effect": "4.0.4",
     "jose": "catalog:",
     "mdast-util-directive": "catalog:",
     "micromark-extension-directive": "catalog:",
@@ -508,13 +508,13 @@
     "remark-parse": "catalog:",
     "remark-rehype": "catalog:",
     "unified": "catalog:",
-    "yaml": "catalog:"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
-    "@effect/vitest": "catalog:",
-    "@types/node": "catalog:",
+    "@effect/platform-node": "4.0.4",
+    "@effect/vitest": "4.0.4",
+    "@types/node": "24.12.4",
     "micromark-util-types": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "1.4.0"
   }
 }

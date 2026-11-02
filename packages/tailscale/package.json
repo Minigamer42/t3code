@@ -14,11 +14,11 @@
   },
   "dependencies": {
     "@t3tools/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "4.0.4"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "@types/node": "catalog:",
-    "vite-plus": "catalog:"
+    "@effect/vitest": "4.0.4",
+    "@types/node": "24.12.4",
+    "vite-plus": "1.4.0"
   }
 }

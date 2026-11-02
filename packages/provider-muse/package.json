@@ -29,13 +29,13 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
     "@t3tools/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "4.0.4"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
-    "@effect/vitest": "catalog:",
+    "@effect/platform-node": "4.0.4",
+    "@effect/vitest": "4.0.4",
     "@t3tools/provider-testing": "workspace:*",
-    "@types/node": "catalog:",
-    "vite-plus": "catalog:"
+    "@types/node": "24.12.4",
+    "vite-plus": "1.4.0"
   }
 }
