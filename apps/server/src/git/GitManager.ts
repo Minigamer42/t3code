@@ -922,14 +922,8 @@ export const make = Effect.gen(function* () {
 
   const readRepositoryInstructions = (cwd: string, fileName: string) =>
     Effect.gen(function* () {
-      const root = yield* fileSystem.realPath(cwd);
-      const instructionPath = yield* fileSystem.realPath(path.join(root, fileName));
-      // A drive root such as `D:\` already ends with a separator, so compare
-      // with path.relative instead of a `${root}${sep}` prefix.
-      const relative = path.relative(root, instructionPath);
-      if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-        return "";
-      }
+      // Worktrees can share instructions through symlinks to files outside the project.
+      const instructionPath = yield* fileSystem.realPath(path.join(cwd, fileName));
       const info = yield* fileSystem.stat(instructionPath);
       if (info.type !== "File" || info.size > ByteSize.bytes(20_000)) {
         return "";
