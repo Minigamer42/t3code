@@ -239,6 +239,35 @@ describe("threadHistoryPaging", () => {
     expect([...older.items, ...recent.items]).toHaveLength(items.length);
   });
 
+  it("splits oversized user turns into resumable pages", () => {
+    const first = makeRow(0);
+    const prompt = {
+      ...first,
+      item: {
+        ...first.item,
+        type: "user_message" as const,
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+        inputIntent: "turn_start" as const,
+        messageId: MessageId.make("large-prompt"),
+        text: "Run a long task",
+        attachments: [],
+      },
+    } as OrchestrationV2ProjectedTurnItem;
+    const items = [prompt, ...Array.from({ length: 1_200 }, (_, index) => makeRow(index + 1))];
+    const recent = selectRecentTimelineWindow({ items, snapshotSequence: 1 });
+    expect(recent.items.length).toBeLessThanOrEqual(1_000);
+    expect(recent.hasMoreHistory).toBe(true);
+    const older = selectHistoryPageFromCursor({
+      items,
+      cursor: recent.nextCursor!,
+      snapshotSequence: 1,
+    });
+    expect([...older.items, ...recent.items].map((row) => row.sourceItemId)).toEqual(
+      items.map((row) => row.sourceItemId),
+    );
+  });
+
   it("encodes opaque cursors with stable source identity", () => {
     const cursor = encodeThreadHistoryCursor({
       snapshotSequence: 9,

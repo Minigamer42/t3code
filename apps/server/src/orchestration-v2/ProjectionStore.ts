@@ -86,6 +86,7 @@ import {
   isConversationHistoryItem,
   isThreadHistoryTurnStart,
   THREAD_HISTORY_MAX_RAW_TURNS,
+  THREAD_HISTORY_MAX_TURN_ITEMS,
   selectHistoryPageFromCursor,
   selectRecentTimelineWindow,
   THREAD_HISTORY_PAGE_POLICY,
@@ -2857,7 +2858,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ORDER BY ordinal DESC, turn_item_id DESC
                   LIMIT CASE
                     WHEN ${window.rowLimit} = 0 THEN 0
-                    WHEN (SELECT COUNT(*) FROM user_anchors) > 0 THEN -1
+                    WHEN (SELECT COUNT(*) FROM user_anchors) > 0 THEN ${THREAD_HISTORY_MAX_TURN_ITEMS + 2}
                     ELSE ${window.rowLimit}
                   END
                 ), retained AS MATERIALIZED (
@@ -6678,7 +6679,9 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                   ? rawStart
                   : anchors.at(-anchorLimit)!
                 : Math.max(0, anchorIndex - options.rowLimit);
-            const visibleTurnItems = candidates.slice(start);
+            const visibleTurnItems = candidates.slice(
+              Math.max(start, candidates.length - THREAD_HISTORY_MAX_TURN_ITEMS - 2),
+            );
             return {
               ...snapshot,
               projection: { ...snapshot.projection, visibleTurnItems },

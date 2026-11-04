@@ -56,6 +56,7 @@ const modelSelection = { instanceId: provider, model: "gpt-5.4" };
 const projectId = ProjectId.make("project:compact-transport");
 const PARENT = ThreadId.make("thread:compact-transport:parent");
 const FORK = ThreadId.make("thread:compact-transport:fork");
+const HUGE = ThreadId.make("thread:compact-transport:huge");
 const LONG = ThreadId.make("thread:compact-transport:long");
 const parentRun = RunId.make("run:compact-transport:parent");
 const longRun = RunId.make("run:compact-transport:long");
@@ -201,6 +202,26 @@ function itemUpdated(
   };
 }
 
+function promptUpdated(at: DateTime.Utc): OrchestrationV2DomainEvent {
+  const event = itemUpdated(HUGE, null, "prompt", 1, at);
+  if (event.type !== "turn-item.updated" || event.payload.type !== "command_execution") {
+    throw new Error("Expected command fixture");
+  }
+  return {
+    ...event,
+    payload: {
+      ...event.payload,
+      type: "user_message",
+      messageId: MessageId.make("message:huge"),
+      text: "Run a long task",
+      attachments: [],
+      createdBy: "user",
+      creationSource: "web",
+      inputIntent: "turn_start",
+    },
+  };
+}
+
 const seed = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const at = yield* DateTime.now;
@@ -210,6 +231,11 @@ const seed = Effect.gen(function* () {
     ...[1, 2, 3].map((n) => itemUpdated(PARENT, parentRun, `parent-${n}`, n, at)),
     threadCreated(FORK, at, parentRun),
     ...[1, 2, 3, 4].map((n) => itemUpdated(FORK, null, `fork-${n}`, n, at)),
+    threadCreated(HUGE, at),
+    promptUpdated(at),
+    ...Array.from({ length: 1_200 }, (_, index) =>
+      itemUpdated(HUGE, null, `huge-${index}`, index + 2, at),
+    ),
     threadCreated(LONG, at),
     runCreated(LONG, longRun, at),
     // The request sits far outside the recent window; its result is inside it.
@@ -278,6 +304,21 @@ function itemIds(projection: OrchestrationV2ThreadProjection): string[] {
 }
 
 it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
+  it.effect("bounds oversized user turns before decoding and keeps older activity pageable", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const window = yield* projections.getThreadSnapshotWindow(HUGE, {
+        rowLimit: 77,
+        userTurnLimit: 10,
+      });
+      assert.isAtMost(window.projection.turnItems.length, 1_002);
+      const response = yield* withHttp(async (get) =>
+        decodeBounded(await (await get(`/api/orchestration/threads/${HUGE}/bounded`)).text()),
+      );
+      assert.isTrue(response.hasMoreHistory);
+      assert.isNotNull(response.historyCursor);
+    }),
+  );
   describe.each([
     ["fork", FORK],
     ["long run with a retained interrupt request", LONG],

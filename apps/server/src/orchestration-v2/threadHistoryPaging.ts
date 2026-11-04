@@ -7,8 +7,8 @@ import type {
 } from "@t3tools/contracts";
 
 /**
- * Match the V1 conversation windows. Item/byte budgets only apply to histories
- * without turn starts; tool activity must not split an ordinary conversation turn.
+ * Keep ordinary conversation turns together. Oversized turns still need a
+ * safety ceiling so tool activity cannot make a snapshot an unbounded read.
  */
 export const THREAD_HISTORY_PAGE_POLICY = {
   maxUserTurns: 10,
@@ -23,6 +23,8 @@ export function isConversationHistoryItem(item: Pick<OrchestrationV2TurnItem, "t
   return !["command_execution", "reasoning", "file_change", "dynamic_tool"].includes(item.type);
 }
 export const THREAD_HISTORY_MAX_RAW_TURNS = 150;
+/** Split unusually large turns; leave two look-behind rows in SQL for paging. */
+export const THREAD_HISTORY_MAX_TURN_ITEMS = 1_000;
 
 /** Extra rows let the projection query retain an inclusive cursor and prove another page exists. */
 export const THREAD_HISTORY_SNAPSHOT_ROW_LIMIT = THREAD_HISTORY_PAGE_POLICY.maxItems + 2;
@@ -178,7 +180,7 @@ export function isThreadHistoryUserTurn(item: HistoryRow["item"]): boolean {
 
 /**
  * Walk a chronological timeline backward from the exclusive end, collecting rows
- * through complete user turns. Histories without turn starts use row budgets
+ * through user turns up to the safety ceiling. Histories without turn starts use row budgets
  * and always admit at least one row so oversized items cannot deadlock paging.
  */
 function selectOlderTimelinePage<Row extends HistoryRow>(input: {
@@ -207,9 +209,10 @@ function selectOlderTimelinePage<Row extends HistoryRow>(input: {
     const rowBytes = turnLimit === undefined ? rowCost(row) : 0;
     if (
       selected.length > 0 &&
-      (turnLimit === undefined
-        ? selected.length >= policy.maxItems || encodedBytes + rowBytes > policy.maxEncodedBytes
-        : userTurns >= turnLimit || rawTurns >= THREAD_HISTORY_MAX_RAW_TURNS)
+      (selected.length >= THREAD_HISTORY_MAX_TURN_ITEMS ||
+        (turnLimit === undefined
+          ? selected.length >= policy.maxItems || encodedBytes + rowBytes > policy.maxEncodedBytes
+          : userTurns >= turnLimit || rawTurns >= THREAD_HISTORY_MAX_RAW_TURNS))
     ) {
       break;
     }

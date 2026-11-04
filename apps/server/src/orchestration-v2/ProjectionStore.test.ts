@@ -713,7 +713,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 
-  it.effect("pages complete user turns through SQL regardless of tool count or payload size", () =>
+  it.effect("bounds SQL turn windows and pages all activity without gaps", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const sql = yield* SqlClient.SqlClient;
@@ -857,17 +857,17 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         nodePlan.map((row) => row.detail),
         "SEARCH orchestration_v2_projection_nodes USING INDEX orchestration_v2_projection_nodes_live_idx (thread_id=?)",
       );
-      // Only the selected turn cohort and two lookahead anchors are decoded.
-      assert.lengthOf(initial.projection.turnItems, 12 * 102);
+      // Turn anchors cannot bypass the row ceiling before payload decoding.
+      assert.lengthOf(initial.projection.turnItems, 1_002);
       const bounded = buildBoundedThreadProjection({
         projection: initial.projection,
         snapshotSequence: 0,
       });
-      assert.lengthOf(bounded.projection.visibleTurnItems, 10 * 102);
-      assert.strictEqual(bounded.projection.visibleTurnItems[0]?.sourceItemId, allIds[35 * 102]);
+      assert.lengthOf(bounded.projection.visibleTurnItems, 1_000);
+      assert.strictEqual(bounded.projection.visibleTurnItems[0]?.sourceItemId, allIds.at(-1_000));
       const loaded = bounded.projection.visibleTurnItems.map((row) => String(row.sourceItemId));
       let cursor = bounded.historyCursor;
-      for (const turns of [20, 15]) {
+      for (let pages = 0; cursor !== null && pages < 100; pages += 1) {
         assert.isNotNull(cursor);
         const anchor = decodeThreadHistoryCursor(cursor!);
         const snapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
@@ -881,7 +881,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           cursor: cursor!,
           snapshotSequence: 0,
         });
-        assert.lengthOf(page.items, turns * 102);
+        assert.isAbove(page.items.length, 0);
+        assert.isAtMost(page.items.length, 1_000);
         loaded.unshift(...page.items.map((row) => String(row.sourceItemId)));
         cursor = page.nextCursor;
       }
