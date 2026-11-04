@@ -1,7 +1,7 @@
-import { useClerk } from "@clerk/react";
+import { useConnectAuth } from "../../cloud/connectAuth";
 
 export function useClerkLoadFailed() {
-  return useClerk().status === "error";
+  return useConnectAuth().loadFailed === true;
 }
 
 export function retryClerkLoad() {

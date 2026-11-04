@@ -1,3 +1,4 @@
+import { isHostedStaticApp } from "./hostedPairing";
 import React from "react";
 import ReactDOM from "react-dom/client";
 
@@ -30,7 +31,9 @@ const managedAuthShellModule =
   clerkPublishableKey && hasCloudPublicConfig()
     ? isElectron
       ? import("./components/clerk/ElectronManagedAuthShell")
-      : import("./components/clerk/BrowserManagedAuthShell")
+      : isHostedStaticApp() || clerkPublishableKey.startsWith("pk_test_")
+        ? import("./components/clerk/BrowserManagedAuthShell")
+        : import("./components/clerk/LocalManagedAuthShell")
     : null;
 
 export const startup = Promise.all([
