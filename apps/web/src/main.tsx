@@ -6,6 +6,7 @@ import "./index.css";
 
 import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
+import { isHostedStaticApp } from "./hostedPairing";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
 import {
@@ -51,7 +52,9 @@ const managedAuthShellModule =
   clerkPublishableKey && hasCloudPublicConfig()
     ? isElectron
       ? import("./components/clerk/ElectronManagedAuthShell")
-      : import("./components/clerk/BrowserManagedAuthShell")
+      : isHostedStaticApp() || clerkPublishableKey.startsWith("pk_test_")
+        ? import("./components/clerk/BrowserManagedAuthShell")
+        : import("./components/clerk/LocalManagedAuthShell")
     : null;
 
 // The index.html boot splash lives inside #root, and React's first commit

@@ -1,4 +1,4 @@
-import { useAuth } from "@clerk/react";
+import { useConnectAuth as useAuth } from "./connectAuth";
 import { ManagedRelay, setManagedRelaySession } from "@t3tools/client-runtime/relay";
 import {
   reportAtomCommandResult,

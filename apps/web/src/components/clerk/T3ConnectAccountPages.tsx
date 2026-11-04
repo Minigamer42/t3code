@@ -1,3 +1,4 @@
+import { useConnectAuth } from "../../cloud/connectAuth";
 import { useAuth, useClerk } from "@clerk/react";
 import { ServerIcon, SmartphoneIcon } from "lucide-react";
 import { type ReactNode, useCallback, useState } from "react";
@@ -29,7 +30,7 @@ type PortalTargets = Readonly<Record<string, HTMLDivElement | undefined>>;
  * UserButton. Clerk mounts custom pages into DOM nodes it owns, so the caller
  * must keep `portals` rendered for as long as the modal can be open.
  */
-export function useT3ConnectAccountPage(): {
+export function useClerkT3ConnectAccountPage(): {
   readonly open: (() => void) | null;
   readonly portals: ReactNode;
 } {
@@ -63,4 +64,9 @@ export function useT3ConnectAccountPage(): {
   });
 
   return { open: isSignedIn ? open : null, portals };
+}
+
+export function useT3ConnectAccountPage() {
+  const auth = useConnectAuth();
+  return { open: auth.isSignedIn ? auth.openAccount : null, portals: null };
 }

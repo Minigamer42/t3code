@@ -1,3 +1,4 @@
+import * as BrowserAuth from "./cloud/BrowserAuth.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Clock from "effect/Clock";
@@ -672,6 +673,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
 );
 
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
+  Layer.provideMerge(BrowserAuth.layer),
   // Misc.
   // Usage reads provider history through the ProviderHost, which needs the
   // background policy below it.

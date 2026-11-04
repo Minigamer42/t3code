@@ -38,8 +38,8 @@ vi.mock("@effect/atom-react", () => ({
     ),
   }),
 }));
-vi.mock("@clerk/react", () => ({
-  useAuth: () => ({ getToken: testState.getToken, isSignedIn: true }),
+vi.mock("./connectAuth", () => ({
+  useConnectAuth: () => ({ getToken: testState.getToken, isSignedIn: true }),
 }));
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: testState.toast } }));
 vi.mock("../state/relay", () => ({
