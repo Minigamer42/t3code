@@ -133,6 +133,19 @@ describe("commit menu actions", () => {
 });
 
 describe("git action progress presentation", () => {
+  it("shows commit splitting in the same progress area as change-request creation", () => {
+    assert.deepEqual(
+      resolveGitActionProgressPresentation({
+        isRunning: true,
+        operation: "split_commits",
+        currentLabel: "Splitting into logical commits...",
+        lastOutputLine: null,
+        phaseStartedAtMs: 1_000,
+        hookStartedAtMs: null,
+      }),
+      { status: "Splitting into logical commits...", output: null, startedAtMs: 1_000 },
+    );
+  });
   it("keeps the phase on the first row and hook output on the second", () => {
     assert.deepEqual(
       resolveGitActionProgressPresentation({

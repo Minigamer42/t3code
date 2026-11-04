@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
+  CommandId,
   SourceControlProviderKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -186,7 +187,12 @@ function requestVcsStatusRefresh(
   }
   void refresh({ environmentId, input: { cwd } });
 }
-const RUNNING_SOURCE_CONTROL_ACTIONS = ["runStackedAction", "pull", "publishRepository"] as const;
+const RUNNING_SOURCE_CONTROL_ACTIONS = [
+  "runStackedAction",
+  "pull",
+  "publishRepository",
+  "splitCommits",
+] as const;
 
 /** Every built-in host, in the order the built-in definitions list them. */
 const PUBLISH_PROVIDER_OPTIONS = sourceControlClients.definitions.map((definition) => ({
@@ -1016,6 +1022,10 @@ export default function GitActionsControl({
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "thread branch metadata update",
+  );
+  const cancelCommitWorkflow = useAtomCommand(
+    gitEnvironment.cancelCommitWorkflow,
+    "cancel commit splitting",
   );
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const successScopeKey = `${activeEnvironmentId ?? ""}\u0000${gitCwd ?? ""}`;
@@ -2209,6 +2219,27 @@ export default function GitActionsControl({
         </Group>
       )}
 
+      {vcsActionState.isRunning &&
+        vcsActionState.operation === "split_commits" &&
+        vcsActionState.actionId &&
+        activeEnvironmentId &&
+        gitCwd && (
+          <ThreadDetailsControl
+            variant="ghost"
+            size="sm"
+            part="row"
+            disabled={!canWriteSourceControl}
+            onClick={() => {
+              if (!vcsActionState.actionId) return;
+              void cancelCommitWorkflow({
+                environmentId: activeEnvironmentId,
+                input: { cwd: gitCwd, commandId: CommandId.make(vcsActionState.actionId) },
+              });
+            }}
+          >
+            Cancel split
+          </ThreadDetailsControl>
+        )}
       {isPanel && isRepo ? (
         <ThreadDetailsControl
           type="button"
