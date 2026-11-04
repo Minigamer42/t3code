@@ -105,6 +105,16 @@ function OverlayContent(props: { readonly progress: GitActionProgress }) {
           type="monochrome"
         />
       ) : null}
+      {progress.onCancel && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cancel commit splitting"
+          onPress={progress.onCancel}
+          className="min-h-11 justify-center px-2"
+        >
+          <Text className="text-sm font-medium text-foreground">Cancel</Text>
+        </Pressable>
+      )}
     </>
   );
 
