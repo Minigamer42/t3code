@@ -9,6 +9,14 @@ export function createGitEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    cancelCommitWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:cancel-commit-workflow",
+      tag: WS_METHODS.gitCancelCommitWorkflow,
+    }),
+    startCommitWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:start-commit-workflow",
+      tag: WS_METHODS.gitStartCommitWorkflow,
+    }),
     pullRequestResolution: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:resolve-pull-request",
       tag: WS_METHODS.gitResolvePullRequest,
