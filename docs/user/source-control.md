@@ -202,6 +202,15 @@ Choose how commit messages and pull request titles and descriptions are written 
 project's instructions and recent commit subjects. **Custom instructions** applies your own
 instructions to commits and pull requests.
 
+Use **Split into logical commits** to arrange uncommitted changes or existing branch commits by
+responsibility and dependency. It uses the model and writing style from **Settings → Source Control**,
+including project overrides, and runs independently as a quick action without chat history.
+Existing branch history requires a clean feature branch; leave the base branch blank to use the
+repository default. The workflow reads `.t3code/commit-message.md` and is instructed to build in a
+separate worktree, check intermediate states, preserve the final contents, and keep a backup ref.
+The dialog stays open while it runs and shows the result when it finishes. Use **Cancel** to stop
+the action. Nothing is pushed.
+
 After rebasing a published branch, use **Push** and confirm **Force push with lease**. The push
 stops if the upstream changed since T3 Code last fetched it.
 
