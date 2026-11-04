@@ -350,6 +350,20 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         ) : null}
         {Platform.OS !== "android" ? <View className="ml-12 h-px bg-border" /> : null}
         <SheetListRow
+          icon="arrow.branch"
+          title="Split into logical commits"
+          subtitle="Build a dependency-ordered history using your Source Control settings"
+          disabled={!canWriteSourceControl || !gitActions.canChangeThreadBranch || busy || !isRepo}
+          onPress={() =>
+            navigation.navigate("GitCommit", {
+              environmentId: String(environmentId),
+              threadId: String(threadId),
+              workflow: true,
+            })
+          }
+        />
+        {Platform.OS !== "android" ? <View className="ml-12 h-px bg-border" /> : null}
+        <SheetListRow
           icon="text.bubble"
           title="Review changes"
           subtitle="Inspect changes, uncommitted edits, and turn diffs"

@@ -6,7 +6,9 @@ import {
   flattenCommitFileTree,
   toggleCommitFiles,
 } from "@t3tools/client-runtime/commit-file-tree";
-import { useCallback, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CommandId, type GitStartCommitWorkflowInput } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,13 +28,18 @@ import { vcsEnvironment } from "../../../state/vcs";
 import { ThemedSwitch } from "../../../components/ThemedSwitch";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../../state/preferences";
 import { SheetActionButton } from "./gitSheetComponents";
+import { gitEnvironment } from "../../../state/git";
+import { useAtomCommand } from "../../../state/use-atom-command";
+import { uuidv4 } from "../../../lib/uuid";
 
 type GitCommitSheetProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
+  readonly workflow?: boolean;
 }>;
 
 export function GitCommitSheet(_props: GitCommitSheetProps) {
+  const isWorkflow = _props.route.params.workflow === true;
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -69,6 +76,37 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
+  const [workflowScope, setWorkflowScope] = useState<"working_tree" | "branch">("working_tree");
+  const [baseRef, setBaseRef] = useState("");
+  const [startingWorkflow, setStartingWorkflow] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [workflowResult, setWorkflowResult] = useState<string | null>(null);
+  const [cancellingWorkflow, setCancellingWorkflow] = useState(false);
+  const workflowRequest = useRef<{ key: string; input: GitStartCommitWorkflowInput } | null>(null);
+  const startWorkflow = useAtomCommand(gitEnvironment.startCommitWorkflow, {
+    reportFailure: false,
+  });
+  const cancelWorkflow = useAtomCommand(gitEnvironment.cancelCommitWorkflow, {
+    reportFailure: false,
+  });
+  const inFlight = useRef<Parameters<typeof startWorkflow>[0] | null>(null);
+  useEffect(
+    () => () => {
+      const active = inFlight.current;
+      if (active)
+        void cancelWorkflow({
+          environmentId: active.environmentId,
+          input: {
+            commandId: active.input.commandId,
+            cwd: active.input.cwd,
+          },
+        });
+    },
+    [cancelWorkflow],
+  );
+  const canStartWorkflow = useAtomValue(
+    gitEnvironment.startCommitWorkflow.permissionAtom(selectedThread?.environmentId ?? null),
+  );
 
   const selectedFiles = allFiles.filter((file) => !excludedFiles.has(file.path));
   const allSelected = selectedFiles.length === allFiles.length;
@@ -76,29 +114,93 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
   const selectedInsertions = selectedFiles.reduce((sum, file) => sum + file.insertions, 0);
   const selectedDeletions = selectedFiles.reduce((sum, file) => sum + file.deletions, 0);
   const selectedFilePreview = selectedFiles.slice(0, 3);
+  const workflowUnavailable =
+    selectedThread?.id !== _props.route.params.threadId ||
+    selectedThread?.environmentId !== _props.route.params.environmentId ||
+    !gitStatus.data?.refName ||
+    (workflowScope === "working_tree"
+      ? noneSelected
+      : isDefaultRef || gitStatus.data?.hasWorkingTreeChanges !== false);
+  const runWorkflow = async () => {
+    if (
+      !selectedThread ||
+      !selectedThreadCwd ||
+      !canStartWorkflow ||
+      startingWorkflow ||
+      workflowUnavailable ||
+      !gitStatus.data?.refName
+    )
+      return;
+    const payload = {
+      threadId: selectedThread.id,
+      cwd: selectedThreadCwd,
+      expectedBranch: gitStatus.data.refName,
+      scope:
+        workflowScope === "branch"
+          ? { type: "branch" as const, ...(baseRef.trim() ? { baseRef: baseRef.trim() } : {}) }
+          : {
+              type: "working_tree" as const,
+              ...(!allSelected ? { filePaths: selectedFiles.map((file) => file.path) } : {}),
+            },
+      ...(dialogCommitMessage.trim() ? { instructions: dialogCommitMessage.trim() } : {}),
+    };
+    const key = JSON.stringify(payload);
+    if (workflowRequest.current?.key !== key)
+      workflowRequest.current = {
+        key,
+        input: {
+          ...payload,
+          commandId: CommandId.make(uuidv4()),
+        },
+      };
+    setStartingWorkflow(true);
+    setWorkflowError(null);
+    const target = {
+      environmentId: selectedThread.environmentId,
+      input: workflowRequest.current.input,
+    };
+    inFlight.current = target;
+    const result = await startWorkflow(target);
+    inFlight.current = null;
+    setStartingWorkflow(false);
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
+      setWorkflowError(cause instanceof Error ? cause.message : "Could not split commits.");
+      return;
+    }
+    setWorkflowResult(result.value.summary);
+  };
 
-  const runCommitAction = useCallback(
-    async (featureBranch: boolean) => {
-      if (!canWriteSourceControl || (featureBranch && !canChangeThreadBranch)) return;
-      const commitMessage = dialogCommitMessage.trim();
-      navigation.goBack();
-      await gitActions.onRunSelectedThreadGitAction({
-        action: "commit",
-        featureBranch,
-        ...(commitMessage ? { commitMessage } : {}),
-        ...(!allSelected ? { filePaths: selectedFiles.map((file) => file.path) } : {}),
-      });
-    },
-    [
-      allSelected,
-      canWriteSourceControl,
-      canChangeThreadBranch,
-      dialogCommitMessage,
-      gitActions,
-      navigation,
-      selectedFiles,
-    ],
-  );
+  const cancelPendingWorkflow = async () => {
+    if (!selectedThread || !workflowRequest.current || cancellingWorkflow) return;
+    setCancellingWorkflow(true);
+    const result = await cancelWorkflow({
+      environmentId: selectedThread.environmentId,
+      input: {
+        commandId: workflowRequest.current.input.commandId,
+        cwd: workflowRequest.current.input.cwd,
+      },
+    });
+    setCancellingWorkflow(false);
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
+      setWorkflowError(
+        cause instanceof Error ? cause.message : "Could not cancel commit splitting.",
+      );
+    } else workflowRequest.current = null;
+  };
+
+  const runCommitAction = async (featureBranch: boolean) => {
+    if (!canWriteSourceControl || (featureBranch && !canChangeThreadBranch)) return;
+    const commitMessage = dialogCommitMessage.trim();
+    navigation.goBack();
+    await gitActions.onRunSelectedThreadGitAction({
+      action: "commit",
+      featureBranch,
+      ...(commitMessage ? { commitMessage } : {}),
+      ...(!allSelected ? { filePaths: selectedFiles.map((file) => file.path) } : {}),
+    });
+  };
 
   return (
     <View
@@ -116,7 +218,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
       ) : null}
       {Platform.OS === "android" ? (
         <AndroidSheetHeader
-          title="Commit changes"
+          title={isWorkflow ? "Split into logical commits" : "Commit changes"}
           onBack={() => navigation.goBack()}
           hideBottomBorder
         />
@@ -135,6 +237,50 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
               : undefined
           }
         >
+          {isWorkflow && (
+            <View className="gap-3 bg-card p-4 android:rounded-[20px] ios:rounded-[22px]">
+              <Text className="text-foreground-secondary text-sm">
+                Build and check a dependency-ordered commit sequence using your Source Control
+                settings, independently without chat history. Final contents and a backup of the
+                original history are preserved. Nothing is pushed.
+              </Text>
+              {(["working_tree", "branch"] as const).map((scope) => (
+                <Pressable
+                  key={scope}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: workflowScope === scope }}
+                  disabled={startingWorkflow}
+                  onPress={() => setWorkflowScope(scope)}
+                  className="min-h-12 flex-row items-center gap-2"
+                >
+                  <Text className="text-foreground text-sm">
+                    {workflowScope === scope ? "●" : "○"}{" "}
+                    {scope === "working_tree" ? "Uncommitted changes" : "Existing branch commits"}
+                  </Text>
+                </Pressable>
+              ))}
+              {workflowScope === "branch" && (
+                <>
+                  <TextInput
+                    accessibilityLabel="Base branch"
+                    value={baseRef}
+                    onChangeText={setBaseRef}
+                    maxLength={256}
+                    placeholder="Repository default branch"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    className="min-h-12 rounded-xl bg-subtle px-4"
+                    editable={!startingWorkflow}
+                  />
+                  {workflowUnavailable && (
+                    <Text className="text-warning-foreground text-sm">
+                      Use a feature branch with a clean working tree to rebuild existing commits.
+                    </Text>
+                  )}
+                </>
+              )}
+            </View>
+          )}
           <View className="gap-3 bg-card p-4 android:rounded-[20px] ios:rounded-[22px] ios:border ios:border-border">
             <View className="android:gap-1 ios:flex-row ios:items-center ios:justify-between ios:gap-3">
               <Text className="text-foreground-muted text-sm font-medium">Branch</Text>
@@ -149,7 +295,10 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
             ) : null}
           </View>
 
-          <View className="gap-3 bg-card p-4 android:rounded-[20px] ios:rounded-[22px] ios:border ios:border-border">
+          <View
+            className="gap-3 bg-card p-4 android:rounded-[20px] ios:rounded-[22px] ios:border ios:border-border"
+            style={isWorkflow && workflowScope === "branch" ? { display: "none" } : undefined}
+          >
             <View className="flex-row items-center justify-between gap-3">
               <View className="gap-1">
                 <Text className="text-foreground text-base android:font-t3-medium ios:font-t3-bold">
@@ -394,41 +543,81 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
               </View>
             )}
           </View>
-
           <View className="android:gap-3 android:rounded-[20px] android:bg-card android:p-4 ios:gap-2">
             <Text className="text-foreground android:text-base android:font-t3-medium ios:text-sm ios:font-t3-bold">
-              Commit message
+              {isWorkflow ? "Additional instructions (optional)" : "Commit message"}
             </Text>
             <TextInput
               multiline
-              accessibilityLabel="Commit message"
+              accessibilityLabel={isWorkflow ? "Additional instructions" : "Commit message"}
               value={dialogCommitMessage}
               onChangeText={setDialogCommitMessage}
-              placeholder="Leave empty to auto-generate"
+              placeholder={
+                isWorkflow
+                  ? "Independent helpers first, then core implementation and integration…"
+                  : "Leave empty to auto-generate"
+              }
+              maxLength={isWorkflow ? 10_000 : undefined}
+              editable={!startingWorkflow}
               textAlignVertical="top"
               className="min-h-[128px] px-4 py-3.5 android:rounded-xl android:bg-sheet-solid ios:rounded-[20px]"
             />
           </View>
 
-          <View className="android:gap-2 ios:flex-row ios:gap-3">
-            <View className="ios:flex-1">
+          {workflowError && (
+            <Text accessibilityRole="alert" className="text-danger-foreground text-sm">
+              {workflowError}
+            </Text>
+          )}
+          {workflowResult && (
+            <Text selectable className="text-foreground text-sm leading-normal">
+              {workflowResult}
+            </Text>
+          )}
+          {isWorkflow ? (
+            <>
+              {startingWorkflow && (
+                <SheetActionButton
+                  icon="xmark"
+                  label={cancellingWorkflow ? "Cancelling…" : "Cancel"}
+                  disabled={cancellingWorkflow}
+                  onPress={() => void cancelPendingWorkflow()}
+                />
+              )}
               <SheetActionButton
                 icon="arrow.branch"
-                label="Commit on new branch"
-                disabled={!canChangeThreadBranch || noneSelected || busy}
-                onPress={() => void runCommitAction(true)}
-              />
-            </View>
-            <View className="ios:flex-1">
-              <SheetActionButton
-                icon="checkmark.circle"
-                label="Commit"
+                label={
+                  workflowResult ? "Done" : startingWorkflow ? "Splitting…" : "Split into commits"
+                }
                 tone="primary"
-                disabled={!canWriteSourceControl || noneSelected || busy}
-                onPress={() => void runCommitAction(false)}
+                disabled={
+                  !workflowResult &&
+                  (!canStartWorkflow || workflowUnavailable || busy || startingWorkflow)
+                }
+                onPress={() => (workflowResult ? navigation.goBack() : void runWorkflow())}
               />
+            </>
+          ) : (
+            <View className="android:gap-2 ios:flex-row ios:gap-3">
+              <View className="ios:flex-1">
+                <SheetActionButton
+                  icon="arrow.branch"
+                  label="Commit on new branch"
+                  disabled={!canChangeThreadBranch || noneSelected || busy}
+                  onPress={() => void runCommitAction(true)}
+                />
+              </View>
+              <View className="ios:flex-1">
+                <SheetActionButton
+                  icon="checkmark.circle"
+                  label="Commit"
+                  tone="primary"
+                  disabled={!canWriteSourceControl || noneSelected || busy}
+                  onPress={() => void runCommitAction(false)}
+                />
+              </View>
             </View>
-          </View>
+          )}
         </ScrollView>
       </MaterialScreenContent>
     </View>
