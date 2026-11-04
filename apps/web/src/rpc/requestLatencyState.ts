@@ -28,7 +28,11 @@ interface PendingRpcAckRequest {
 }
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
-const untrackedRpcAckMethods = new Set<string>([WS_METHODS.serverGetUsageSummary]);
+const untrackedRpcAckMethods = new Set<string>([
+  WS_METHODS.serverGetUsageSummary,
+  // This operation owns its running state in the source-control panel.
+  WS_METHODS.gitStartCommitWorkflow,
+]);
 const longRunningRpcAckMethods = new Set<string>([
   WS_METHODS.gitRewriteCommitMessages,
   WS_METHODS.serverUpdateProvider,

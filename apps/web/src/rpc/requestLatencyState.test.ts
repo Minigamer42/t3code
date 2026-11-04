@@ -59,6 +59,17 @@ describe("requestLatencyState", () => {
     expect(getSlowRpcAckRequests()).toEqual([]);
   });
 
+  it("lets commit splitting run beyond both slow-request thresholds without warning", () => {
+    trackRpcRequestSent(
+      "split",
+      WS_METHODS.gitStartCommitWorkflow,
+      `${WS_METHODS.gitStartCommitWorkflow} · env-1`,
+    );
+    vi.advanceTimersByTime(LONG_RUNNING_RPC_ACK_THRESHOLD_MS * 5);
+    expect(getSlowRpcAckRequests()).toEqual([]);
+    acknowledgeRpcRequest("split");
+  });
+
   it.each(Object.values(WS_METHODS).filter((method) => method.startsWith("pullRequests.")))(
     "ignores pull request workspace request %s",
     (method) => {
