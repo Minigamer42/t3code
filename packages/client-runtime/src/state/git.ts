@@ -4,19 +4,38 @@ import { Atom } from "effect/reactivity";
 import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
+import type { createVcsActionManager } from "./vcsAction.ts";
 
 export function createGitEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+  trackAction: ReturnType<typeof createVcsActionManager>["track"],
 ) {
+  const startCommitWorkflow = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:git:start-commit-workflow",
+    tag: WS_METHODS.gitStartCommitWorkflow,
+  });
   return {
     cancelCommitWorkflow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:git:cancel-commit-workflow",
       tag: WS_METHODS.gitCancelCommitWorkflow,
     }),
-    startCommitWorkflow: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:git:start-commit-workflow",
-      tag: WS_METHODS.gitStartCommitWorkflow,
-    }),
+    startCommitWorkflow: {
+      ...startCommitWorkflow,
+      run: (
+        registry: Parameters<typeof startCommitWorkflow.run>[0],
+        target: Parameters<typeof startCommitWorkflow.run>[1],
+      ) =>
+        trackAction(
+          registry,
+          { environmentId: target.environmentId, cwd: target.input.cwd },
+          {
+            operation: "split_commits",
+            label: "Splitting into logical commits...",
+            actionId: target.input.commandId,
+          },
+          () => startCommitWorkflow.run(registry, target),
+        ),
+    },
     pullRequestResolution: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:resolve-pull-request",
       tag: WS_METHODS.gitResolvePullRequest,
