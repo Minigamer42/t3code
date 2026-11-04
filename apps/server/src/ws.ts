@@ -200,6 +200,7 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as CommitWorkflowService from "./git/CommitWorkflowService.ts";
 import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
@@ -1279,6 +1280,7 @@ const layerWsRpc = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const commitWorkflow = yield* CommitWorkflowService.CommitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -2888,6 +2890,9 @@ const layerWsRpc = (
               ),
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) => gitWorkflow.resolvePullRequest(input),
+        [WS_METHODS.gitStartCommitWorkflow]: (input) =>
+          commitWorkflow.start(input).pipe(Effect.ensuring(refreshGitStatus(input.cwd))),
+        [WS_METHODS.gitCancelCommitWorkflow]: (input) => commitWorkflow.cancel(input),
         [WS_METHODS.gitListRewriteableCommits]: (input) =>
           gitWorkflow.listRewriteableCommits(input),
         [WS_METHODS.gitRegeneratePullRequestDescription]: (input) =>

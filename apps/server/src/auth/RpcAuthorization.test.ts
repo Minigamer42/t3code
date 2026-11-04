@@ -42,6 +42,12 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires source-control write access to start a commit workflow", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitStartCommitWorkflow)).toBe(
+      AuthSourceControlWriteScope,
+    );
+  });
+
   it("allows worktree discovery with orchestration read access", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.vcsListWorktrees)).toBe(AuthOrchestrationReadScope);
   });
