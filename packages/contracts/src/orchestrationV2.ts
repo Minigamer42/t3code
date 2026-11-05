@@ -3263,6 +3263,8 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.metadata.update"),
     commandId: CommandId,
     threadId: ThreadId,
+    /** Move the thread to another project in this environment. Resets its checkout by default. */
+    projectId: Schema.optional(ProjectId),
     title: Schema.optional(TrimmedNonEmptyString),
     regenerateTitle: Schema.optional(Schema.Boolean),
     branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -3271,6 +3273,8 @@ export const OrchestrationV2Command = Schema.Union([
     expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     /** A message queued in the same commit, so a workspace change cannot settle the thread first. */
     continuation: Schema.optional(Schema.Struct({ messageId: MessageId, text: Schema.String })),
+    /** Require an idle thread for an explicit workspace selection. */
+    expectedIdle: Schema.optional(Schema.Boolean),
     /** Reject unless no message or run has landed on this thread. */
     expectedEmpty: Schema.optional(Schema.Boolean),
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
