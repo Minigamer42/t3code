@@ -3363,8 +3363,9 @@ it.effect("uses repository instructions and naming policy for generated worktree
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-for (const worktreePath of [null, "/already-checked-out"]) {
-  it.effect(`only reuses an available local base branch (${worktreePath ?? "available"})`, () =>
+it.effect.each([null, "/already-checked-out"])(
+  "only reuses an available local base branch (%s)",
+  (worktreePath) =>
     Effect.gen(function* () {
       const created =
         yield* Deferred.make<
@@ -3409,8 +3410,7 @@ for (const worktreePath of [null, "/already-checked-out"]) {
         else assert.isTrue(input.newRefName?.startsWith("t3/") ?? false);
       }).pipe(Effect.provide(harness.layer));
     }),
-  );
-}
+);
 
 it.effect("preserves a reused branch when cancelling a claimed worktree", () =>
   Effect.gen(function* () {

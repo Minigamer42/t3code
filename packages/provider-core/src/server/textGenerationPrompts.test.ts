@@ -52,4 +52,3 @@ describe("buildCommitPlanPrompt", () => {
     expect(result.prompt).toContain("Branch: feature/split");
   });
 });
-

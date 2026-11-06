@@ -1497,4 +1497,3 @@ it.effect("passes the project before JetBrains line navigation arguments", () =>
     ]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
-

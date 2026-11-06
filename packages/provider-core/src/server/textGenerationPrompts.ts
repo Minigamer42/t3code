@@ -71,10 +71,6 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Logical commit plan
-// ---------------------------------------------------------------------------
-
 export interface CommitPlanPromptInput {
   branch: string | null;
   changeUnitSummary: string;
@@ -120,10 +116,6 @@ export function buildCommitPlanPrompt(input: CommitPlanPromptInput) {
     }),
   };
 }
-
-// ---------------------------------------------------------------------------
-// Change request content
-// ---------------------------------------------------------------------------
 
 export interface PrContentPromptInput {
   baseBranch: string;

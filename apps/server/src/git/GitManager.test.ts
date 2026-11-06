@@ -1238,7 +1238,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".t3code", "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({ hooks: { afterPush: hookCommands } }),
       );
       NodeFS.writeFileSync(NodePath.join(repoDir, "after-push.txt"), "after push\n");
@@ -1292,7 +1291,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       NodeFS.mkdirSync(NodePath.join(repoDir, ".t3code"));
       NodeFS.writeFileSync(
         NodePath.join(repoDir, ".t3code", "vcs.json"),
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify({
           hooks: {
             afterPush: [
@@ -1479,7 +1477,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         const remoteDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
         yield* runGit(repoDir, ["push", "-u", "origin", "development"]);
-        yield* runGit(remoteDir, ["symbolic-ref", "HEAD", "refs/heads/development"]);
+        yield* runGit(remoteDir, ["--git-dir=.", "symbolic-ref", "HEAD", "refs/heads/development"]);
         yield* runGit(repoDir, ["remote", "set-head", "origin", "development"]);
         yield* runGit(repoDir, ["checkout", "-b", "source-change"]);
         NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\ndetached change\n");
