@@ -1101,7 +1101,13 @@ export const make = Effect.gen(function* () {
       return;
     }
 
-    const shell = hostPlatform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh";
+    const shell =
+      hostPlatform === "win32"
+        ? yield* Config.String("ComSpec").pipe(
+            Config.withDefault("cmd.exe"),
+            Effect.orElseSucceed(() => "cmd.exe"),
+          )
+        : "/bin/sh";
 
     yield* Effect.forEach(afterPush, (configuredCommand) => {
       const processCommand =
@@ -4117,14 +4123,15 @@ export const make = Effect.gen(function* () {
     }
 
     const settings = yield* projectSettingsFor(input).pipe(
-      Effect.flatMap((resolved) =>
+      Effect.flatMap(({ settings, projectId }) =>
         providerRegistry.getProviders.pipe(
           Effect.map((providers) => ({
             modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
-              resolved,
+              settings,
               providers,
+              projectId,
             ),
-            style: resolved.sourceControlWritingStyle,
+            style: settings.sourceControlWritingStyle,
           })),
         ),
       ),

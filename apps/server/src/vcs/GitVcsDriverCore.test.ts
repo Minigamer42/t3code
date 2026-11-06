@@ -2386,7 +2386,7 @@ describe("rejected git refs", () => {
       );
 
       assert.equal(error.reason, undefined);
-      assert.equal(error.detail, "Git command exited with a non-zero status.");
+      assert.include(error.detail, "[rejected]");
     }),
   );
 });
@@ -5189,7 +5189,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("reports untracked line counts relative to a nested cwd", () =>
+    it.effect("reports untracked line counts at repository-relative paths from a nested cwd", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd);
@@ -5205,12 +5205,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         );
 
         assert.deepInclude(status.workingTree.files, {
-          path: "inside.php",
+          path: "nested/inside.php",
           insertions: 1,
           deletions: 0,
         });
         assert.deepInclude(status.workingTree.files, {
-          path: "../outside.php",
+          path: "outside.php",
           insertions: 2,
           deletions: 0,
         });
@@ -5286,7 +5286,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const status = yield* driver.statusDetails(nestedCwd);
 
         assert.deepEqual(status.workingTree.files, [
-          { path: "nested/new.txt", insertions: 0, deletions: 0 },
+          { path: "nested/new.txt", insertions: 1, deletions: 0 },
           { path: "nested/tracked.txt", insertions: 1, deletions: 0 },
           { path: "README.md", insertions: 1, deletions: 0 },
         ]);
@@ -5321,7 +5321,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const status = yield* driver.statusDetails(nestedCwd);
 
         assert.deepEqual(status.workingTree.files, [
-          { path: "nested/new.txt", insertions: 0, deletions: 0 },
+          { path: "nested/new.txt", insertions: 1, deletions: 0 },
           { path: "nested/tracked.txt", insertions: 1, deletions: 0 },
         ]);
         assert.equal(
@@ -6539,9 +6539,9 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const barePath = path.join(root, "bare.git");
         const checkoutPath = path.join(root, "checkout");
         yield* git(cwd, ["clone", "--bare", cwd, barePath]);
-        yield* git(barePath, ["worktree", "add", "--detach", checkoutPath]);
+        yield* git(cwd, [`--git-dir=${barePath}`, "worktree", "add", "--detach", checkoutPath]);
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        assert.deepStrictEqual(yield* driver.listWorktrees({ cwd: barePath }), {
+        assert.deepStrictEqual(yield* driver.listWorktrees({ cwd: checkoutPath }), {
           worktrees: [{ path: path.normalize(yield* fs.realPath(checkoutPath)), refName: null }],
         });
       }),
@@ -9757,7 +9757,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* git(remote, ["init", "--bare"]);
           yield* git(cwd, ["remote", "add", "origin", remote]);
           yield* git(cwd, ["push", "-u", "origin", initialBranch]);
-          yield* git(remote, ["symbolic-ref", "HEAD", `refs/heads/${initialBranch}`]);
+          yield* git(cwd, [
+            `--git-dir=${remote}`,
+            "symbolic-ref",
+            "HEAD",
+            `refs/heads/${initialBranch}`,
+          ]);
           yield* git(peer, ["clone", remote, "."]);
           yield* git(peer, ["config", "user.email", "peer@test.com"]);
           yield* git(peer, ["config", "user.name", "Peer"]);
@@ -9776,7 +9781,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
           assert.equal(error._tag, "GitCommandError");
           assert.equal(
-            yield* git(remote, ["log", "-1", "--pretty=%s", initialBranch]),
+            yield* git(cwd, [`--git-dir=${remote}`, "log", "-1", "--pretty=%s", initialBranch]),
             "Peer update",
           );
         }),

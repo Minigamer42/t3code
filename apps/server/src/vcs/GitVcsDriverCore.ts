@@ -1515,54 +1515,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
   });
 
-  const ensurePublishedBranchUpstream = Effect.fn("ensurePublishedBranchUpstream")(function* (
-    cwd: string,
-    remoteName: string,
-    branchName: string,
-  ) {
-    const currentUpstream = yield* resolveCurrentUpstream(cwd);
-    if (currentUpstream?.remoteName === remoteName && currentUpstream.branchName === branchName) {
-      return;
-    }
-
-    const fetchRefspec = `+refs/heads/${branchName}:refs/remotes/${remoteName}/${branchName}`;
-    const configuredFetchRefspecs = yield* runGitStdout(
-      "GitVcsDriver.ensurePublishedBranchUpstream.readFetchRefspecs",
-      cwd,
-      ["config", "--get-all", `remote.${remoteName}.fetch`],
-      true,
-    ).pipe(Effect.map((stdout) => stdout.split(/\r?\n/g)));
-    if (!configuredFetchRefspecs.includes(fetchRefspec)) {
-      yield* runGit("GitVcsDriver.ensurePublishedBranchUpstream.addFetchRefspec", cwd, [
-        "config",
-        "--add",
-        `remote.${remoteName}.fetch`,
-        fetchRefspec,
-      ]);
-    }
-
-    yield* executeGit(
-      "GitVcsDriver.ensurePublishedBranchUpstream.fetch",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", remoteName, fetchRefspec],
-      {
-        env: STATUS_UPSTREAM_REFRESH_ENV,
-      },
-    );
-
-    const resolvedUpstream = yield* resolveCurrentUpstream(cwd);
-    if (resolvedUpstream?.remoteName !== remoteName || resolvedUpstream.branchName !== branchName) {
-      return yield* new GitCommandError({
-        ...gitCommandContext({
-          operation: "GitVcsDriver.ensurePublishedBranchUpstream",
-          cwd,
-          args: ["fetch", remoteName],
-        }),
-        detail: "The pushed branch could not be resolved as the local upstream.",
-      });
-    }
-  });
-
   const fetchRemoteForStatus = Effect.fn("GitVcsDriver.fetchRemoteForStatus.wait")(function* (
     gitCommonDir: string,
     remoteName: string,
@@ -2479,9 +2431,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   ) {
     if (untrackedPaths.length === 0) return [];
 
-    const repositoryRelativePaths = untrackedPaths.map((untrackedPath) =>
-      path.relative(repositoryRoot, path.resolve(cwd, untrackedPath)).replaceAll("\\", "/"),
-    );
+    const repositoryRelativePaths = untrackedPaths.map((untrackedPath) => untrackedPath);
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
@@ -2513,7 +2463,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         );
         const entries = parseNoIndexNumstatEntries(result.stdout).map((entry) => ({
           ...entry,
-          path: path.relative(cwd, path.resolve(repositoryRoot, entry.path)).replaceAll("\\", "/"),
+          path: entry.path,
         }));
         return untrackedPaths.map((untrackedPath) => {
           const normalizedPath = untrackedPath.endsWith("/")
@@ -3315,6 +3265,54 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   // `push -u` exits 0 without the upstream when another writer holds the config lock.
+  const ensurePublishedBranchUpstream = Effect.fn("ensurePublishedBranchUpstream")(function* (
+    cwd: string,
+    remoteName: string,
+    branchName: string,
+  ) {
+    const currentUpstream = yield* resolveCurrentUpstream(cwd);
+    if (currentUpstream?.remoteName === remoteName && currentUpstream.branchName === branchName) {
+      return;
+    }
+
+    const fetchRefspec = `+refs/heads/${branchName}:refs/remotes/${remoteName}/${branchName}`;
+    const configuredFetchRefspecs = yield* runGitStdout(
+      "GitVcsDriver.ensurePublishedBranchUpstream.readFetchRefspecs",
+      cwd,
+      ["config", "--get-all", `remote.${remoteName}.fetch`],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.split(/\r?\n/g)));
+    if (!configuredFetchRefspecs.includes(fetchRefspec)) {
+      yield* runGit("GitVcsDriver.ensurePublishedBranchUpstream.addFetchRefspec", cwd, [
+        "config",
+        "--add",
+        `remote.${remoteName}.fetch`,
+        fetchRefspec,
+      ]);
+    }
+
+    yield* executeGit(
+      "GitVcsDriver.ensurePublishedBranchUpstream.fetch",
+      cwd,
+      ["fetch", "--quiet", "--no-tags", remoteName, fetchRefspec],
+      {
+        env: STATUS_UPSTREAM_REFRESH_ENV,
+      },
+    );
+
+    const resolvedUpstream = yield* resolveCurrentUpstream(cwd);
+    if (resolvedUpstream?.remoteName !== remoteName || resolvedUpstream.branchName !== branchName) {
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: "GitVcsDriver.ensurePublishedBranchUpstream",
+          cwd,
+          args: ["fetch", remoteName],
+        }),
+        detail: "The pushed branch could not be resolved as the local upstream.",
+      });
+    }
+  });
+
   const recordPushedUpstream = Effect.fn("recordPushedUpstream")(
     function* (cwd: string, branch: string, remoteName: string, publishBranch: string) {
       // Without a prior upstream, Git ignores a merge ref with no remote, so losing the second
@@ -3330,6 +3328,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       if (autoSetupRebase === "always" || autoSetupRebase === "remote") {
         yield* writeConfigValue({ cwd, key: `branch.${branch}.rebase`, value: "true" });
       }
+      yield* ensurePublishedBranchUpstream(cwd, remoteName, publishBranch);
       return true;
     },
     Effect.catch((cause) =>
@@ -3474,7 +3473,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ["push", ...forceArgs, "--", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
-      yield* ensurePublishedBranchUpstream(cwd, requestedRemoteName, publishBranch);
       return {
         status: "pushed" as const,
         branch,
@@ -3588,7 +3586,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ["push", ...forceArgs, "--", remoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
-      yield* ensurePublishedBranchUpstream(cwd, remoteName, publishBranch);
       return {
         status: "pushed" as const,
         branch,
@@ -6295,12 +6292,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const createRef: GitVcsDriver.GitVcsDriver["Service"]["createRef"] = Effect.fn("createRef")(
     function* (input) {
-      yield* executeGit("GitVcsDriver.createRef", input.cwd, ["branch", "--", input.refName, ...(input.baseRefName ? [input.baseRefName] : [])], {
-        timeoutMs: 10_000,
-        fallbackErrorDetail: "git branch create failed",
-        // `branch.autoSetupMerge=always` records HEAD's branch as the upstream.
-        writesSharedConfig: true,
-      });
+      yield* executeGit(
+        "GitVcsDriver.createRef",
+        input.cwd,
+        ["branch", "--", input.refName, ...(input.baseRefName ? [input.baseRefName] : [])],
+        {
+          timeoutMs: 10_000,
+          fallbackErrorDetail: "git branch create failed",
+          // `branch.autoSetupMerge=always` records HEAD's branch as the upstream.
+          writesSharedConfig: true,
+        },
+      );
       if (input.switchRef) {
         yield* switchRef({ cwd: input.cwd, refName: input.refName });
       }
@@ -6426,7 +6428,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     status,
     statusDetails,
     statusDetailsLocal,
-    resolveBaseRef: (cwd, branch) => resolveBaseBranchForNoUpstream(cwd, branch),
+    resolveBaseRef: Effect.fn("GitVcsDriver.resolveBaseRef")((cwd, branch) =>
+      resolveBaseBranchForNoUpstream(cwd, branch).pipe(Effect.map((base) => base?.baseRef ?? null)),
+    ),
     statusDetailsRemote,
     readRefSnapshot,
     prepareCommitContext,
