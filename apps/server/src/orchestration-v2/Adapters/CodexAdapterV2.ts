@@ -1499,6 +1499,8 @@ export const CODEX_THREAD_CONFIG = {
   // Tool calls stop waiting on the detailed reasoning summary. Codex applies it only to its
   // built-in OpenAI provider and sends each summary section whole, not as token deltas.
   "features.concurrent_reasoning_summaries": true,
+  // Compact after the final response so the next prompt usually avoids compaction.
+  model_post_turn_compact_threshold_percent: 80,
 } as const;
 
 // request_secret can wait an hour; keep Codex's MCP timeout above that.
