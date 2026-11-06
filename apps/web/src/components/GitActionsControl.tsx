@@ -1581,11 +1581,11 @@ export default function GitActionsControl({
         setIsForcePushDialogOpen(true);
         return;
       }
-      void runGitActionWithToast({ action: "push" });
+      void runGitActionWithToast({ action: item.action ?? "commit_push" });
       return;
     }
     if (item.dialogAction === "create_pr") {
-      void runGitActionWithToast({ action: "create_pr" });
+      void runGitActionWithToast({ action: item.action ?? "commit_push_pr" });
       return;
     }
     setExcludedFiles(new Set());

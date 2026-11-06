@@ -17,6 +17,7 @@ import {
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
+  CommandId,
   EnvironmentId,
   ScheduledTaskId,
   WS_METHODS,
@@ -339,6 +340,20 @@ it.effect(
         AuthOrchestrationOperateScope,
       );
       yield* prepare.authorize(registry, env, { ...input, threadId: undefined });
+      const split = createCommandPermissions(runtime, WS_METHODS.gitStartCommitWorkflow);
+      const splitInput = {
+        commandId: CommandId.make("split-command"),
+        threadId: ThreadId.make("thread"),
+        cwd: "/repo",
+        expectedBranch: "main",
+        scope: { type: "working_tree_new_branch" },
+      };
+      yield* split.authorize(registry, env, { ...splitInput, scope: { type: "working_tree" } });
+      expect(registry.get(split.permissionAtom(env, splitInput))).toBe(false);
+      expect(
+        (yield* split.authorize(registry, env, splitInput).pipe(Effect.flip)).requiredScope,
+      ).toBe(AuthOrchestrationOperateScope);
+
       registry.set(
         sessions(env),
         AsyncResult.success({
@@ -349,6 +364,8 @@ it.effect(
       );
       expect(registry.get(prepare.permissionAtom(env, input))).toBe(true);
       yield* prepare.authorize(registry, env, input);
+      expect(registry.get(split.permissionAtom(env, splitInput))).toBe(true);
+      yield* split.authorize(registry, env, splitInput);
     }),
 );
 

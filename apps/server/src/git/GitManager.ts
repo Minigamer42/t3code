@@ -185,6 +185,12 @@ export class GitManager extends Context.Service<
     readonly preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+    readonly createFeatureBranch: (input: {
+      readonly cwd: string;
+      readonly expectedBranch: string | null;
+      readonly filePaths?: readonly string[];
+      readonly settings: SourceControlTextGenerationSettings;
+    }) => Effect.Effect<string, GitManagerServiceError>;
     readonly runStackedAction: (
       input: GitRunStackedActionInput,
       options?: GitRunStackedActionOptions,
@@ -4003,6 +4009,15 @@ export const make = Effect.gen(function* () {
     const existingBranchNames = yield* gitCore.listLocalBranchNames(cwd);
     const resolvedBranch = resolveAutoBranchName(existingBranchNames, preferredBranch, naming);
 
+    const currentStatus = yield* gitCore.statusDetailsLocal(cwd);
+    if (currentStatus.branch !== branch) {
+      return yield* new GitManagerError({
+        operation: "runFeatureBranchStep",
+        cwd,
+        detail:
+          "The branch changed while preparing the feature branch. Reopen the commit dialog and try again.",
+      });
+    }
     yield* gitCore.createRef({ cwd, refName: resolvedBranch });
     yield* Effect.scoped(gitCore.switchRef({ cwd, refName: resolvedBranch }));
 
@@ -4011,6 +4026,27 @@ export const make = Effect.gen(function* () {
       resolvedCommitMessage: suggestion?.commitMessage,
       resolvedCommitSuggestion: suggestion ?? undefined,
     };
+  });
+
+  const createFeatureBranch: GitManager["Service"]["createFeatureBranch"] = Effect.fn(
+    "GitManager.createFeatureBranch",
+  )(function* (input) {
+    const status = yield* gitCore.statusDetailsLocal(input.cwd);
+    if (status.branch !== input.expectedBranch) {
+      return yield* new GitManagerError({
+        operation: "createFeatureBranch",
+        cwd: input.cwd,
+        detail: "The branch changed. Reopen the commit dialog and try again.",
+      });
+    }
+    const result = yield* runFeatureBranchStep(
+      input.settings,
+      input.cwd,
+      input.expectedBranch,
+      undefined,
+      input.filePaths,
+    );
+    return result.branchStep.name;
   });
 
   const readCommitObject = Effect.fn("readCommitObject")(function* (cwd: string, sha: string) {
@@ -4840,6 +4876,7 @@ export const make = Effect.gen(function* () {
 
   return GitManager.of({
     createWorktree,
+    createFeatureBranch,
     localStatus,
     remoteStatus,
     status,

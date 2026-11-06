@@ -162,7 +162,8 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           confirmAction: confirmableAction,
           branchName,
           includesCommit: String(
-            input.action === "commit_push" || input.action === "commit_push_pr",
+            (input.action === "commit_push" || input.action === "commit_push_pr") &&
+              gitStatus.data?.hasWorkingTreeChanges === true,
           ),
         }),
       );
@@ -216,11 +217,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         );
         return;
       }
-      await runActionWithPrompt({ action: "push" });
+      await runActionWithPrompt({ action: item.action ?? "commit_push" });
       return;
     }
     if (item.dialogAction === "create_pr") {
-      await runActionWithPrompt({ action: "create_pr" });
+      await runActionWithPrompt({ action: item.action ?? "commit_push_pr" });
     }
   };
 
