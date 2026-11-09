@@ -34,6 +34,7 @@ describe("VcsDriverRegistry", () => {
           resolveKind: (input) => Effect.succeed(input.requestedKind ?? "auto"),
           resolveBranchNaming: () => Effect.succeed(VcsProjectConfig.defaultBranchNamingConfig),
           resolveHooks: () => Effect.succeed(VcsProjectConfig.defaultHooksConfig),
+          resolveChangeRequestContext: () => Effect.succeed(null),
         }),
       ),
       Layer.provide(
