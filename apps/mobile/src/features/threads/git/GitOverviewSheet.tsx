@@ -300,8 +300,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
             !canWriteSourceControl ||
             busy ||
             !isRepo ||
-            !gitStatus.data?.hasWorkingTreeChanges ||
-            ((!gitStatus.data.refName || isDefaultRef) && !canChangeThreadBranch)
+            ((!gitStatus.data?.refName || isDefaultRef) && !canChangeThreadBranch)
           }
           onPress={() =>
             void gitActions.onRunSelectedThreadGitAction({
@@ -324,7 +323,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           ))}
         <ListRow
           icon="arrow.branch"
-          label="Rewrite commits…"
+          label="Rewrite commits"
           description="Split and regroup existing branch commits"
           disabled={!canWriteSourceControl || !gitActions.canChangeThreadBranch || busy || !isRepo}
           onPress={() =>
