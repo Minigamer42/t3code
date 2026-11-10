@@ -1496,7 +1496,7 @@ export default function GitActionsControl({
     }
     if (refreshedQuickAction.kind === "create_branch") {
       void runGitActionWithToast({
-        action: "commit",
+        action: "create_branch",
         featureBranch: true,
         skipDefaultBranchPrompt: true,
         statusOverride: status,
@@ -1565,12 +1565,15 @@ export default function GitActionsControl({
   const runMenuItem = (item: GitActionMenuItem) => {
     if (item.disabled) return;
     if (item.kind === "run_action" && item.action) {
-      void runGitActionWithToast({ action: item.action });
+      void runGitActionWithToast({
+        action: item.action,
+        featureBranch: item.featureBranch === true,
+      });
       return;
     }
     if (item.dialogAction === "create_branch") {
       void runGitActionWithToast({
-        action: "commit",
+        action: "create_branch",
         featureBranch: true,
         skipDefaultBranchPrompt: true,
       });
@@ -1581,11 +1584,17 @@ export default function GitActionsControl({
         setIsForcePushDialogOpen(true);
         return;
       }
-      void runGitActionWithToast({ action: item.action ?? "commit_push" });
+      void runGitActionWithToast({
+        action: item.action ?? "commit_push",
+        featureBranch: item.featureBranch === true,
+      });
       return;
     }
     if (item.dialogAction === "create_pr") {
-      void runGitActionWithToast({ action: item.action ?? "commit_push_pr" });
+      void runGitActionWithToast({
+        action: item.action ?? "commit_push_pr",
+        featureBranch: item.featureBranch === true,
+      });
       return;
     }
     setExcludedFiles(new Set());
@@ -1704,7 +1713,9 @@ export default function GitActionsControl({
         part="row"
         panel
         key={`${item.id}-${item.label}`}
-        disabled={!canWriteSourceControl || item.disabled}
+        disabled={
+          !canWriteSourceControl || item.disabled || (item.featureBranch && !canChangeThreadBranch)
+        }
         onClick={() => {
           runMenuItem(item);
         }}
@@ -1800,15 +1811,20 @@ export default function GitActionsControl({
           <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>Publish repository...</span>
         </ThreadDetailsControl>
       ) : null}
-      {isDetachedHead && (
-        <p className="px-2 py-1.5 text-xs text-warning">
-          Detached HEAD: create and check out a branch to enable push and{" "}
-          {changeRequestTerminology.singular} actions.
-        </p>
-      )}
-      {isCleanAndBehind && (
-        <p className="px-2 py-1.5 text-xs text-warning">Behind upstream. Pull/rebase first.</p>
-      )}
+      {gitStatusForActions &&
+        (gitStatusForActions.refName === null || gitStatusForActions.isDefaultRef) && (
+          <p className="px-2 py-1.5 text-xs text-muted-foreground">
+            Commit, Push, and Create {changeRequestTerminology.shortLabel} create a feature branch
+            first. Commit dialog can also commit directly to the current checkout.
+          </p>
+        )}
+      {gitStatusForActions &&
+        gitStatusForActions.refName !== null &&
+        !gitStatusForActions.hasWorkingTreeChanges &&
+        gitStatusForActions.behindCount > 0 &&
+        gitStatusForActions.aheadCount === 0 && (
+          <p className="px-2 py-1.5 text-xs text-warning">Behind upstream. Pull/rebase first.</p>
+        )}
       {gitStatusError && <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError}</p>}
     </>
   );
