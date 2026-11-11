@@ -40,7 +40,7 @@ type GitCommitSheetProps = StaticScreenProps<{
 
 export function GitCommitSheet(_props: GitCommitSheetProps) {
   const rewriteHistory = _props.route.params.workflow === true;
-  const [commitMode, setCommitMode] = useState("single");
+  const [commitMode, setCommitMode] = useState("logical");
   const isWorkflow = rewriteHistory || commitMode === "logical";
   const navigation = useNavigation();
   const { selectedThread } = useThreadSelection();
