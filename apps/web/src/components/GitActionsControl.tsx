@@ -497,13 +497,15 @@ export function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
     setPublishError(null);
 
     void (async () => {
-      const result = await publishRepositoryAction.run({
+      const completion = publishRepositoryAction.run({
         provider: publishProvider,
         repository: publishRepository.trim(),
         visibility: publishVisibility,
         remoteName: publishRemoteName.trim() || "origin",
         protocol: publishProtocol,
       });
+      handleOpenChange(false);
+      const result = await completion;
 
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) {
@@ -1166,12 +1168,8 @@ export default function GitActionsControl({
         message: "Regeneration is unavailable.",
       }));
     }
-    setIsRegeneratingDescription(true);
+    setInlineSuccess(null);
     const label = changeRequestTerminology.shortLabel;
-    const toastId = toastManager.add({
-      type: "loading",
-      title: `Regenerating ${label} titles and descriptions...`,
-    });
     const failures: Array<{ url: string; message: string }> = [];
     let updatedCount = 0;
     for (const candidate of candidates) {
@@ -1197,8 +1195,15 @@ export default function GitActionsControl({
     if (updatedCount > 0) {
       requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
     }
-    toastManager.update(
-      toastId,
+    if (updatedCount > 0) {
+      setInlineSuccess({
+        title: `Updated ${updatedCount} ${label} title${updatedCount === 1 ? "" : "s"} and description${updatedCount === 1 ? "" : "s"}`,
+        description: failures.length > 0 ? `${failures.length} failed` : null,
+        scopeKey: successScopeKey,
+        expiresAtMs: inlineSuccessExpiresAt(),
+      });
+    }
+    toastManager.add(
       failures.length > 0
         ? {
             type: "error",
@@ -1216,7 +1221,6 @@ export default function GitActionsControl({
                 : `Updated ${candidates.length} ${label} titles and descriptions`,
           },
     );
-    setIsRegeneratingDescription(false);
     return failures;
   };
   const isSelectingWorktreeBase =
@@ -2043,7 +2047,6 @@ export default function GitActionsControl({
           candidates={regenerateSelection.candidates}
           shortLabel={changeRequestTerminology.shortLabel}
           canRegenerate={canRegenerateDescription}
-          isRegenerating={isRegeneratingDescription}
           onRegenerate={runRegenerateDescriptions}
           onClose={() => setRegenerateSelection(null)}
         />
