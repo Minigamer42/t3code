@@ -36,7 +36,7 @@ import {
 } from "@t3tools/provider-core/server/textGenerationPrompts";
 import {
   sanitizeCommitSubject,
-  sanitizeCommitPlan,
+  normalizeCommitPlan,
   sanitizePrTitle,
   toJsonSchemaObject,
 } from "@t3tools/provider-core/server/textGenerationUtils";
@@ -330,7 +330,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
       ...buildCommitPlanPrompt(input),
       modelSelection: input.modelSelection,
     });
-    return { commits: sanitizeCommitPlan(generated.commits) };
+    return yield* normalizeCommitPlan(generated);
   });
   const generatePrContent: ProviderTextGeneration["generatePrContent"] = Effect.fn(
     "MuseTextGeneration.generatePrContent",
