@@ -4209,6 +4209,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const result = yield* runStackedAction(manager, {
         cwd: repoDir,
         action: "commit",
+        splitCommits: false,
       });
 
       expect(result.branch.status).toBe("skipped_not_requested");
@@ -4284,11 +4285,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         },
       });
 
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+      yield* runStackedAction(manager, { cwd: repoDir, action: "commit", splitCommits: false });
 
       NodeFS.writeFileSync(NodePath.join(repoDir, "CLAUDE.md"), "Mention the Claude provider.\n");
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello again\n");
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+      yield* runStackedAction(manager, { cwd: repoDir, action: "commit", splitCommits: false });
 
       expect(commitInstructions[0]).toContain("Local AGENTS.md:\nUse imperative subjects.");
       expect(commitInstructions[0]).not.toContain("Local CLAUDE.md:");
@@ -4328,7 +4329,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         },
       });
 
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+      yield* runStackedAction(manager, { cwd: repoDir, action: "commit", splitCommits: false });
 
       expect(commitInstructions).toMatch(
         /Recent commit subjects from this repository:\nInitial commit$/,
@@ -4362,7 +4363,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           },
         },
       });
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+      yield* runStackedAction(manager, { cwd: repoDir, action: "commit", splitCommits: false });
 
       expect(generatedPolicy).toMatchObject({
         commitInstructions: "Use a direct tone.\n\nPrefix commits with the affected package.",
@@ -4404,6 +4405,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runStackedAction(manager, {
         cwd: repoDir,
         action: "commit",
+        splitCommits: false,
       });
 
       expect(generatedModelSelection).toEqual(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
@@ -4441,6 +4443,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         actionId: "test-project-action-settings",
         cwd: repoDir,
         action: "commit",
+        splitCommits: false,
         projectId,
       });
 
@@ -4534,6 +4537,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         actionId: "test-action-id",
         cwd: repoDir,
         action: "commit",
+        splitCommits: false,
         threadId,
         projectId: ProjectId.make("project:other"),
       });
@@ -4577,6 +4581,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         const result = yield* runStackedAction(manager, {
           cwd: repoDir,
           action: "commit",
+          splitCommits: false,
           ...(filePaths ? { filePaths } : {}),
         }).pipe(Effect.result);
         expect(Result.isFailure(result)).toBe(true);
@@ -4600,6 +4605,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const result = yield* runStackedAction(manager, {
         cwd: repoDir,
         action: "commit",
+        splitCommits: false,
         filePaths: ["a.txt"],
       });
 
@@ -4621,8 +4627,12 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     { action: "commit_push", mode: "clean" },
     { action: "commit_push", mode: "single" },
     { action: "commit_push", mode: "custom" },
+    { action: "commit", mode: "logical" },
+    { action: "commit", mode: "failed-plan" },
+    { action: "commit", mode: "clean" },
     { action: "commit", mode: "single" },
-  ] as const)("uses logical commits for implicit publishing: $action / $mode", ({ action, mode }) =>
+    { action: "commit", mode: "custom" },
+  ] as const)("uses logical commits by default: $action / $mode", ({ action, mode }) =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-publish-logical-");
       yield* initRepo(repoDir);
@@ -4673,7 +4683,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         {
           cwd: repoDir,
           action,
-          ...(mode === "single" && action !== "commit" ? { splitCommits: false } : {}),
+          ...(mode === "single" ? { splitCommits: false } : {}),
           ...(mode === "custom" ? { commitMessage: "Chosen message" } : {}),
         },
         {
