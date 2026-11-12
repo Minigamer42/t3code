@@ -1,3 +1,5 @@
+import { GitActionProgressView } from "./GitActionProgressView";
+import { GitWorkflowProgressView } from "./GitWorkflowProgressView";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import {
@@ -22,9 +24,8 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useDeadlinePassed } from "../hooks/useDeadline";
-import { useNowSecond } from "../hooks/useNowSecond";
 import { flushSync } from "react-dom";
 import {
   CheckIcon,
@@ -46,12 +47,10 @@ import { cn } from "~/lib/utils";
 import {
   buildMenuItems,
   canRewriteCommitMessages,
-  formatGitActionElapsed,
   isDuplicatePendingThreadBranchSync,
   type PendingThreadBranchSync,
   GIT_ACTION_SUCCESS_VISIBLE_MS,
   hasUsableGitMenuContent,
-  type GitActionProgressPresentation,
   type GitActionIconName,
   type GitActionMenuItem,
   type DefaultBranchConfirmableAction,
@@ -246,96 +245,6 @@ function GitActionItemIcon({
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
   return <SourceControlIcon />;
-}
-
-function GitActionElapsedTime({
-  startedAtMs,
-  className,
-}: {
-  startedAtMs: number | null;
-  className?: string;
-}) {
-  return startedAtMs === null ? null : (
-    <RunningGitActionElapsedTime startedAtMs={startedAtMs} className={className} />
-  );
-}
-
-function RunningGitActionElapsedTime({
-  startedAtMs,
-  className,
-}: {
-  startedAtMs: number;
-  className: string | undefined;
-}) {
-  const nowMs = useNowSecond();
-  const elapsed = formatGitActionElapsed(startedAtMs, nowMs);
-  if (!elapsed) {
-    return null;
-  }
-
-  return (
-    <p aria-live="off" className={className}>
-      {elapsed}
-    </p>
-  );
-}
-
-function GitActionProgressButtonContent({
-  progress,
-  id,
-}: {
-  progress: GitActionProgressPresentation;
-  id: string;
-}) {
-  const hasOutput = progress.output !== null;
-
-  return (
-    <div
-      id={id}
-      aria-atomic="false"
-      aria-live="polite"
-      className={cn(
-        "grid min-w-0 flex-1 items-center",
-        "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[1.125rem] gap-x-3",
-      )}
-      role="status"
-    >
-      <Spinner aria-hidden="true" className="row-start-1 -mx-0.5 shrink-0" />
-      <p
-        className={cn(
-          "row-start-1 min-w-0 self-baseline truncate text-left",
-          THREAD_DETAILS_PANEL_LABEL_CLASS,
-        )}
-      >
-        {progress.status}
-      </p>
-      <GitActionElapsedTime
-        startedAtMs={progress.startedAtMs}
-        className="col-start-3 row-start-1 self-baseline text-2xs font-normal tabular-nums text-muted-foreground"
-      />
-      <div
-        className={cn(
-          "col-start-2 grid min-w-0 transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
-          hasOutput ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-        )}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <p className="truncate pt-0.5 text-left text-2xs font-normal text-muted-foreground" />
-              }
-            >
-              {progress.output}
-            </TooltipTrigger>
-            <TooltipPopup side="bottom" className="max-w-96 break-words">
-              {progress.output}
-            </TooltipPopup>
-          </Tooltip>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function GitActionSuccessButtonContent({ success }: { success: InlineGitActionSuccess }) {
@@ -904,7 +813,6 @@ export default function GitActionsControl({
   onOpenChanges,
   workspaceMutationId = null,
 }: GitActionsControlProps) {
-  const progressLabelId = useId();
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "thread branch metadata update",
@@ -1145,7 +1053,16 @@ export default function GitActionsControl({
   const initAction = useVcsInitAction(sourceControlScope);
   const runImmediateGitAction = useGitStackedAction(sourceControlScope);
   const pullAction = useVcsPullAction(sourceControlScope);
-  const isGitActionRunning = vcsActionState.isRunning;
+  const workflowQuery = useEnvironmentQuery(
+    activeEnvironmentId && gitCwd
+      ? gitEnvironment.workflowProgress({
+          environmentId: activeEnvironmentId,
+          input: { cwd: gitCwd },
+        })
+      : null,
+  );
+  const workflow = workflowQuery.data;
+  const isGitActionRunning = vcsActionState.isRunning || workflow?.state === "running";
   const isRegeneratingDescription =
     vcsActionState.isRunning && vcsActionState.operation === "regenerate_change_request";
   const availableRegenerateCandidates = resolveRegeneratePullRequestCandidates(
@@ -1262,18 +1179,57 @@ export default function GitActionsControl({
 
   const isDefaultRef = gitStatusForActions?.isDefaultRef ?? false;
 
+  const stackQuery = useEnvironmentQuery(
+    activeEnvironmentId && gitCwd
+      ? gitEnvironment.stackStatus({ environmentId: activeEnvironmentId, input: { cwd: gitCwd } })
+      : null,
+  );
+  const hasStackDescendants =
+    stackQuery.data?.managed === true &&
+    stackQuery.data.layers.some(
+      (layer, index) => layer.current && index < stackQuery.data!.layers.length - 1,
+    );
   const gitActionMenuItems = buildMenuItems(
     gitStatusForActions,
     isGitActionRunning,
     hasPrimaryRemote,
+  ).map((item) =>
+    hasStackDescendants && item.id === "push"
+      ? {
+          ...item,
+          label: gitStatusForActions?.hasWorkingTreeChanges
+            ? "Commit, restack & push"
+            : "Restack & push",
+        }
+      : item,
   );
-  const quickAction = resolveQuickAction(
+  const initialQuickAction = resolveQuickAction(
     gitStatusForActions,
     isGitActionRunning,
     isDefaultRef,
     hasPrimaryRemote,
   );
-  const gitActionProgress = resolveGitActionProgressPresentation(vcsActionState);
+  const quickAction =
+    hasStackDescendants &&
+    (initialQuickAction.action === "commit_push" || initialQuickAction.action === "push")
+      ? {
+          ...initialQuickAction,
+          label: gitStatusForActions?.hasWorkingTreeChanges
+            ? "Commit, restack & push"
+            : "Restack & push",
+        }
+      : initialQuickAction;
+  const gitActionProgress = resolveGitActionProgressPresentation(
+    workflow?.state === "running"
+      ? {
+          ...vcsActionState,
+          isRunning: true,
+          currentLabel: workflow.label,
+          phaseStartedAtMs: workflow.startedAtMs,
+          hookStartedAtMs: null,
+        }
+      : vcsActionState,
+  );
   // A fresh draft or a thread with no turns hides commit, push, and diff rows until there is work.
   const quietEmptyDraft =
     (draftId !== undefined || activeServerThreadShell?.latestRun === null) &&
@@ -1839,15 +1795,7 @@ export default function GitActionsControl({
       ) : quietEmptyDraft || (compact && !gitActionProgress && !visibleInlineSuccess) ? null : (
         <div role="group" aria-label="Git actions" onPointerEnter={hasGitMenuContent ? undefined : refreshStatusForEmptyMenu} onFocus={hasGitMenuContent ? undefined : refreshStatusForEmptyMenu} className="flex w-full flex-col">
           {gitActionProgress ? (
-            <div className="flex items-start rounded-lg bg-black/[0.035] dark:bg-white/[0.055]">
-              <ThreadDetailsControl aria-labelledby={progressLabelId} variant="ghost" multiline disabled part="row" panel>
-                <GitActionProgressButtonContent id={progressLabelId} progress={gitActionProgress} />
-              </ThreadDetailsControl>
-              <GitActionElapsedTime
-                startedAtMs={gitActionProgress.startedAtMs}
-                className="flex h-8 shrink-0 items-center pe-2.5 text-2xs tabular-nums text-muted-foreground"
-              />
-            </div>
+            <GitActionProgressView progress={gitActionProgress} />
           ) : !vcsActionState.error && visibleInlineSuccess ? (
             <ThreadDetailsControl variant="ghost" multiline disabled part="row" panel>
               <GitActionSuccessButtonContent success={visibleInlineSuccess} />
@@ -1858,6 +1806,7 @@ export default function GitActionsControl({
               {vcsActionState.error}
             </p>
           ) : null}
+          {workflow ? <GitWorkflowProgressView progress={workflow} /> : null}
           {quickAction.kind === "run_pull" ? (
             <ThreadDetailsControl
               variant="ghost"
