@@ -410,6 +410,7 @@ export type GitRewriteableCommit = typeof GitRewriteableCommit.Type;
 
 export const GitListRewriteableCommitsResult = Schema.Struct({
   branch: TrimmedNonEmptyStringSchema,
+  layerBase: Schema.optional(TrimmedNonEmptyStringSchema),
   headSha: GitCommitSha,
   commits: Schema.Array(GitRewriteableCommit),
 });
