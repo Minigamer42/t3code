@@ -1,3 +1,5 @@
+import { GitWorkflowProgress, GitWorkflowProgressInput } from "./gitWorkflowProgress.ts";
+import { GitStackStatusInput, GitStackStatusResult, GitStackManageInput } from "./gitStack.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -485,6 +487,9 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitStartCommitWorkflow: "git.startCommitWorkflow",
   gitCancelCommitWorkflow: "git.cancelCommitWorkflow",
+  gitSubscribeWorkflowProgress: "git.subscribeWorkflowProgress",
+  gitStackStatus: "git.stackStatus",
+  gitStackManage: "git.stackManage",
   gitListRewriteableCommits: "git.listRewriteableCommits",
   gitRewriteCommitMessages: "git.rewriteCommitMessages",
   gitRegeneratePullRequestDescription: "git.regeneratePullRequestDescription",
@@ -1592,6 +1597,23 @@ const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   stream: true,
 });
 
+const WsGitWorkflowProgressRpc = Rpc.make(WS_METHODS.gitSubscribeWorkflowProgress, {
+  payload: GitWorkflowProgressInput,
+  success: Schema.NullOr(GitWorkflowProgress),
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsGitStackStatusRpc = Rpc.make(WS_METHODS.gitStackStatus, {
+  payload: GitStackStatusInput,
+  success: GitStackStatusResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+const WsGitStackManageRpc = Rpc.make(WS_METHODS.gitStackManage, {
+  payload: GitStackManageInput,
+  success: GitStackStatusResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
 const WsGitListRewriteableCommitsRpc = Rpc.make(WS_METHODS.gitListRewriteableCommits, {
   payload: GitListRewriteableCommitsInput,
   success: GitListRewriteableCommitsResult,
@@ -2326,6 +2348,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
+  WsGitWorkflowProgressRpc,
+  WsGitStackStatusRpc,
+  WsGitStackManageRpc,
   WsGitListRewriteableCommitsRpc,
   WsGitRewriteCommitMessagesRpc,
   WsGitStartCommitWorkflowRpc,
