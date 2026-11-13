@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const GitStackStatusInput = Schema.Struct({ cwd: TrimmedNonEmptyString });
 export type GitStackStatusInput = typeof GitStackStatusInput.Type;
@@ -26,6 +26,7 @@ export const GitStackStatusResult = Schema.Struct({
       parentHead: Schema.optional(Schema.String),
       headSha: Schema.String,
       needsRestack: Schema.Boolean,
+      behindCount: Schema.optional(NonNegativeInt),
       hasChanges: Schema.Boolean,
       current: Schema.Boolean,
       worktreePath: Schema.NullOr(Schema.String),

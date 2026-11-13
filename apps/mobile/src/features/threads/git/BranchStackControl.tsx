@@ -1,4 +1,4 @@
-import type { EnvironmentId, GitStackManageInput } from "@t3tools/contracts";
+import type { EnvironmentId, GitStackManageInput, VcsStatusResult } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useState } from "react";
 import { Alert, Linking, Pressable, View } from "react-native";
@@ -18,6 +18,7 @@ export function BranchStackControl({
   onStart,
   canSwitch,
   hasWorkingTreeChanges,
+  currentPullRequest,
   onSwitchBranch,
 }: {
   readonly environmentId: EnvironmentId;
@@ -26,6 +27,7 @@ export function BranchStackControl({
   readonly onStart: () => void;
   readonly canSwitch: boolean;
   readonly hasWorkingTreeChanges: boolean | null;
+  readonly currentPullRequest: VcsStatusResult["pr"];
   readonly onSwitchBranch: (branch: string) => void;
 }) {
   const query = useEnvironmentQuery(gitEnvironment.stackStatus({ environmentId, input: { cwd } }));
@@ -83,6 +85,7 @@ export function BranchStackControl({
         <Text className="text-xs text-foreground-secondary">Base: {status.base}</Text>
       ) : null}
       {status.layers.map((layer) => {
+        const pullRequest = layer.pullRequest ?? (layer.current ? currentPullRequest : null);
         const disabledReason = getStackBranchSwitchDisabledReason({
           layer,
           hasWorkingTreeChanges,
@@ -113,28 +116,32 @@ export function BranchStackControl({
                   {layer.branch}
                 </Text>
               </Pressable>
-              {layer.pullRequest ? (
+              {pullRequest ? (
                 <Text
                   accessibilityRole="link"
                   onPress={() => {
-                    if (layer.pullRequest) void Linking.openURL(layer.pullRequest.url);
+                    if (pullRequest) void Linking.openURL(pullRequest.url);
                   }}
                   className="shrink-0 text-primary-text"
                 >
-                  #{layer.pullRequest.number}
+                  #{pullRequest.number}
                 </Text>
               ) : null}
             </View>
-            {layer.hasChanges ? (
+            {(layer.current ? hasWorkingTreeChanges : layer.hasChanges) ? (
               <Text className="text-xs text-foreground-secondary">Uncommitted changes</Text>
             ) : null}
             {layer.needsRestack ? (
-              <Text className="text-xs text-warning-foreground">Needs restacking</Text>
+              <Text className="text-xs text-warning-foreground">
+                {layer.behindCount
+                  ? `${layer.behindCount} commit${layer.behindCount === 1 ? "" : "s"} behind`
+                  : "Needs restacking"}
+              </Text>
             ) : null}
           </View>
         );
       })}
-      {status.managed && !adopting ? (
+      {!adopting ? (
         <>
           {status.operation ? (
             <>

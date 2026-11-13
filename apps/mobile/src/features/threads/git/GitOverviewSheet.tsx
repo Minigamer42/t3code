@@ -457,6 +457,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           busy={busy}
           canSwitch={canChangeThreadBranch && canWriteSourceControl}
           hasWorkingTreeChanges={gitStatus.data?.hasWorkingTreeChanges ?? null}
+          currentPullRequest={gitStatus.data?.pr ?? null}
           onSwitchBranch={(branch) => {
             void gitActions.onCheckoutSelectedThreadBranch(branch, true);
           }}

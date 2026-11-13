@@ -158,6 +158,9 @@ export function BranchStackControl({
         ) : null}
         <ol aria-label="Stack layers" className="space-y-2 border-l border-border pl-3 text-xs">
           {status.layers.map((layer) => {
+            const pullRequest =
+              layer.pullRequest ??
+              (layer.current && checkout.data?.refName === layer.branch ? checkout.data.pr : null);
             const disabledReason = getStackBranchSwitchDisabledReason({
               layer,
               hasWorkingTreeChanges: checkout.data?.hasWorkingTreeChanges ?? null,

@@ -384,16 +384,22 @@ export const make = Effect.gen(function* () {
         const parentRef =
           index === 0 ? (active?.baseRef ?? `refs/heads/${base}`) : `refs/heads/${parent}`;
         const target = yield* git(cwd, ["rev-parse", "--verify", `${parentRef}^{commit}`], true);
+        const headSha = yield* head(cwd, name);
+        const needsRestack =
+          !!active &&
+          target.exitCode === 0 &&
+          active.layers[index]!.parentHead !== target.stdout.trim();
+        const behindCount = needsRestack
+          ? Number(yield* text(cwd, ["rev-list", "--count", `${headSha}..${target.stdout.trim()}`]))
+          : 0;
         layers.push({
           branch: name,
           parent,
           ...(active ? { parentHead: active.layers[index]!.parentHead } : {}),
-          headSha: yield* head(cwd, name),
+          headSha,
           current: name === branch,
-          needsRestack:
-            !!active &&
-            target.exitCode === 0 &&
-            active.layers[index]!.parentHead !== target.stdout.trim(),
+          needsRestack,
+          behindCount,
           worktreePath: owners.get(name) ?? null,
           hasChanges:
             !!active && owners.has(name)

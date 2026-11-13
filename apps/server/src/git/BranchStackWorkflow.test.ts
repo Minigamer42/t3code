@@ -168,9 +168,17 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         const oldC = yield* f.git(["rev-parse", "c"]);
         const status = yield* f.adopt;
         expect(status.remote).toBe("fork");
+        expect(status.layers.every((layer) => layer.behindCount === 0)).toBe(true);
         yield* f.commit("b.txt", "updated\n");
+        expect((yield* f.stacks.inspect(f.cwd)).layers[2]).toMatchObject({
+          needsRestack: true,
+          behindCount: 1,
+        });
         const newB = yield* f.commit("b-extra.txt", "another logical commit\n");
-        expect((yield* f.stacks.inspect(f.cwd)).layers[2]?.needsRestack).toBe(true);
+        expect((yield* f.stacks.inspect(f.cwd)).layers[2]).toMatchObject({
+          needsRestack: true,
+          behindCount: 2,
+        });
         const updates: GitWorkflowProgressUpdate[] = [];
         yield* f.stacks.update(f.cwd, {
           onProgress: (update) =>
@@ -193,7 +201,11 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect(yield* f.git(["show", "c:b-extra.txt"])).toBe("another logical commit");
         expect(yield* f.remoteHead("origin", "c")).toBe(oldC);
         expect(yield* f.remoteHead("fork", "c")).toBe(yield* f.git(["rev-parse", "c"]));
-        expect((yield* f.stacks.inspect(f.cwd)).operation).toBeNull();
+        const updatedStatus = yield* f.stacks.inspect(f.cwd);
+        expect(updatedStatus.operation).toBeNull();
+        expect(
+          updatedStatus.layers.every((layer) => !layer.needsRestack && layer.behindCount === 0),
+        ).toBe(true);
         yield* f.git(["checkout", "c"]);
         const top = yield* f.commit("top-extra.txt", "top fix\n");
         yield* f.stacks.pushCurrent(f.cwd, "c");
@@ -401,7 +413,15 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect((yield* f.git(["ls-tree", "--name-only", "c"])).includes("main-extra.txt")).toBe(
           false,
         );
+        expect((yield* f.stacks.inspect(f.cwd)).layers[0]).toMatchObject({
+          needsRestack: true,
+          behindCount: 1,
+        });
         yield* f.stacks.update(f.cwd, { includeLatestBase: true });
+        expect((yield* f.stacks.inspect(f.cwd)).layers[0]).toMatchObject({
+          needsRestack: false,
+          behindCount: 0,
+        });
         expect(yield* f.git(["show", "c:main-extra.txt"])).toBe("upstream");
         const result = yield* f.stacks.update(f.cwd, { mergedBranches: ["a"] });
         expect(result.layers.map((layer) => layer.branch)).toEqual(["b", "c"]);
