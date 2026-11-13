@@ -64,7 +64,7 @@ export function BranchStackControl({
   const switchBranch = async (branch: string) => {
     if (switching) return;
     setSwitching(true);
-    try {
+    await (async () => {
       const result = await switchRef({
         environmentId,
         input: { cwd, refName: branch, requireClean: true },
@@ -88,10 +88,10 @@ export function BranchStackControl({
           });
       }
       onBranchChange?.(nextBranch);
-    } finally {
+    })().finally(() => {
       query.refresh();
       setSwitching(false);
-    }
+    });
   };
   const permitted = useAtomValue(gitEnvironment.manageStack.permissionAtom(environmentId));
   const [adopting, setAdopting] = useState(false);
@@ -199,107 +199,98 @@ export function BranchStackControl({
                       {disabledReason ?? "Switch to branch"}
                     </TooltipPopup>
                   </Tooltip>
-                  {layer.pullRequest ? (
+                  {pullRequest ? (
                     <a
-                      href={layer.pullRequest.url}
+                      href={pullRequest.url}
                       target="_blank"
                       rel="noreferrer"
                       className="shrink-0 text-muted-foreground underline underline-offset-2"
                     >
-                      #{layer.pullRequest.number}
+                      #{pullRequest.number}
                     </a>
                   ) : null}
                 </div>
-                {layer.hasChanges ? (
+                {(layer.current ? checkout.data?.hasWorkingTreeChanges : layer.hasChanges) ? (
                   <p className="text-muted-foreground">Uncommitted changes</p>
                 ) : null}
-                {layer.needsRestack ? <p className="text-warning">Needs restacking</p> : null}
+                {layer.needsRestack ? (
+                  <p className="text-warning">
+                    {layer.behindCount
+                      ? `${layer.behindCount} commit${layer.behindCount === 1 ? "" : "s"} behind`
+                      : "Needs restacking"}
+                  </p>
+                ) : null}
               </li>
             );
           })}
         </ol>
-        {status.managed ? (
+        {status.operation ? (
           <>
-            {status.operation ? (
-              <>
-                <p className="break-words text-xs text-warning">
-                  Stack update paused at {status.operation.branch} ({status.operation.phase}).
-                  {status.operation.phase === "rebase"
-                    ? ` Resolve and stage conflicts in ${status.operation.cwd} before continuing.`
-                    : status.operation.phase === "hooks"
-                      ? " Continue retries unfinished post-push hooks. The branches are already published."
-                      : " Continue retries publishing. Abort restores local branches; completed remote pushes remain."}
-                </p>
-                <div className="flex gap-2">
-                  <Button size="xs" disabled={!permitted || busy} onClick={() => run("continue")}>
-                    Continue
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={!permitted || busy}
-                    onClick={() => run("abort")}
-                  >
-                    Abort
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <>
-                <label className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    checked={includeLatestBase}
-                    onCheckedChange={setIncludeLatestBase}
-                    disabled={busy}
-                  />
-                  Include latest {status.base}
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={!permitted || busy}
-                    onClick={() => run("update")}
-                  >
-                    Update stack
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost-muted"
-                    disabled={!permitted || busy}
-                    onClick={() => {
-                      setBranches(status.layers.map((layer) => layer.branch));
-                      setBase(status.base);
-                      setAdopting(true);
-                    }}
-                  >
-                    Edit layers
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost-muted"
-                    disabled={!permitted || busy}
-                    onClick={() => run("untrack")}
-                  >
-                    Untrack
-                  </Button>
-                </div>
-              </>
-            )}
+            <p className="break-words text-xs text-warning">
+              Stack update paused at {status.operation.branch} ({status.operation.phase}).
+              {status.operation.phase === "rebase"
+                ? ` Resolve and stage conflicts in ${status.operation.cwd} before continuing.`
+                : status.operation.phase === "hooks"
+                  ? " Continue retries unfinished post-push hooks. The branches are already published."
+                  : " Continue retries publishing. Abort restores local branches; completed remote pushes remain."}
+            </p>
+            <div className="flex gap-2">
+              <Button size="xs" disabled={!permitted || busy} onClick={() => run("continue")}>
+                Continue
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!permitted || busy}
+                onClick={() => run("abort")}
+              >
+                Abort
+              </Button>
+            </div>
           </>
         ) : (
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            disabled={!permitted || busy}
-            onClick={() => {
-              setBranches(status.layers.map((layer) => layer.branch));
-              setBase(status.base);
-              setAdopting(true);
-            }}
-          >
-            Edit layers
-          </Button>
+          <>
+            <label className="flex items-center gap-2 text-xs">
+              <Checkbox
+                checked={includeLatestBase}
+                onCheckedChange={setIncludeLatestBase}
+                disabled={busy}
+              />
+              Include latest {status.base}
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!permitted || busy}
+                onClick={() => run("update")}
+              >
+                Update stack
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={!permitted || busy}
+                onClick={() => {
+                  setBranches(status.layers.map((layer) => layer.branch));
+                  setBase(status.base);
+                  setAdopting(true);
+                }}
+              >
+                Edit layers
+              </Button>
+              {status.managed ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  disabled={!permitted || busy}
+                  onClick={() => run("untrack")}
+                >
+                  Untrack
+                </Button>
+              ) : null}
+            </div>
+          </>
         )}
         <Dialog open={adopting} onOpenChange={setAdopting}>
           <DialogPopup>

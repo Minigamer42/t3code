@@ -197,18 +197,20 @@ export function BranchStackControl({
                     setAdopting(true);
                   }}
                 />
-                <Button
-                  size="compact"
-                  label="Untrack"
-                  tone="text"
-                  disabled={busy || !permitted}
-                  onPress={() => run("untrack")}
-                />
+                {status.managed ? (
+                  <Button
+                    size="compact"
+                    label="Untrack"
+                    tone="text"
+                    disabled={busy || !permitted}
+                    onPress={() => run("untrack")}
+                  />
+                ) : null}
               </View>
             </>
           )}
         </>
-      ) : adopting ? (
+      ) : (
         <>
           <Text className="font-t3-medium text-foreground">Edit layers</Text>
           <Text className="text-foreground-secondary">Base branch</Text>
@@ -296,18 +298,6 @@ export function BranchStackControl({
             <Button size="compact" label="Cancel" tone="text" onPress={() => setAdopting(false)} />
           </View>
         </>
-      ) : (
-        <Button
-          size="compact"
-          label="Edit layers"
-          tone="text"
-          disabled={busy || !permitted}
-          onPress={() => {
-            setBase(status.base);
-            setBranches(status.layers.map((layer) => layer.branch));
-            setAdopting(true);
-          }}
-        />
       )}
     </View>
   );

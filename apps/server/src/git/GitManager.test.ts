@@ -1345,12 +1345,17 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect.each(["publish", "update", "continue", "top"] as const)(
+  it.effect.each(["publish", "update", "continue", "top", "lazy-update", "lazy-single"] as const)(
     "runs the normal post-push lifecycle for each changed stack branch via %s",
     (mode) =>
       Effect.gen(function* () {
         const cwd = yield* createStackedBranches();
-        const branches = ["stack/first", "stack/second", "stack/feature"];
+        const branches =
+          mode === "lazy-single"
+            ? ["stack/feature"]
+            : ["stack/first", "stack/second", "stack/feature"];
+        if (mode === "lazy-single")
+          yield* runGit(cwd, ["branch", "-D", "stack/first", "stack/second"]);
         const scenario: FakeProviderScenario = {
           prListByHeadSelector: Object.fromEntries(
             branches.map((branch, index) => [
@@ -1412,15 +1417,31 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             },
           }),
         );
-        const current = mode === "top" ? "stack/feature" : "stack/second";
+        const current = mode === "top" || mode === "lazy-single" ? "stack/feature" : "stack/second";
         yield* runGit(cwd, ["checkout", current]);
-        yield* manager.manageStack({ cwd, action: "adopt", base: "main", branches });
+        if (mode === "lazy-update" || mode === "lazy-single") {
+          const detected = yield* manager.stackStatus({ cwd });
+          expect(detected.managed).toBe(false);
+          expect(detected.layers.map((layer) => layer.branch)).toEqual(branches);
+          expect(NodeFS.existsSync(NodePath.join(cwd, ".git/t3-branch-stacks.json"))).toBe(false);
+          const initialized = yield* manager.manageStack({
+            cwd,
+            action: "update",
+            expectedBranch: current,
+          });
+          expect(initialized.managed).toBe(true);
+          expect(initialized.layers.map((layer) => layer.branch)).toEqual(branches);
+          expect(recorded).toEqual([]);
+        } else {
+          yield* manager.manageStack({ cwd, action: "adopt", base: "main", branches });
+        }
         NodeFS.writeFileSync(NodePath.join(cwd, "review-fix.txt"), "fix\n");
         yield* runGit(cwd, ["add", "review-fix.txt"]);
         yield* runGit(cwd, ["commit", "-m", "Review fix"]);
         if (mode === "publish" || mode === "top")
           yield* runStackedAction(manager, { cwd, action: "push" });
-        else if (mode === "update") yield* manager.manageStack({ cwd, action: "update" });
+        else if (mode === "update" || mode === "lazy-update" || mode === "lazy-single")
+          yield* manager.manageStack({ cwd, action: "update" });
         else {
           const remote = (yield* runGit(cwd, ["remote", "get-url", "origin"])).stdout.trim();
           yield* runGit(cwd, [
@@ -1441,7 +1462,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           yield* manager.manageStack({ cwd, action: "continue" });
         }
         const expected =
-          mode === "top"
+          mode === "top" || mode === "lazy-single"
             ? ["stack/feature"]
             : mode === "publish"
               ? ["stack/second"]

@@ -476,6 +476,10 @@ out from the matching organization and repository.
 
 ## Maintaining a local branch stack
 
+The Git sidebar shows a suggested stack before tracking is enabled. **Update stack** starts tracking
+it automatically; opening the view does not. Saving changes in **Edit layers** also starts tracking.
+**Untrack** appears only while the stack is tracked.
+
 Use **Edit layers** in the Git sidebar to give T3 an ordered list of existing branches,
 from the oldest layer to the newest, and their base branch. T3 can suggest the order from local
 branch ancestry, recorded parent relationships, or `glab` stack metadata. Adoption preserves branches and commits; afterward,
@@ -499,7 +503,7 @@ restacking and pushing the remaining branches. Enable **Include latest base** to
 changes from the base branch. A conflict pauses the operation in the checkout shown in the sidebar;
 resolve and stage its files, then choose **Continue**, or **Abort** to restore local branches.
 Completed remote pushes are not undone. **Untrack** stops T3 maintenance without deleting branches
-and disables automatic tracking for those branches. Save the hierarchy in **Edit layers** to enable it again.
+and disables automatic tracking for those branches. Choose **Update stack** or save the hierarchy in **Edit layers** to enable it again.
 
 Updating requires a clean working tree. Branches checked out in another worktree must be released
 before restacking; T3 does not change another checkout. Divergent remote changes stop the operation

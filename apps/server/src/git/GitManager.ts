@@ -4667,10 +4667,20 @@ export const make = Effect.gen(function* () {
     return { ...status, layers };
   });
   const manageStack = Effect.fn("GitManager.manageStack")(function* (input: GitStackManageInput) {
-    const status = yield* stackStatus(input, input.action === "update");
+    const initialStatus = yield* stackStatus(input, input.action === "update");
     const maintain = Effect.fn("GitManager.maintainStack")(function* (
       report?: WorkflowProgress.ProgressReporter,
     ) {
+      let status = initialStatus;
+      if (input.action === "update" && !status.managed) {
+        yield* branchStacks.manage({
+          ...input,
+          action: "adopt",
+          base: status.base,
+          branches: status.layers.map((layer) => layer.branch),
+        });
+        status = yield* stackStatus(input, true);
+      }
       yield* branchStacks.manage(
         input,
         status.layers
