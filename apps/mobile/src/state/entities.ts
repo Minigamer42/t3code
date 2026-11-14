@@ -34,7 +34,7 @@ import { projectGlyphImageAtom, projectGlyphKey } from "../native/ProjectChipIco
 import { projectFaviconUrlAtom } from "./assets";
 import { environmentProjects } from "./projects";
 import { environmentServerConfigsAtom, serverEnvironment } from "./server";
-import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import { environmentThreadDetails, environmentThreadShells, threadFamilies } from "./threads";
 
 const EMPTY_PROJECT_ATOM = Atom.make<EnvironmentProject | null>(null).pipe(
   Atom.withLabel("mobile-project:empty"),
@@ -48,9 +48,10 @@ const EMPTY_SERVER_CONFIG_ATOM = Atom.make<ServerConfig | null>(null).pipe(
 const EMPTY_THREAD_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
   Atom.withLabel("mobile-thread:empty"),
 );
-const EMPTY_THREAD_LINK_TITLES_ATOM = Atom.make<ReadonlyMap<string, string>>(new Map()).pipe(
-  Atom.withLabel("mobile-thread-link-titles:empty"),
-);
+const EMPTY_THREAD_LINK_TITLES_ATOM = Atom.make({
+  titles: new Map<string, string>(),
+  unresolved: new Map<string, string>(),
+}).pipe(Atom.withLabel("mobile-thread-link-titles:empty"));
 
 const decodeThreadKey = Schema.decodeUnknownSync(Schema.Tuple([EnvironmentId, ThreadId]));
 const threadKey = (ref: ScopedThreadRef) => JSON.stringify([ref.environmentId, ref.threadId]);
@@ -58,9 +59,12 @@ const threadKey = (ref: ScopedThreadRef) => JSON.stringify([ref.environmentId, r
 // Null when this client doesn't know the thread. Keyed, so a link never walks an environment's threads.
 const threadTitleAtom = Atom.family((key: string) => {
   const ref = scopeThreadRef(...decodeThreadKey(JSON.parse(key)));
-  return Atom.make((get) => get(environmentThreadShells.threadShellAtom(ref))?.title ?? null).pipe(
-    Atom.withLabel(`mobile-thread-title:${key}`),
-  );
+  return Atom.make(
+    (get) =>
+      get(environmentThreadShells.threadShellAtom(ref))?.title ??
+      AsyncResult.getOrElse(get(threadFamilies.threadAtom(ref)), () => null)?.title ??
+      null,
+  ).pipe(Atom.withLabel(`mobile-thread-title:${key}`));
 });
 
 const decodeThreadKeys = Schema.decodeUnknownSync(Schema.Array(Schema.String));
@@ -69,11 +73,19 @@ const threadLinkTitlesAtom = Atom.family((key: string) => {
   const refKeys = decodeThreadKeys(JSON.parse(key));
   return Atom.make((get) => {
     const titles = new Map<string, string>();
+    const unresolved = new Map<string, string>();
     for (const refKey of refKeys) {
       const title = get(threadTitleAtom(refKey));
       if (title !== null) titles.set(refKey, title);
+      else {
+        const ref = scopeThreadRef(...decodeThreadKey(JSON.parse(refKey)));
+        const result = get(threadFamilies.threadAtom(ref));
+        if (result.waiting || AsyncResult.isInitial(result))
+          unresolved.set(refKey, "Loading thread…");
+        else if (AsyncResult.isFailure(result)) unresolved.set(refKey, "Could not load thread");
+      }
     }
-    return titles;
+    return { titles, unresolved };
   }).pipe(Atom.withLabel(`mobile-thread-link-titles:${key}`));
 });
 
@@ -208,12 +220,17 @@ export function useSideChats(ref: ScopedThreadRef) {
 }
 
 export function useLiveThreadLinkLabels(markdown: string, environmentId: EnvironmentId): string {
-  const titles = useAtomValue(
+  const labels = useAtomValue(
     hasThreadLinks(markdown)
       ? threadLinkTitlesAtom(JSON.stringify(threadLinkRefs(markdown, environmentId).map(threadKey)))
       : EMPTY_THREAD_LINK_TITLES_ATOM,
   );
-  return relabelThreadLinks(markdown, environmentId, (ref) => titles.get(threadKey(ref)));
+  return relabelThreadLinks(
+    markdown,
+    environmentId,
+    (ref) => labels.titles.get(threadKey(ref)),
+    (ref) => labels.unresolved.get(threadKey(ref)),
+  );
 }
 
 /** Keyed reads; every thread is read only to place a v1 link its message's environment lacks. */

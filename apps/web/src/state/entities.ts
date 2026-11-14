@@ -35,7 +35,8 @@ import {
   allEnvironmentProjectSnapshotsReadyAtom,
   allEnvironmentShellsBootstrappedAtom,
 } from "./shell";
-import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import { environmentThreadDetails, environmentThreadShells, threadFamilies } from "./threads";
+import { useEnvironmentQuery } from "./query";
 import { waitForAtomValue } from "./waitForAtomValue";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
@@ -151,6 +152,10 @@ export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadSh
   return useAtomValue(
     ref === null ? EMPTY_THREAD_SHELL_ATOM : environmentThreadShells.threadShellAtom(ref),
   );
+}
+
+export function useThreadLinkTarget(ref: ScopedThreadRef | null) {
+  return useEnvironmentQuery(ref === null ? null : threadFamilies.threadAtom(ref));
 }
 
 /** The shell without its streaming timestamps; see quietThreadShellAtom. */
