@@ -49,9 +49,10 @@ const EMPTY_SERVER_CONFIG_ATOM = Atom.make<ServerConfig | null>(null).pipe(
 const EMPTY_THREAD_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
   Atom.withLabel("mobile-thread:empty"),
 );
-const EMPTY_THREAD_LINK_TITLES_ATOM = Atom.make<ReadonlyMap<string, string>>(new Map()).pipe(
-  Atom.withLabel("mobile-thread-link-titles:empty"),
-);
+const EMPTY_THREAD_LINK_TITLES_ATOM = Atom.make({
+  titles: new Map<string, string>(),
+  unresolved: new Map<string, string>(),
+}).pipe(Atom.withLabel("mobile-thread-link-titles:empty"));
 
 const decodeThreadKey = Schema.decodeUnknownSync(Schema.Tuple([EnvironmentId, ThreadId]));
 const threadKey = (ref: ScopedThreadRef) => JSON.stringify([ref.environmentId, ref.threadId]);
@@ -69,8 +70,8 @@ const threadTitleAtom = Atom.family((key: string) => {
       }),
     );
     return AsyncResult.isSuccess(titles)
-      ? (titles.value[ref.threadId]?.title ?? (titles.waiting ? "Thread" : null))
-      : "Thread";
+      ? (titles.value[ref.threadId]?.title ?? null)
+      : null;
   }).pipe(Atom.withLabel(`mobile-thread-title:${key}`));
 });
 
@@ -80,11 +81,19 @@ const threadLinkTitlesAtom = Atom.family((key: string) => {
   const refKeys = decodeThreadKeys(JSON.parse(key));
   return Atom.make((get) => {
     const titles = new Map<string, string>();
+    const unresolved = new Map<string, string>();
     for (const refKey of refKeys) {
       const title = get(threadTitleAtom(refKey));
       if (title !== null) titles.set(refKey, title);
+      else {
+        const ref = scopeThreadRef(...decodeThreadKey(JSON.parse(refKey)));
+        const result = get(orchestrationEnvironment.threadLinkMetadata({ environmentId: ref.environmentId, input: { threadIds: [ref.threadId] } }));
+        if (result.waiting || AsyncResult.isInitial(result))
+          unresolved.set(refKey, "Loading thread…");
+        else if (AsyncResult.isFailure(result)) unresolved.set(refKey, "Could not load thread");
+      }
     }
-    return titles;
+    return { titles, unresolved };
   }).pipe(Atom.withLabel(`mobile-thread-link-titles:${key}`));
 });
 
@@ -235,12 +244,17 @@ export function useSideChats(ref: ScopedThreadRef) {
 }
 
 export function useLiveThreadLinkLabels(markdown: string, environmentId: EnvironmentId): string {
-  const titles = useAtomValue(
+  const labels = useAtomValue(
     hasThreadLinks(markdown)
       ? threadLinkTitlesAtom(JSON.stringify(threadLinkRefs(markdown, environmentId).map(threadKey)))
       : EMPTY_THREAD_LINK_TITLES_ATOM,
   );
-  return relabelThreadLinks(markdown, environmentId, (ref) => titles.get(threadKey(ref)));
+  return relabelThreadLinks(
+    markdown,
+    environmentId,
+    (ref) => labels.titles.get(threadKey(ref)),
+    (ref) => labels.unresolved.get(threadKey(ref)),
+  );
 }
 
 /** Keyed reads; every thread is read only to place a v1 link its message's environment lacks. */

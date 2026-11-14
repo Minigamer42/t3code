@@ -56,7 +56,7 @@ export function MarkdownThreadLink(props: {
   const remote = useThreadShell(remoteRef);
   const resolved = target ?? (remoteRef && remote ? { ref: remoteRef, metadata: remote } : null);
   if (missing && resolved === null) {
-    const unknown = unknownThreadLinkLabel(props.link, props.environmentId);
+    const unknown = lookup.error ? "Could not load thread" : unknownThreadLinkLabel(props.link, props.environmentId);
     return <UnresolvedChip label={props.label ?? unknown} tooltip={unknown} />;
   }
   const ref = resolved?.ref ?? writtenRef;

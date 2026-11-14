@@ -60,7 +60,7 @@ export function ThreadContextChip(props: {
       <TooltipPopup side="top">
         {props.unreadable
           ? "On another machine, so this machine's agent can't read it. Remove it or switch back to send."
-          : "Open thread"}
+          : shell || metadata ? "Open thread" : lookup.isPending ? "Loading thread…" : lookup.error ? "Could not load thread" : "Thread no longer available"}
       </TooltipPopup>
     </Tooltip>
   );
