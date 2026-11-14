@@ -105,6 +105,16 @@ describe("thread links", () => {
   });
 
   it("turns a v2 link it cannot resolve into plain text, never the raw link", () => {
+    for (const status of ["Loading thread…", "Could not load thread"]) {
+      expect(
+        relabelThreadLinks(
+          "<t3-thread://v2/local/t1>",
+          local,
+          () => undefined,
+          () => status,
+        ),
+      ).toBe(status);
+    }
     expect(
       relabelThreadLinks(
         "<t3-thread://v2/there/t1>, <t3-thread://v2/local/t1>, [Old title](t3-thread://v2/there/t1)",

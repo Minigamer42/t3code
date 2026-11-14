@@ -194,6 +194,7 @@ export function relabelThreadLinks(
   markdown: string,
   messageEnvironmentId: EnvironmentId,
   title: (ref: ScopedThreadRef) => string | undefined,
+  unresolvedLabel?: (ref: ScopedThreadRef) => string | undefined,
 ): string {
   return replaceThreadLinks(markdown, (written, label) => {
     const environmentId = written.environmentId ?? messageEnvironmentId;
@@ -207,7 +208,12 @@ export function relabelThreadLinks(
     const current = title({ environmentId, threadId });
     if (current === undefined) {
       if (label !== undefined && written.environmentId === null) return undefined;
-      return label?.trim() || unknownThreadLinkLabel(written, messageEnvironmentId);
+      return (
+        label?.trim() ||
+        unresolvedLabel?.({ environmentId, threadId }) ||
+        (decoded === null ? undefined : unresolvedLabel?.({ environmentId, threadId: decoded })) ||
+        unknownThreadLinkLabel(written, messageEnvironmentId)
+      );
     }
     return formatThreadLink(
       { environmentId: written.environmentId, threadId },

@@ -125,8 +125,15 @@ describe("createThreadFamilyAtoms", () => {
           yield* Queue.unbounded<
             Effect.Effect<OrchestrationV2ThreadFamily, OrchestrationV2GetShellSnapshotError>
           >();
+        const linkReplies =
+          yield* Queue.unbounded<
+            Effect.Effect<OrchestrationV2ThreadFamily, OrchestrationV2GetShellSnapshotError>
+          >();
         const client = {
-          [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: () => Effect.flatten(Queue.take(replies)),
+          [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input: { threadId: string }) =>
+            input.threadId === "older-settled"
+              ? Effect.flatten(Queue.take(linkReplies))
+              : Effect.flatten(Queue.take(replies)),
         } as unknown as WsRpcProtocolClient;
         const session = {
           client,
@@ -170,6 +177,7 @@ describe("createThreadFamilyAtoms", () => {
         );
         const parent = row("parent");
         const child = row("idle-child");
+        const old = row("older-settled");
         const shellSnapshot = {
           schemaVersion: 1,
           snapshotSequence: 3,
@@ -191,6 +199,11 @@ describe("createThreadFamilyAtoms", () => {
           Effect.sync(() => registry.dispose()),
         );
         const family = families.familyAtom(TARGET.environmentId, parent.id);
+        const linked = families.threadAtom({
+          environmentId: TARGET.environmentId,
+          threadId: old.id,
+        });
+        registry.mount(linked);
         const mergedIds = () =>
           registry.get(families.snapshotAtom(TARGET.environmentId))?.threads.map(({ id }) => id);
         // Waits for the read to finish either way; the assertions read its outcome.
@@ -203,13 +216,35 @@ describe("createThreadFamilyAtoms", () => {
 
         // A cached shell from before this session's first snapshot reads nothing.
         expect(threadFamilyRead(registry.get(family))).toBe("pending");
+        expect(registry.get(linked).waiting).toBe(true);
         expect(yield* Queue.size(replies)).toBe(0);
 
         registry.set(shellState, AsyncResult.success(shellAt(1)));
         yield* Queue.offer(replies, Effect.succeed({ snapshotSequence: 3, threads: [child] }));
         yield* settle;
+        yield* Queue.offer(linkReplies, Effect.succeed({ snapshotSequence: 3, threads: [old] }));
+        expect(yield* AtomRegistry.getResult(registry, linked, { suspendOnWaiting: true })).toEqual(
+          old,
+        );
+        expect(mergedIds()).not.toContain(old.id);
+        expect(
+          AsyncResult.getOrElse(
+            registry.get(
+              families.threadAtom({ environmentId: TARGET.environmentId, threadId: parent.id }),
+            ),
+            () => null,
+          ),
+        ).toEqual(parent);
         expect(threadFamilyRead(registry.get(family))).toBe("settled");
         expect(mergedIds()).toEqual(["parent", "idle-child"]);
+        registry.set(
+          shellState,
+          AsyncResult.success({
+            ...shellAt(1),
+            removedAt: new Map([[old.id, 4]]),
+          }),
+        );
+        expect(AsyncResult.getOrElse(registry.get(linked), () => "pending")).toBeNull();
 
         // A new authoritative snapshot never reuses the old read, even while the next one waits
         // or fails.
@@ -223,6 +258,20 @@ describe("createThreadFamilyAtoms", () => {
         yield* settle;
         expect(threadFamilyRead(registry.get(family))).toBe("failed");
         expect(mergedIds()).toEqual(["parent"]);
+        yield* Queue.offer(
+          linkReplies,
+          Effect.fail(new OrchestrationV2GetShellSnapshotError({ message: "offline" })),
+        );
+        yield* AtomRegistry.getResult(registry, linked, { suspendOnWaiting: true }).pipe(
+          Effect.ignore,
+        );
+        expect(AsyncResult.isFailure(registry.get(linked))).toBe(true);
+        families.refresh(registry, TARGET.environmentId, old.id);
+        expect(registry.get(linked).waiting).toBe(true);
+        yield* Queue.offer(linkReplies, Effect.succeed({ snapshotSequence: 5, threads: [] }));
+        expect(
+          yield* AtomRegistry.getResult(registry, linked, { suspendOnWaiting: true }),
+        ).toBeNull();
 
         families.refresh(registry, TARGET.environmentId, parent.id);
         expect(threadFamilyRead(registry.get(family))).toBe("pending");

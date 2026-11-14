@@ -5,6 +5,7 @@ import {
   type OrchestrationV2ThreadFamily,
   type OrchestrationV2ThreadShell,
   type ThreadId,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -14,7 +15,7 @@ import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type * as EnvironmentRegistry from "../connection/registry.ts";
 import { EnvironmentRpcUnavailableError, request } from "../rpc/client.ts";
-import { arrayElementsEqual } from "./entities.ts";
+import { arrayElementsEqual, parseThreadKey, threadKey } from "./entities.ts";
 import { createEnvironmentQueryAtomFamily, selectEnvironmentQueryData } from "./runtime.ts";
 import type { EnvironmentShellState } from "./shell.ts";
 
@@ -244,9 +245,33 @@ export function createThreadFamilyAtoms<R, ER, E>(
     }).pipe(Atom.withLabel(`environment-snapshot-with-families:${environmentId}`));
   });
 
+  const threadRowsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.map(snapshotAtom(environmentId), (snapshot) => snapshot?.threads),
+  );
+  const threadIndexAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => new Map(get(threadRowsAtom(environmentId))?.map((row) => [row.id, row]))),
+  );
+  const removedAtAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.map(shellStateAtom(environmentId), (state) => shellStateValue(state)?.removedAt),
+  );
+  const threadAtom = Atom.family((key: string) => {
+    const { environmentId, threadId } = parseThreadKey(key);
+    return Atom.make((get) => {
+      const shell = get(threadIndexAtom(environmentId)).get(threadId);
+      if (shell !== undefined) return AsyncResult.success(shell);
+      const removedAt = get(removedAtAtom(environmentId));
+      return AsyncResult.map(get(familyAtom(familyKey(environmentId, threadId))), (family) => {
+        if ((removedAt?.get(threadId) ?? -1) > family.snapshotSequence) return null;
+        return family.threads.find((row) => row.id === threadId) ?? null;
+      });
+    }).pipe(Atom.withLabel(`environment-thread-link:${key}`));
+  });
+
   return {
     /** The shell snapshot plus the rows of every mounted family. */
     snapshotAtom,
+    /** Resolves a link without adding its family to sidebar rows or loading its transcript. */
+    threadAtom: (ref: ScopedThreadRef) => threadAtom(threadKey(ref)),
     /** The current generation's family read, for decisions that need a settled answer. */
     familyAtom: (environmentId: EnvironmentId, threadId: ThreadId) =>
       familyAtom(familyKey(environmentId, threadId)),
