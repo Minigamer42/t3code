@@ -5,6 +5,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { fileBasename } from "@t3tools/shared/path";
 import { useProjects, useThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentQuery } from "../../state/query";
@@ -92,12 +93,16 @@ export function ThreadWorkspaceControl({
         }}
       >
         <SelectTrigger size="sm" aria-label="Thread worktree">
-          <SelectValue>{thread.worktreePath ?? "Project checkout"}</SelectValue>
+          <SelectValue>
+            {fileBasename(thread.worktreePath ?? project?.workspaceRoot ?? "Project checkout")}
+            {" · "}
+            {thread.branch ?? "Detached HEAD"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {data?.worktrees.map((worktree) => (
             <SelectItem key={worktree.path} value={worktree.path}>
-              {worktree.refName ?? worktree.path}
+              {fileBasename(worktree.path)} · {worktree.refName ?? "Detached HEAD"}
             </SelectItem>
           ))}
           {!data ? (

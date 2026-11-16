@@ -5,6 +5,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { fileBasename } from "@t3tools/shared/path";
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import { useProjects, useThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
@@ -77,7 +78,7 @@ export function useThreadWorkspaceMenu(
           },
           ...(data?.worktrees ?? []).map((worktree) => ({
             id: worktree.path,
-            title: worktree.refName ?? "Detached HEAD",
+            title: `${fileBasename(worktree.path)} · ${worktree.refName ?? "Detached HEAD"}`,
             subtitle: worktree.path,
             selected: worktree.path === (thread?.worktreePath ?? project?.workspaceRoot),
             disabled,
