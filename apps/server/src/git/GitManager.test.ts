@@ -6873,64 +6873,86 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
   it.effect.each([
     { layer: "stack/second", action: "commit_push" },
     { layer: "stack/second", action: "commit_push_pr" },
+    { layer: "stack/second", action: "commit_push", retarget: true },
     { layer: "stack/second", action: "commit" },
     { layer: "stack/feature", action: "commit_push" },
-  ] as const)(
-    "maintains an adopted stack when publishing $layer with $action",
-    ({ layer, action }) =>
-      Effect.gen(function* () {
-        const cwd = yield* createStackedBranches();
-        const branches = ["stack/first", "stack/second", "stack/feature"];
-        const prListByHeadSelector = Object.fromEntries(
-          branches.map((head, index) => [
-            head,
-            [
-              {
-                number: index + 1,
-                title: head,
-                url: `https://github.com/example/repo/pull/${index + 1}`,
-                headRefName: head,
-                baseRefName: branches[index - 1] ?? "main",
-                state: "open" as const,
-                isCrossRepository: false,
-              },
-            ],
-          ]),
+  ] as const)("maintains an adopted stack when publishing $layer with $action", (scenario) =>
+    Effect.gen(function* () {
+      const { layer, action } = scenario;
+      const retarget = "retarget" in scenario && scenario.retarget;
+      const cwd = yield* createStackedBranches();
+      const branches = ["stack/first", "stack/second", "stack/feature"];
+      const prListByHeadSelector = Object.fromEntries(
+        branches.map((head, index) => [
+          head,
+          [
+            {
+              number: index + 1,
+              title: head,
+              url: `https://github.com/example/repo/pull/${index + 1}`,
+              headRefName: head,
+              baseRefName: retarget && head === layer ? "main" : (branches[index - 1] ?? "main"),
+              state: "open" as const,
+              isCrossRepository: false,
+            },
+          ],
+        ]),
+      );
+      const { manager, providerCalls } = yield* makeManager({
+        providerScenario: { kind: retarget ? "gitlab" : "github", prListByHeadSelector },
+      });
+      yield* runGit(cwd, ["checkout", layer]);
+      yield* manager.manageStack({ cwd, action: "adopt", base: "main", branches });
+      const previousTop = (yield* runGit(cwd, ["rev-parse", "stack/feature"])).stdout.trim();
+      const previousMiddle = (yield* runGit(cwd, ["rev-parse", "stack/second"])).stdout.trim();
+      NodeFS.writeFileSync(NodePath.join(cwd, "updated-layer.txt"), "review fix\n");
+      const result = yield* runStackedAction(manager, {
+        cwd,
+        action,
+        commitMessage: "Address review",
+      });
+      expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(layer);
+      expect(created(providerCalls)).toEqual([]);
+      if (action !== "commit") {
+        const snapshot = (yield* manager
+          .subscribeWorkflowProgress({ cwd })
+          .pipe(Stream.take(1), Stream.runCollect))[0];
+        expect(
+          snapshot?.steps
+            .filter((step) => step.id.endsWith(":review"))
+            .map((step) => [step.group, step.label, step.state]),
+        ).toEqual(retarget ? [[layer, "Change MR target", "completed"]] : []);
+        expect(providerCalls.filter((call) => call.operation === "retargetChangeRequest")).toEqual(
+          retarget
+            ? [
+                {
+                  operation: "retargetChangeRequest",
+                  reference: "https://github.com/example/repo/pull/2",
+                  baseBranch: "stack/first",
+                },
+              ]
+            : [],
         );
-        const { manager, providerCalls } = yield* makeManager({
-          providerScenario: { prListByHeadSelector },
-        });
-        yield* runGit(cwd, ["checkout", layer]);
-        yield* manager.manageStack({ cwd, action: "adopt", base: "main", branches });
-        const previousTop = (yield* runGit(cwd, ["rev-parse", "stack/feature"])).stdout.trim();
-        const previousMiddle = (yield* runGit(cwd, ["rev-parse", "stack/second"])).stdout.trim();
-        NodeFS.writeFileSync(NodePath.join(cwd, "updated-layer.txt"), "review fix\n");
-        const result = yield* runStackedAction(manager, {
-          cwd,
-          action,
-          commitMessage: "Address review",
-        });
-        expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(layer);
-        expect(created(providerCalls)).toEqual([]);
-        const top = (yield* runGit(cwd, ["rev-parse", "stack/feature"])).stdout.trim();
-        if (action === "commit") {
-          expect(top).toBe(previousTop);
-          expect(result.push.status).toBe("skipped_not_requested");
-        } else {
-          expect(
-            (yield* runGit(cwd, ["show", "stack/feature:updated-layer.txt"])).stdout.trim(),
-          ).toBe("review fix");
-          expect(
-            (yield* runGit(cwd, ["rev-parse", "refs/remotes/origin/stack/feature"])).stdout.trim(),
-          ).toBe(layer === "stack/feature" ? top : previousTop);
-          if (layer === "stack/feature")
-            expect((yield* runGit(cwd, ["rev-parse", "stack/second"])).stdout.trim()).toBe(
-              previousMiddle,
-            );
-        }
-        if (layer === "stack/second")
-          expect((yield* manager.listRewriteableCommits({ cwd })).commits).toHaveLength(2);
-      }),
+      }
+      const top = (yield* runGit(cwd, ["rev-parse", "stack/feature"])).stdout.trim();
+      if (action === "commit") {
+        expect(top).toBe(previousTop);
+        expect(result.push.status).toBe("skipped_not_requested");
+      } else {
+        expect(
+          (yield* runGit(cwd, ["show", "stack/feature:updated-layer.txt"])).stdout.trim(),
+        ).toBe("review fix");
+        expect(
+          (yield* runGit(cwd, ["rev-parse", "refs/remotes/origin/stack/feature"])).stdout.trim(),
+        ).toBe(layer === "stack/feature" ? top : previousTop);
+        if (layer === "stack/feature")
+          expect((yield* runGit(cwd, ["rev-parse", "stack/second"])).stdout.trim()).toBe(
+            previousMiddle,
+          );
+      }
+      if (layer === "stack/second")
+        expect((yield* manager.listRewriteableCommits({ cwd })).commits).toHaveLength(2);
+    }),
   );
 
   it.effect.each(["stack/first", "stack/second", "stack/feature"] as const)(
@@ -6962,10 +6984,8 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
         expect(
           snapshot?.steps
             .filter((step) => step.id.endsWith(":review"))
-            .map((step) => [step.group, step.state]),
-        ).toEqual(
-          branches.map((branch) => [branch, prefix.includes(branch) ? "completed" : "skipped"]),
-        );
+            .map((step) => [step.group, step.label, step.state]),
+        ).toEqual(prefix.map((branch) => [branch, "Create MR", "completed"]));
         expect(created(providerCalls).map((call) => [call.headSelector, call.baseRefName])).toEqual(
           prefix.map((branch, index) => [branch, branches[index - 1] ?? "main"]),
         );

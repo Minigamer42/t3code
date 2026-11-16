@@ -3018,6 +3018,7 @@ export const make = Effect.gen(function* () {
     emit: GitActionProgressEmitter,
     pushRemoteRef?: { readonly remoteName: string; readonly upstreamRef: string },
     stackParent?: string,
+    onCreate?: () => Effect.Effect<void>,
   ) {
     const provider = yield* sourceControlProvider(cwd);
     const terms = sourceControlDefinitions.get(provider.kind).changeRequest;
@@ -3056,6 +3057,8 @@ export const make = Effect.gen(function* () {
         title: existing.title,
       };
     }
+
+    if (onCreate) yield* onCreate();
 
     const { baseBranch, baseRef } = stackParent
       ? {
@@ -5029,14 +5032,7 @@ export const make = Effect.gen(function* () {
           }
           prefix = prefix.filter((layer) => !mergedBranches.includes(layer.branch));
           let coreSteps: readonly GitWorkflowStep[] = [];
-          let reviewSteps: readonly GitWorkflowStep[] = localStack.layers
-            .filter((layer) => !mergedBranches.includes(layer.branch))
-            .map((layer) => ({
-              id: `${layer.branch}:review`,
-              group: layer.branch,
-              label: changeRequestTerms?.singular ?? "Review",
-              state: prefix.some((item) => item.branch === layer.branch) ? "pending" : "skipped",
-            }));
+          let reviewSteps: readonly GitWorkflowStep[] = [];
           yield* branchStacks.update(input.cwd, {
             publishThrough: currentBranch!,
             mergedBranches,
@@ -5059,13 +5055,18 @@ export const make = Effect.gen(function* () {
           });
           const reviews = Effect.fn("GitManager.publishStackReviews")(function* () {
             for (const layer of prefix) {
-              const label = `Publishing review for ${layer.branch}...`;
-              reviewSteps = reviewSteps.map((step) =>
-                step.group === layer.branch ? { ...step, state: "running" } : step,
-              );
-              yield* onProgress({ label, steps: [...coreSteps, ...reviewSteps] });
-              yield* Ref.set(currentPhase, Option.some("pr"));
-              yield* progress.emit({ kind: "phase_started", phase: "pr", label });
+              const startReviewStep = Effect.fn("GitManager.startStackReviewStep")(function* (
+                label: string,
+              ) {
+                reviewSteps = [
+                  ...reviewSteps.filter((step) => step.group !== layer.branch),
+                  { id: `${layer.branch}:review`, group: layer.branch, label, state: "running" },
+                ];
+                const message = `${label} for ${layer.branch}...`;
+                yield* onProgress({ label: message, steps: [...coreSteps, ...reviewSteps] });
+                yield* Ref.set(currentPhase, Option.some("pr"));
+                yield* progress.emit({ kind: "phase_started", phase: "pr", label: message });
+              });
               yield* gitCore.switchRef({
                 cwd: input.cwd,
                 refName: layer.branch,
@@ -5084,6 +5085,7 @@ export const make = Effect.gen(function* () {
                 progress.emit,
                 undefined,
                 layer.parent,
+                () => startReviewStep(`Create ${changeRequestTerms?.shortLabel ?? "review"}`),
               );
               if (
                 (pr.status === "created" || pr.status === "opened_existing") &&
@@ -5097,6 +5099,9 @@ export const make = Effect.gen(function* () {
                     cwd: input.cwd,
                     detail: "This host cannot retarget the existing review to its stack parent.",
                   });
+                yield* startReviewStep(
+                  `Change ${changeRequestTerms?.shortLabel ?? "review"} target`,
+                );
                 yield* provider.retargetChangeRequest({
                   cwd: input.cwd,
                   reference: pr.url,
@@ -5104,13 +5109,16 @@ export const make = Effect.gen(function* () {
                 });
               }
               if (layer.branch === currentBranch) stackPr = { ...pr, baseBranch: layer.parent };
-              reviewSteps = reviewSteps.map((step) =>
-                step.group === layer.branch ? { ...step, state: "completed" } : step,
-              );
-              yield* onProgress({
-                label: `Published review for ${layer.branch}`,
-                steps: [...coreSteps, ...reviewSteps],
-              });
+              const reviewStep = reviewSteps.find((step) => step.group === layer.branch);
+              if (reviewStep) {
+                reviewSteps = reviewSteps.map((step) =>
+                  step.group === layer.branch ? { ...step, state: "completed" } : step,
+                );
+                yield* onProgress({
+                  label: `${reviewStep.label} for ${layer.branch}: completed`,
+                  steps: [...coreSteps, ...reviewSteps],
+                });
+              }
             }
           });
           yield* reviews().pipe(Effect.onError(() => restore.pipe(Effect.ignore)));
