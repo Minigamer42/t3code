@@ -128,6 +128,7 @@ function createThread(input: {
   readonly command: string;
   readonly thread: string;
   readonly worktreePath?: string;
+  readonly title?: string;
 }) {
   return Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
@@ -137,7 +138,7 @@ function createThread(input: {
       commandId: CommandId.make(input.command),
       threadId,
       projectId,
-      title: "Seed title",
+      title: input.title ?? "Seed title",
       modelSelection,
       runtimeMode: "full-access",
       interactionMode: "default",
@@ -415,6 +416,7 @@ describe("ThreadTitleRegenerationService", () => {
           const threadId = yield* createThread({
             command: "create:first-turn",
             thread: "first-turn",
+            title: "New thread",
           });
           const initialRequestId = CommandId.make("message:first-turn");
           const messageId = MessageId.make(`${initialRequestId}:message`);

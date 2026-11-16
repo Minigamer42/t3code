@@ -242,6 +242,8 @@ const layerGitFixtureTemplates = Layer.effect(
     const repo = yield* makeTempDir("t3code-git-template-");
     // An empty template skips copying git's sample hooks into every test repository.
     yield* runGit(repo, ["init", "--initial-branch=main", "--template="]);
+    yield* fs.makeDirectory(NodePath.join(repo, ".git", "info"));
+    yield* fs.makeDirectory(NodePath.join(repo, ".git", "hooks"));
     yield* runGit(repo, ["config", "user.email", "test@example.com"]);
     yield* runGit(repo, ["config", "user.name", "Test User"]);
     // Override global autocrlf on Windows for LF assertions, including linked worktrees.
@@ -1856,6 +1858,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               cwd,
               expectedBranch: "master",
               settings: {
+                projectId: null,
                 modelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
                 style: DEFAULT_SERVER_SETTINGS.sourceControlWritingStyle,
               },
@@ -1924,6 +1927,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 expectedBranch: "main",
                 filePaths: ["README.md"],
                 settings: {
+                  projectId: null,
                   modelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
                   style: DEFAULT_SERVER_SETTINGS.sourceControlWritingStyle,
                 },
@@ -4397,7 +4401,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const committed: Array<string> = [];
       for (const [index] of subjects.entries()) {
         NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), `change ${index}\n`);
-        yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+        yield* runStackedAction(manager, { cwd: repoDir, action: "commit", splitCommits: false });
         committed.push((yield* runGit(repoDir, ["log", "-1", "--pretty=%s"])).stdout.trim());
       }
 

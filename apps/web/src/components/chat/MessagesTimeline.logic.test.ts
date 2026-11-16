@@ -3382,6 +3382,7 @@ describe("v2 run and attempt history", () => {
     expect(collapsedRows.map((row) => row.id)).toEqual([
       "context-handoff-entry",
       "initial-user-entry",
+      "superseded-assistant-entry",
       `attempt-fold:${supersededAttemptId}`,
       "superseded-thread-created-entry",
       "steer-user-entry",
@@ -3402,8 +3403,8 @@ describe("v2 run and attempt history", () => {
     expect(expandedRows.map((row) => row.id)).toEqual([
       "context-handoff-entry",
       "initial-user-entry",
-      `attempt-fold:${supersededAttemptId}`,
       "superseded-assistant-entry",
+      `attempt-fold:${supersededAttemptId}`,
       "superseded-work-entry",
       "superseded-thread-created-entry",
       "steer-user-entry",
@@ -3579,19 +3580,25 @@ describe("v2 run and attempt history", () => {
       [undefined, 4, true],
       [undefined, 11, false],
     ] as const)(
-      "retains phase %s ending at %s only when it is a final reply: %s",
+      "keeps phase %s ending at %s visible unless Zen hides it: %s",
       (phase, completedSecond, retained) => {
         for (const runStatus of ["running", "completed"] as const) {
           for (const visibility of ["showAll", "zen"] as const) {
             const rows = rowsFor(completedSecond, runStatus, visibility, phase);
-            expect(rows.some((row) => row.id === "old-reply-entry")).toBe(retained);
+            expect(rows.some((row) => row.id === "old-reply-entry")).toBe(
+              visibility === "showAll" || retained,
+            );
             if (phase !== undefined && runStatus === "completed") {
               const nativeRows = rowsFor(completedSecond, runStatus, visibility, phase, true);
-              expect(nativeRows.some((row) => row.id === "old-reply-entry")).toBe(retained);
-              expect(nativeRows.some((row) => row.id === "status-entry")).toBe(false);
+              expect(nativeRows.some((row) => row.id === "old-reply-entry")).toBe(
+                visibility === "showAll" || retained,
+              );
+              expect(nativeRows.some((row) => row.id === "status-entry")).toBe(
+                visibility === "showAll",
+              );
             }
             if (runStatus === "completed") {
-              expect(rows.some((row) => row.id === "status-entry")).toBe(false);
+              expect(rows.some((row) => row.id === "status-entry")).toBe(visibility === "showAll");
             }
           }
         }

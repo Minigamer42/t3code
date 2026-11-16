@@ -69,9 +69,7 @@ const threadTitleAtom = Atom.family((key: string) => {
         input: { threadIds: [ref.threadId] },
       }),
     );
-    return AsyncResult.isSuccess(titles)
-      ? (titles.value[ref.threadId]?.title ?? null)
-      : null;
+    return AsyncResult.isSuccess(titles) ? (titles.value[ref.threadId]?.title ?? null) : null;
   }).pipe(Atom.withLabel(`mobile-thread-title:${key}`));
 });
 
@@ -87,7 +85,12 @@ const threadLinkTitlesAtom = Atom.family((key: string) => {
       if (title !== null) titles.set(refKey, title);
       else {
         const ref = scopeThreadRef(...decodeThreadKey(JSON.parse(refKey)));
-        const result = get(orchestrationEnvironment.threadLinkMetadata({ environmentId: ref.environmentId, input: { threadIds: [ref.threadId] } }));
+        const result = get(
+          orchestrationEnvironment.threadLinkMetadata({
+            environmentId: ref.environmentId,
+            input: { threadIds: [ref.threadId] },
+          }),
+        );
         if (result.waiting || AsyncResult.isInitial(result))
           unresolved.set(refKey, "Loading thread…");
         else if (AsyncResult.isFailure(result)) unresolved.set(refKey, "Could not load thread");

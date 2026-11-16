@@ -1776,8 +1776,14 @@ export default function GitActionsControl({
             {initAction.isPending ? "Initializing..." : "Initialize Git"}
           </span>
         </ThreadDetailsControl>
-      ) : quietEmptyDraft || (compact && !gitActionProgress && !visibleInlineSuccess) ? null : (
-        <div role="group" aria-label="Git actions" onPointerEnter={hasGitMenuContent ? undefined : refreshStatusForEmptyMenu} onFocus={hasGitMenuContent ? undefined : refreshStatusForEmptyMenu} className="flex w-full flex-col">
+      ) : quietEmptyDraft ? null : (
+        <div
+          role="group"
+          aria-label="Git actions"
+          onPointerEnter={hasGitMenuContent ? undefined : refreshStatusForEmptyMenu}
+          onFocus={hasGitMenuContent ? undefined : refreshStatusForEmptyMenu}
+          className="flex w-full flex-col"
+        >
           {gitActionProgress ? (
             <GitActionProgressView progress={gitActionProgress} />
           ) : !vcsActionState.error && visibleInlineSuccess ? (
@@ -1796,8 +1802,12 @@ export default function GitActionsControl({
               variant="ghost"
               part="row"
               panel
-              disabled={!canWriteSourceControl || isRefreshingQuickAction || isGitActionRunning || quickAction.disabled}
-              title={quickActionDisabledReason ?? undefined}
+              disabled={
+                !canWriteSourceControl ||
+                isRefreshingQuickAction ||
+                isGitActionRunning ||
+                quickAction.disabled
+              }
               onClick={runQuickAction}
             >
               <CloudDownloadIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />

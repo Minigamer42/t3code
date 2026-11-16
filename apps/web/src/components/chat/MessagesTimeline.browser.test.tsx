@@ -313,7 +313,15 @@ describe("MessagesTimeline work rows", () => {
           ...Array.from({ length: 12 }, (_, index) =>
             message(`Earlier context ${index}`, {}, `context-${index}`),
           ),
-          message("Progress details\n\n".repeat(50), { role: "assistant", runId }, "progress"),
+          ...Array.from({ length: 32 }, (_, index) =>
+            work(`progress-${index}`, {
+              runId,
+              label: `Checked step ${index}`,
+              itemType: "todo_list",
+              tone: "tool",
+              toolLifecycleStatus: "completed",
+            }),
+          ),
           message("Done", { role: "assistant", runId }, "final"),
         ]}
       />,
@@ -354,7 +362,15 @@ describe("MessagesTimeline work rows", () => {
       ...Array.from({ length: 12 }, (_, index) =>
         message(`Earlier context ${index}`, {}, `context-${index}`),
       ),
-      message("Progress details\n\n".repeat(50), { role: "assistant", runId }, "progress"),
+      ...Array.from({ length: 32 }, (_, index) =>
+        work(`progress-${index}`, {
+          runId,
+          label: `Checked step ${index}`,
+          itemType: "todo_list",
+          tone: "tool",
+          toolLifecycleStatus: "completed",
+        }),
+      ),
       message("Done", { role: "assistant", runId }, "final"),
     ];
     await using screen = await render(<MessagesTimeline {...props} timelineEntries={entries} />, {

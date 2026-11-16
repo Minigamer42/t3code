@@ -700,10 +700,18 @@ export const make = Effect.gen(function* () {
     }),
     createMergeRequest: Effect.fn("GitLabCli.createMergeRequest")(function* (input) {
       const projectResult = yield* execute({ cwd: input.cwd, args: ["api", "projects/:fullpath"] });
-      const projectSettings = yield* decodeGitLabRemoveSourceBranchSetting(projectResult.stdout).pipe(
-        Effect.mapError((cause) => new GitLabRepositoryDecodeError({
-          operation: "createMergeRequest", command: "glab", cwd: input.cwd, cause,
-        })),
+      const projectSettings = yield* decodeGitLabRemoveSourceBranchSetting(
+        projectResult.stdout,
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitLabRepositoryDecodeError({
+              operation: "createMergeRequest",
+              command: "glab",
+              cwd: input.cwd,
+              cause,
+            }),
+        ),
       );
       let project = ":fullpath";
       let targetProjectId: number | undefined;

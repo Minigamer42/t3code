@@ -43,7 +43,6 @@ import {
   formatGeneratedBranchName,
   isTemporaryWorktreeBranch,
   resolveAutoBranchName,
-  WORKTREE_BRANCH_PREFIX,
 } from "@t3tools/shared/git";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -641,7 +640,9 @@ const make = Effect.gen(function* () {
         reuseBaseBranch = localRefs.refs.some((ref) => ref.name === baseRef && !ref.worktreePath);
       }
       const generatedTemporaryBranch =
-        input.workspaceStrategy.type === "worktree" && requestedBranch === undefined && !reuseBaseBranch;
+        input.workspaceStrategy.type === "worktree" &&
+        requestedBranch === undefined &&
+        !reuseBaseBranch;
       let branch: string | null;
       if (input.workspaceStrategy.type === "worktree" && reuseBaseBranch) {
         branch = input.workspaceStrategy.baseRef;
@@ -738,7 +739,11 @@ const make = Effect.gen(function* () {
             }));
           }
         }
-        if (!reuseBaseBranch && branch !== null && (generatedTemporaryBranch || isTemporaryWorktreeBranch(branch))) {
+        if (
+          !reuseBaseBranch &&
+          branch !== null &&
+          (generatedTemporaryBranch || isTemporaryWorktreeBranch(branch))
+        ) {
           const parts = branch.split("/");
           for (let depth = 1; depth < parts.length; depth++) {
             if (

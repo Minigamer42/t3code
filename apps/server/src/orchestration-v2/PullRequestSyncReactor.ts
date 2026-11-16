@@ -698,7 +698,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(
       groups,
       ([key, entries]) =>
-        scope !== "all" && !requested.has(key) || !isDue(key, entries, nowMs)
+        (scope !== "all" && !requested.has(key)) || !isDue(key, entries, nowMs)
           ? Effect.void
           : resolveEntries(entries).pipe(
               Effect.tap((resolved) => Effect.sync(() => groups.set(key, resolved))),

@@ -84,43 +84,45 @@ const requestMetadata = {
 it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
   "EnvironmentAuth.layer",
   (it) => {
-    it.effect("keeps stale session rejections quiet while warning about malformed credentials", () =>
-    Effect.gen(function* () {
-      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      const sessions = yield* SessionStore.SessionStore;
-      const revoked = yield* sessions.issue();
-      yield* sessions.revoke(revoked.sessionId);
-      const expired = yield* sessions.issue({ ttl: Duration.zero });
-      const rejections: Array<{ level: string; reason: unknown }> = [];
-      const logger = Logger.make(({ logLevel, fiber, message }) => {
-        const parts = Array.isArray(message) ? message : [message];
-        if (parts[0] === "Rejected authenticated session credential.") {
-          rejections.push({
-            level: logLevel,
-            reason: fiber.getRef(References.CurrentLogAnnotations).reason,
+    it.effect(
+      "keeps stale session rejections quiet while warning about malformed credentials",
+      () =>
+        Effect.gen(function* () {
+          const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+          const sessions = yield* SessionStore.SessionStore;
+          const revoked = yield* sessions.issue();
+          yield* sessions.revoke(revoked.sessionId);
+          const expired = yield* sessions.issue({ ttl: Duration.zero });
+          const rejections: Array<{ level: string; reason: unknown }> = [];
+          const logger = Logger.make(({ logLevel, fiber, message }) => {
+            const parts = Array.isArray(message) ? message : [message];
+            if (parts[0] === "Rejected authenticated session credential.") {
+              rejections.push({
+                level: logLevel,
+                reason: fiber.getRef(References.CurrentLogAnnotations).reason,
+              });
+            }
           });
-        }
-      });
-      yield* Effect.gen(function* () {
-        for (const token of [revoked.token, expired.token, "malformed"]) {
-          const error = yield* serverAuth
-            .authenticateHttpRequest(makeCookieRequest(sessions.cookieName, token))
-            .pipe(Effect.flip);
-          expect(error._tag).toBe("ServerAuthInvalidCredentialError");
-        }
-      }).pipe(
-        Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
-        Effect.provideService(References.MinimumLogLevel, "Debug"),
-      );
-      expect(rejections).toEqual([
-        { level: "Debug", reason: "Session token revoked." },
-        { level: "Debug", reason: "Session token expired." },
-        { level: "Warn", reason: "Malformed session token." },
-      ]);
-    }).pipe(Effect.provide(layerEnvironmentAuth())),
-  );
+          yield* Effect.gen(function* () {
+            for (const token of [revoked.token, expired.token, "malformed"]) {
+              const error = yield* serverAuth
+                .authenticateHttpRequest(makeCookieRequest(sessions.cookieName, token))
+                .pipe(Effect.flip);
+              expect(error._tag).toBe("ServerAuthInvalidCredentialError");
+            }
+          }).pipe(
+            Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
+            Effect.provideService(References.MinimumLogLevel, "Debug"),
+          );
+          expect(rejections).toEqual([
+            { level: "Debug", reason: "Session token revoked." },
+            { level: "Debug", reason: "Session token expired." },
+            { level: "Warn", reason: "Malformed session token." },
+          ]);
+        }).pipe(Effect.provide(layerEnvironmentAuth())),
+    );
 
-  it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
+    it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
       Effect.gen(function* () {
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
         const sessions = yield* SessionStore.SessionStore;

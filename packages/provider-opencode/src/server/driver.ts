@@ -207,7 +207,7 @@ function selectOpenCodeRuntimeTextGeneration(
         v2: v2.generateCommitMessage(input),
       }),
     generateCommitPlan: (input) =>
-      byOpenCodeRuntime(probe.get, {
+      byOpenCodeRuntime(resolve, {
         v1: v1.generateCommitPlan(input),
         v2: v2.generateCommitPlan(input),
       }),

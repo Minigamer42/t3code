@@ -7581,7 +7581,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           refName: initialBranch,
           newRefName: "t3code/deadbeef",
         });
-        assert.match(pathService.basename(temporary.worktree.path), /^t3code-deadbeef-[a-f0-9]{16}$/);
+        assert.match(
+          pathService.basename(temporary.worktree.path),
+          /^t3code-deadbeef-[a-f0-9]{16}$/,
+        );
 
         const created = yield* driver.createWorktree({
           cwd,
@@ -7608,7 +7611,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           path: null,
           refName: "jm/indiv/juh/existing",
         });
-        assert.match(pathService.basename(existing.worktree.path), /^jm-indiv-juh-existing-[a-f0-9]{16}$/);
+        assert.match(
+          pathService.basename(existing.worktree.path),
+          /^jm-indiv-juh-existing-[a-f0-9]{16}$/,
+        );
       }),
     );
 

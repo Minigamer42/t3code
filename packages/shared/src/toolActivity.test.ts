@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { classifyToolActivity, dynamicToolSurface, mergeToolActivityData, deriveToolActivityPresentation } from "./toolActivity.ts";
+import {
+  classifyToolActivity,
+  dynamicToolSurface,
+  mergeToolActivityData,
+  deriveToolActivityPresentation,
+} from "./toolActivity.ts";
 
 describe("toolActivity", () => {
   it("normalizes command tools to a stable ran-command label", () => {

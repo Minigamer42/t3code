@@ -438,6 +438,7 @@ const layerRepositoryIdentityResolver = Layer.effect(
 ).pipe(Layer.provide(layerSourceControlProviderRegistry), Layer.provide(ProcessRunner.layer));
 
 const layerPullRequestService = PullRequestService.layer.pipe(
+  Layer.provide(ProjectionStoreV2.layer),
   Layer.provide(PullRequestProviderRegistry.layer),
   Layer.provide(PullRequestFilesViewed.layer),
   Layer.provide(PullRequestReadCache.layer),

@@ -1029,6 +1029,7 @@ describe("providerMaintenanceRunner", () => {
         snapshot: { getSnapshot: Effect.succeed(baseProvider) } as ProviderInstance["snapshot"],
         orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
         textGeneration: TextGeneration.TextGeneration.of({
+          generateCommitPlan: () => Effect.die("unused"),
           generateCommitMessage: () => Effect.die("unused"),
           generatePrContent: () => Effect.die("unused"),
           generateBranchName: () => Effect.die("unused"),

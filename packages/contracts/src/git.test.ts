@@ -86,7 +86,10 @@ describe("GitRunStackedActionInput", () => {
 
 describe("custom worktree names", () => {
   const decode = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
-  it.each([".", "..", "parent/child", "parent\\child"])("rejects invalid worktree name %s", (worktreeName) => {
-    expect(() => decode({ cwd: "/repo", refName: "main", worktreeName, path: null })).toThrow();
-  });
+  it.each([".", "..", "parent/child", "parent\\child"])(
+    "rejects invalid worktree name %s",
+    (worktreeName) => {
+      expect(() => decode({ cwd: "/repo", refName: "main", worktreeName, path: null })).toThrow();
+    },
+  );
 });

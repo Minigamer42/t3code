@@ -72,7 +72,7 @@ const TEXT_GENERATION_FALLBACK_DRIVERS = [
   "antigravity",
 ].map((driver) => ProviderDriverKind.make(driver));
 
-/** Configured instances can take priority while each candidate model is checked for availability. */
+/** Configured instances take priority while each candidate model is checked for availability. */
 export function fallbackTextGenerationModelSelection(
   providerInstances: ServerSettings["providerInstances"],
   isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind, model: string) => boolean,
@@ -100,14 +100,14 @@ export function fallbackTextGenerationModelSelection(
   const configured =
     options?.includeConfiguredInstances !== false
       ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-          options.configuredInstancesFirst === true ||
+          options?.configuredInstancesFirst !== false ||
           TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
             ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
             : [],
         )
       : [];
   const candidates =
-    options?.configuredInstancesFirst === true
+    options?.configuredInstancesFirst !== false
       ? [...configured, ...defaults]
       : [...defaults, ...configured];
   for (const [instanceId, driver] of candidates) {

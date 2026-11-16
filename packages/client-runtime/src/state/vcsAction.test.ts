@@ -517,33 +517,33 @@ describe("vcsActionState", () => {
       );
       const state = vcsRefsCacheStateAtom({ environmentId });
 
-        expect(registry.get(state).revision).toBe(0);
-        const threadId = ThreadId.make("thread-stacked-action");
-        const projectId = ProjectId.make("project-stacked-action");
-        const successfulResult = yield* Effect.promise(() =>
-          manager.runStackedAction(targetKey).run(registry, {
-            actionId: successfulActionId,
-            action,
-            splitCommits: false,
-            threadId,
-            projectId,
-          }),
-        );
+      expect(registry.get(state).revision).toBe(0);
+      const threadId = ThreadId.make("thread-stacked-action");
+      const projectId = ProjectId.make("project-stacked-action");
+      const successfulResult = yield* Effect.promise(() =>
+        manager.runStackedAction(targetKey).run(registry, {
+          actionId: successfulActionId,
+          action,
+          splitCommits: false,
+          threadId,
+          projectId,
+        }),
+      );
 
-        expect(AsyncResult.isSuccess(successfulResult)).toBe(true);
-        expect(registry.get(manager.stateAtom(targetKey))).toEqual(EMPTY_VCS_ACTION_STATE);
-        expect(registry.get(state).revision).toBe(1);
-        expect(removed).toEqual([`${environmentId}:*`]);
-        expect(rpcInputs).toEqual([
-          {
-            actionId: successfulTransportActionId,
-            cwd,
-            action,
-            splitCommits: false,
-            threadId,
-            projectId,
-          },
-        ]);
+      expect(AsyncResult.isSuccess(successfulResult)).toBe(true);
+      expect(registry.get(manager.stateAtom(targetKey))).toEqual(EMPTY_VCS_ACTION_STATE);
+      expect(registry.get(state).revision).toBe(1);
+      expect(removed).toEqual([`${environmentId}:*`]);
+      expect(rpcInputs).toEqual([
+        {
+          actionId: successfulTransportActionId,
+          cwd,
+          action,
+          splitCommits: false,
+          threadId,
+          projectId,
+        },
+      ]);
 
       const failedResult = yield* Effect.promise(() =>
         manager.runStackedAction(targetKey).run(registry, {

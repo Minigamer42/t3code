@@ -172,8 +172,11 @@ export const make = Effect.gen(function* () {
       );
     }),
     generateCommitPlan: Effect.fn("TextGeneration.generateCommitPlan")(function (input) {
-      return generate("generateCommitPlan", input.modelSelection, (service, modelSelection) =>
-        service.generateCommitPlan({ ...input, modelSelection }),
+      return generate(
+        "generateCommitPlan",
+        input.modelSelection,
+        input.projectId,
+        (service, modelSelection) => service.generateCommitPlan({ ...input, modelSelection }),
       );
     }),
     generatePrContent: Effect.fn("TextGeneration.generatePrContent")(function (input) {

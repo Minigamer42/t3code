@@ -29,6 +29,7 @@ export interface CommitMessageGenerationResult {
 }
 
 export interface CommitPlanGenerationInput {
+  projectId?: ProjectId | null | undefined;
   cwd: string;
   branch: string | null;
   changeUnitSummary: string;

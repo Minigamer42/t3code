@@ -568,7 +568,7 @@ describe("V2 session presentation", () => {
       expect(commandEntry.entry.projectedItem).toBe(visibleTurnItems[2]);
       expect(commandEntry.entry.structuredPayload).toBe(commandItem);
       expect(commandEntry.entry.command).toBe(commandItem.input);
-      expect(commandEntry.entry.detail).toBeUndefined();
+      expect(commandEntry.entry.detail).toBe(commandItem.input);
     }
     const errorEntry = entries[5];
     expect(errorEntry?.kind).toBe("work");
@@ -930,7 +930,7 @@ describe("V2 session presentation", () => {
     }
     expect(entries[1]?.kind).toBe("work");
     if (entries[1]?.kind === "work") {
-      expect(entries[1].entry.detail).toBeUndefined();
+      expect(entries[1].entry.detail).toBe(fileItem.fileName);
       expect(entries[1].entry.changedFiles).toEqual([fileItem.fileName]);
     }
   });
@@ -1275,7 +1275,7 @@ describe("native provider presentation in the v2 timeline", () => {
     });
     if (entry?.kind !== "work") throw new Error("Expected a command work entry");
 
-    expect(entry.entry.detail).toBeUndefined();
+    expect(entry.entry.detail).toBe("foo");
     expect(entry.entry.command).toBe("foo");
     expect(entry.entry.toolLifecycleStatus).toBe("completed");
     expect(workEntryDisplayIndicatesToolFailure(entry.entry)).toBe(true);
@@ -1514,7 +1514,13 @@ describe("HTML renders in the timeline", () => {
     ).map((entry) =>
       entry.kind === "message" && entry.message.role === "user" ? entry : { ...entry, attempt },
     );
-    expect(rowsFor(entries, true)).toEqual(["message", "turn-fold", "attempt-fold", "html-render"]);
+    expect(rowsFor(entries, true)).toEqual([
+      "message",
+      "turn-fold",
+      "attempt-fold",
+      "html-render",
+      "message",
+    ]);
   });
 
   it.each([

@@ -206,365 +206,359 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
       automaticallyAdjustKeyboardInsets
       contentContainerClassName="px-5 pt-4 gap-5"
     >
-          {!rewriteHistory && (
-            <View accessibilityRole="radiogroup" accessibilityLabel="Commit mode" className="gap-2">
-              {(["single", "logical"] as const).map((mode) => (
-                <Pressable
-                  key={mode}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: commitMode === mode }}
-                  onPress={() => setCommitMode(mode)}
-                  className="min-h-12 flex-row items-center gap-2"
-                >
-                  <Text className="text-foreground text-sm">
-                    {commitMode === mode ? "●" : "○"}{" "}
-                    {mode === "single" ? "Single commit" : "Logical commits"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-          {isWorkflow && (
-            <View className="gap-3 bg-card p-4 android:rounded-[20px] ios:rounded-[22px]">
-              <Text className="text-foreground-secondary text-sm">
-                The model groups changes and writes messages using your Source Control settings. T3
-                stages and commits them in this checkout, keeping a backup of the original history.
-                Nothing is pushed.
+      {!rewriteHistory && (
+        <View accessibilityRole="radiogroup" accessibilityLabel="Commit mode" className="gap-2">
+          {(["single", "logical"] as const).map((mode) => (
+            <Pressable
+              key={mode}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: commitMode === mode }}
+              onPress={() => setCommitMode(mode)}
+              className="min-h-12 flex-row items-center gap-2"
+            >
+              <Text className="text-foreground text-sm">
+                {commitMode === mode ? "●" : "○"}{" "}
+                {mode === "single" ? "Single commit" : "Logical commits"}
               </Text>
-              {workflowScope === "working_tree" && gitStatus.data?.refName === null && (
-                <Text className="text-foreground-secondary text-sm">
-                  Commits will be created on detached HEAD. Any paused rebase will stay paused.
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {isWorkflow && (
+        <View className="gap-3 bg-card p-4 android:rounded-[20px] ios:rounded-[22px]">
+          <Text className="text-foreground-secondary text-sm">
+            The model groups changes and writes messages using your Source Control settings. T3
+            stages and commits them in this checkout, keeping a backup of the original history.
+            Nothing is pushed.
+          </Text>
+          {workflowScope === "working_tree" && gitStatus.data?.refName === null && (
+            <Text className="text-foreground-secondary text-sm">
+              Commits will be created on detached HEAD. Any paused rebase will stay paused.
+            </Text>
+          )}
+          {workflowScope === "branch" && (
+            <>
+              {range.data?.layerBase ? (
+                <Text className="text-xs text-foreground-secondary">
+                  Current layer only · after {range.data.layerBase}
+                </Text>
+              ) : range.data || baseRef ? (
+                <TextInput
+                  accessibilityLabel="Base branch"
+                  value={baseRef}
+                  onChangeText={(value) => {
+                    setBaseRef(value);
+                    setStartCommit("");
+                    setEndCommit("");
+                  }}
+                  maxLength={256}
+                  placeholder="Repository default branch"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  className="min-h-12 rounded-xl bg-subtle px-4"
+                />
+              ) : null}
+              {range.isPending ? (
+                <Text className="text-sm text-foreground-secondary">Loading commits…</Text>
+              ) : range.error ? (
+                <Text className="text-sm text-danger-foreground">{range.error}</Text>
+              ) : commits.length === 0 ? (
+                <Text className="text-sm text-foreground-secondary">
+                  No branch commits are available to regroup.
+                </Text>
+              ) : (
+                <CommitRangePicker
+                  commits={commits}
+                  startIndex={startIndex}
+                  endIndex={endIndex}
+                  onReset={() => {
+                    setStartCommit("");
+                    setEndCommit("");
+                  }}
+                  onRangeChange={(first, last) => {
+                    setStartCommit(commits[first]?.sha ?? "");
+                    setEndCommit(commits[last]?.sha ?? "");
+                  }}
+                />
+              )}
+              <Text className="text-xs text-foreground-muted">
+                Earlier commits keep their IDs. Later commits keep their contents and messages but
+                receive new IDs.
+              </Text>
+              {(!gitStatus.data?.refName ||
+                isDefaultRef ||
+                gitStatus.data?.hasWorkingTreeChanges !== false) && (
+                <Text className="text-warning-foreground text-sm">
+                  Use a feature branch with a clean working tree to rebuild existing commits.
                 </Text>
               )}
-              {workflowScope === "branch" && (
-                <>
-                  {range.data?.layerBase ? (
-                    <Text className="text-xs text-foreground-secondary">
-                      Current layer only · after {range.data.layerBase}
-                    </Text>
-                  ) : range.data || baseRef ? (
-                    <TextInput
-                      accessibilityLabel="Base branch"
-                      value={baseRef}
-                      onChangeText={(value) => {
-                        setBaseRef(value);
-                        setStartCommit("");
-                        setEndCommit("");
-                      }}
-                      maxLength={256}
-                      placeholder="Repository default branch"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      className="min-h-12 rounded-xl bg-subtle px-4"
+            </>
+          )}
+        </View>
+      )}
+      {isDefaultRef ? (
+        <Text className="text-sm text-warning-foreground">
+          You’re on the default branch. You can create a new branch when committing.
+        </Text>
+      ) : null}
+      <View className="gap-2">
+        <Text className="text-sm font-t3-medium text-foreground">
+          {isWorkflow ? "Grouping instructions (optional)" : "Commit message"}
+        </Text>
+        <TextInput
+          multiline
+          accessibilityLabel={isWorkflow ? "Grouping instructions" : "Commit message"}
+          value={isWorkflow ? workflowInstructions : dialogCommitMessage}
+          onChangeText={isWorkflow ? setWorkflowInstructions : setDialogCommitMessage}
+          placeholder={
+            isWorkflow ? "Describe the desired commit sequence…" : "Describe your changes…"
+          }
+          textAlignVertical="top"
+          className="min-h-24 rounded-xl bg-subtle px-4 py-3 text-base"
+        />
+        <Text className="text-xs text-foreground-muted">
+          {isWorkflow
+            ? "Leave empty to use Source Control settings."
+            : "Leave empty to generate a message automatically."}
+        </Text>
+      </View>
+      <View style={isWorkflow && workflowScope === "branch" ? { display: "none" } : undefined}>
+        <View className="flex-row items-center justify-between gap-2 pb-2">
+          <View className="flex-1 gap-1">
+            <Text className="text-base font-t3-bold text-foreground">Changed files</Text>
+            <Text className="text-xs text-foreground-muted">
+              {selectedFiles.length} of {allFiles.length} selected · +
+              {formatDiffCount(selectedInsertions)} −{formatDiffCount(selectedDeletions)}
+            </Text>
+          </View>
+          {allFiles.length > 0 ? (
+            <Button
+              label={allSelected ? "Deselect all" : "Select all"}
+              tone="text"
+              onPress={() =>
+                setExcludedFiles(
+                  allSelected ? new Set(allFiles.map((file) => file.path)) : new Set(),
+                )
+              }
+            />
+          ) : null}
+        </View>
+        {allFiles.length > 0 && (
+          <View className="flex-row items-center justify-between gap-3">
+            <Text className="text-foreground-muted text-sm">Group by directory</Text>
+            <ThemedSwitch
+              accessibilityLabel="Group by directory"
+              value={groupByDirectory}
+              disabled={!AsyncResult.isSuccess(preferences)}
+              onValueChange={(value) => savePreferences({ gitFilesGroupByDirectory: value })}
+            />
+          </View>
+        )}
+        {allFiles.length === 0 ? (
+          <Text className="py-4 text-sm text-foreground-muted">No changed files to commit.</Text>
+        ) : groupByDirectory ? (
+          <View className="gap-1">
+            {groupedRows.map(({ node, depth }) => {
+              const files = node.kind === "directory" ? node.files : [node.file];
+              const includedCount = files.filter((file) => !excludedFiles.has(file.path)).length;
+              const checked =
+                includedCount === files.length ? true : includedCount === 0 ? false : "mixed";
+              return (
+                <View
+                  key={`${node.kind}:${node.path}`}
+                  className="flex-row items-center gap-2"
+                  style={{ paddingLeft: depth * 12 }}
+                >
+                  {
+                    <Pressable
+                      accessibilityRole="checkbox"
+                      accessibilityLabel={`Include ${node.kind === "directory" ? "directory " : ""}${node.path}`}
+                      accessibilityState={{ checked }}
+                      className="min-h-11 w-8 items-center justify-center"
+                      onPress={() =>
+                        setExcludedFiles((current) => toggleCommitFiles(files, current))
+                      }
+                    >
+                      <SymbolView
+                        name={checked === "mixed" ? "minus" : checked ? "checkmark" : "circle"}
+                        size={20}
+                        tintColorClassName="accent-foreground"
+                      />
+                    </Pressable>
+                  }
+                  {node.kind === "directory" ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={node.path}
+                      accessibilityState={{ expanded: !collapsed.has(node.path) }}
+                      className="min-h-11 flex-1 flex-row items-center gap-2"
+                      onPress={() =>
+                        setCollapsed((current) => {
+                          const next = new Set(current);
+                          if (next.has(node.path)) next.delete(node.path);
+                          else next.add(node.path);
+                          return next;
+                        })
+                      }
+                    >
+                      <SymbolView
+                        name={collapsed.has(node.path) ? "chevron.right" : "chevron.down"}
+                        size={12}
+                        tintColorClassName="accent-foreground-muted"
+                      />
+                      <SymbolView
+                        name="folder"
+                        size={16}
+                        tintColorClassName="accent-foreground-muted"
+                      />
+                      <Text
+                        className="text-foreground flex-1 text-sm font-medium"
+                        numberOfLines={1}
+                      >
+                        {node.name}
+                      </Text>
+                      <Text className="text-foreground-muted text-xs">{files.length}</Text>
+                    </Pressable>
+                  ) : (
+                    <View
+                      accessibilityLabel={node.path}
+                      className="min-h-11 flex-1 flex-row items-center gap-2 pl-4"
+                    >
+                      <Text
+                        className={cn(
+                          "flex-1 text-sm",
+                          includedCount ? "text-foreground" : "text-foreground-muted",
+                        )}
+                        numberOfLines={1}
+                      >
+                        {node.name}
+                      </Text>
+                      {includedCount ? (
+                        <>
+                          <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
+                            +{formatDiffCount(node.file.insertions)}
+                          </Text>
+                          <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
+                            -{formatDiffCount(node.file.deletions)}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text className="text-foreground-muted text-xs">Excluded</Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          allFiles.map((file) => {
+            const included = !excludedFiles.has(file.path);
+            const slash = file.path.lastIndexOf("/");
+            const name = file.path.slice(slash + 1);
+            const directory = slash >= 0 ? file.path.slice(0, slash) : null;
+            return (
+              <Pressable
+                key={file.path}
+                className="min-h-16 flex-row items-center gap-3 border-t border-border-subtle py-3"
+                accessibilityRole="checkbox"
+                accessibilityLabel={file.path}
+                accessibilityState={{ checked: included }}
+                onPress={() =>
+                  setExcludedFiles((current) => {
+                    const next = new Set(current);
+                    if (next.has(file.path)) next.delete(file.path);
+                    else next.add(file.path);
+                    return next;
+                  })
+                }
+              >
+                <View
+                  className={cn(
+                    "size-5 items-center justify-center rounded-full",
+                    included ? "bg-primary" : "border border-input-border",
+                  )}
+                >
+                  {included ? (
+                    <SymbolView
+                      name="checkmark"
+                      size={13}
+                      tintColorClassName="accent-primary-foreground"
                     />
                   ) : null}
-                  {range.isPending ? (
-                    <Text className="text-sm text-foreground-secondary">Loading commits…</Text>
-                  ) : range.error ? (
-                    <Text className="text-sm text-danger-foreground">{range.error}</Text>
-                  ) : commits.length === 0 ? (
-                    <Text className="text-sm text-foreground-secondary">
-                      No branch commits are available to regroup.
-                    </Text>
-                  ) : (
-                    <CommitRangePicker
-                      commits={commits}
-                      startIndex={startIndex}
-                      endIndex={endIndex}
-                      onReset={() => {
-                        setStartCommit("");
-                        setEndCommit("");
-                      }}
-                      onRangeChange={(first, last) => {
-                        setStartCommit(commits[first]?.sha ?? "");
-                        setEndCommit(commits[last]?.sha ?? "");
-                      }}
-                    />
-                  )}
-                  <Text className="text-xs text-foreground-muted">
-                    Earlier commits keep their IDs. Later commits keep their contents and messages
-                    but receive new IDs.
-                  </Text>
-                  {(!gitStatus.data?.refName ||
-                    isDefaultRef ||
-                    gitStatus.data?.hasWorkingTreeChanges !== false) && (
-                    <Text className="text-warning-foreground text-sm">
-                      Use a feature branch with a clean working tree to rebuild existing commits.
-                    </Text>
-                  )}
-                </>
-              )}
-            </View>
-          )}
-          {isDefaultRef ? (
-            <Text className="text-sm text-warning-foreground">
-              You’re on the default branch. You can create a new branch when committing.
-            </Text>
-          ) : null}
-          <View className="gap-2">
-            <Text className="text-sm font-t3-medium text-foreground">
-              {isWorkflow ? "Grouping instructions (optional)" : "Commit message"}
-            </Text>
-            <TextInput
-              multiline
-              accessibilityLabel={isWorkflow ? "Grouping instructions" : "Commit message"}
-              value={isWorkflow ? workflowInstructions : dialogCommitMessage}
-              onChangeText={isWorkflow ? setWorkflowInstructions : setDialogCommitMessage}
-              placeholder={
-                isWorkflow ? "Describe the desired commit sequence…" : "Describe your changes…"
-              }
-              textAlignVertical="top"
-              className="min-h-24 rounded-xl bg-subtle px-4 py-3 text-base"
-            />
-            <Text className="text-xs text-foreground-muted">
-              {isWorkflow
-                ? "Leave empty to use Source Control settings."
-                : "Leave empty to generate a message automatically."}
-            </Text>
-          </View>
-          <View style={isWorkflow && workflowScope === "branch" ? { display: "none" } : undefined}>
-            <View className="flex-row items-center justify-between gap-2 pb-2">
-              <View className="flex-1 gap-1">
-                <Text className="text-base font-t3-bold text-foreground">Changed files</Text>
-                <Text className="text-xs text-foreground-muted">
-                  {selectedFiles.length} of {allFiles.length} selected · +
-                  {formatDiffCount(selectedInsertions)} −{formatDiffCount(selectedDeletions)}
-                </Text>
-              </View>
-              {allFiles.length > 0 ? (
-                <Button
-                  label={allSelected ? "Deselect all" : "Select all"}
-                  tone="text"
-                  onPress={() =>
-                    setExcludedFiles(
-                      allSelected ? new Set(allFiles.map((file) => file.path)) : new Set(),
-                    )
-                  }
-                />
-              ) : null}
-            </View>
-            {allFiles.length > 0 && (
-              <View className="flex-row items-center justify-between gap-3">
-                <Text className="text-foreground-muted text-sm">Group by directory</Text>
-                <ThemedSwitch
-                  accessibilityLabel="Group by directory"
-                  value={groupByDirectory}
-                  disabled={!AsyncResult.isSuccess(preferences)}
-                  onValueChange={(value) => savePreferences({ gitFilesGroupByDirectory: value })}
-                />
-              </View>
-            )}
-            {allFiles.length === 0 ? (
-              <Text className="py-4 text-sm text-foreground-muted">
-                No changed files to commit.
-              </Text>
-            ) : groupByDirectory ? (
-              <View className="gap-1">
-                {groupedRows.map(({ node, depth }) => {
-                  const files = node.kind === "directory" ? node.files : [node.file];
-                  const includedCount = files.filter(
-                    (file) => !excludedFiles.has(file.path),
-                  ).length;
-                  const checked =
-                    includedCount === files.length ? true : includedCount === 0 ? false : "mixed";
-                  return (
-                    <View
-                      key={`${node.kind}:${node.path}`}
-                      className="flex-row items-center gap-2"
-                      style={{ paddingLeft: depth * 12 }}
-                    >
-                      {
-                        <Pressable
-                          accessibilityRole="checkbox"
-                          accessibilityLabel={`Include ${node.kind === "directory" ? "directory " : ""}${node.path}`}
-                          accessibilityState={{ checked }}
-                          className="min-h-11 w-8 items-center justify-center"
-                          onPress={() =>
-                            setExcludedFiles((current) => toggleCommitFiles(files, current))
-                          }
-                        >
-                          <SymbolView
-                            name={checked === "mixed" ? "minus" : checked ? "checkmark" : "circle"}
-                            size={20}
-                            tintColorClassName="accent-foreground"
-                          />
-                        </Pressable>
-                      }
-                      {node.kind === "directory" ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={node.path}
-                          accessibilityState={{ expanded: !collapsed.has(node.path) }}
-                          className="min-h-11 flex-1 flex-row items-center gap-2"
-                          onPress={() =>
-                            setCollapsed((current) => {
-                              const next = new Set(current);
-                              if (next.has(node.path)) next.delete(node.path);
-                              else next.add(node.path);
-                              return next;
-                            })
-                          }
-                        >
-                          <SymbolView
-                            name={collapsed.has(node.path) ? "chevron.right" : "chevron.down"}
-                            size={12}
-                            tintColorClassName="accent-foreground-muted"
-                          />
-                          <SymbolView
-                            name="folder"
-                            size={16}
-                            tintColorClassName="accent-foreground-muted"
-                          />
-                          <Text
-                            className="text-foreground flex-1 text-sm font-medium"
-                            numberOfLines={1}
-                          >
-                            {node.name}
-                          </Text>
-                          <Text className="text-foreground-muted text-xs">{files.length}</Text>
-                        </Pressable>
-                      ) : (
-                        <View
-                          accessibilityLabel={node.path}
-                          className="min-h-11 flex-1 flex-row items-center gap-2 pl-4"
-                        >
-                          <Text
-                            className={cn(
-                              "flex-1 text-sm",
-                              includedCount ? "text-foreground" : "text-foreground-muted",
-                            )}
-                            numberOfLines={1}
-                          >
-                            {node.name}
-                          </Text>
-                          {includedCount ? (
-                            <>
-                              <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
-                                +{formatDiffCount(node.file.insertions)}
-                              </Text>
-                              <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
-                                -{formatDiffCount(node.file.deletions)}
-                              </Text>
-                            </>
-                          ) : (
-                            <Text className="text-foreground-muted text-xs">Excluded</Text>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              allFiles.map((file) => {
-                const included = !excludedFiles.has(file.path);
-                const slash = file.path.lastIndexOf("/");
-                const name = file.path.slice(slash + 1);
-                const directory = slash >= 0 ? file.path.slice(0, slash) : null;
-                return (
-                  <Pressable
-                    key={file.path}
-                    className="min-h-16 flex-row items-center gap-3 border-t border-border-subtle py-3"
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={file.path}
-                    accessibilityState={{ checked: included }}
-                    onPress={() =>
-                      setExcludedFiles((current) => {
-                        const next = new Set(current);
-                        if (next.has(file.path)) next.delete(file.path);
-                        else next.add(file.path);
-                        return next;
-                      })
-                    }
+                </View>
+                <View className="flex-1 gap-1">
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="middle"
+                    className="text-sm font-t3-medium text-foreground"
                   >
-                    <View
-                      className={cn(
-                        "size-5 items-center justify-center rounded-full",
-                        included ? "bg-primary" : "border border-input-border",
-                      )}
+                    {name}
+                  </Text>
+                  {directory ? (
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="middle"
+                      className="text-xs text-foreground-muted"
                     >
-                      {included ? (
-                        <SymbolView
-                          name="checkmark"
-                          size={13}
-                          tintColorClassName="accent-primary-foreground"
-                        />
-                      ) : null}
-                    </View>
-                    <View className="flex-1 gap-1">
-                      <Text
-                        numberOfLines={1}
-                        ellipsizeMode="middle"
-                        className="text-sm font-t3-medium text-foreground"
-                      >
-                        {name}
-                      </Text>
-                      {directory ? (
-                        <Text
-                          numberOfLines={1}
-                          ellipsizeMode="middle"
-                          className="text-xs text-foreground-muted"
-                        >
-                          {directory}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <View className="flex-row gap-2">
-                      <Text className="text-xs text-adaptive-emerald-700-300">
-                        +{formatDiffCount(file.insertions)}
-                      </Text>
-                      <Text className="text-xs text-adaptive-rose-700-300">
-                        −{formatDiffCount(file.deletions)}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })
-            )}
-          </View>
-          {isWorkflow ? (
-            <View className="gap-2">
-              <Button
-                label={rewriteHistory ? "Rebuild history" : "Create logical commits"}
-                icon="arrow.branch"
-                tone="primary"
-                fullWidth
-                disabled={!canStartWorkflow || workflowUnavailable || busy}
-                onPress={() => void runWorkflow()}
-              />
-              {!rewriteHistory ? (
-                <Button
-                  label="Commit on a new branch"
-                  icon="arrow.branch"
-                  tone="text"
-                  fullWidth
-                  disabled={
-                    !canStartWorkflow || !canChangeThreadBranch || workflowUnavailable || busy
-                  }
-                  onPress={() => void runWorkflow(true)}
-                />
-              ) : null}
-            </View>
-          ) : (
-            <View className="gap-2">
-              <Button
-                label="Commit changes"
-                icon="checkmark"
-                tone="primary"
-                fullWidth
-                disabled={!canWriteSourceControl || noneSelected || busy}
-                onPress={() => void runCommitAction(false)}
-              />
-              <Button
-                label="Commit on a new branch"
-                icon="arrow.branch"
-                tone="text"
-                fullWidth
-                disabled={!canWriteSourceControl || !canChangeThreadBranch || noneSelected || busy}
-                onPress={() => void runCommitAction(true)}
-              />
-            </View>
-          )}
+                      {directory}
+                    </Text>
+                  ) : null}
+                </View>
+                <View className="flex-row gap-2">
+                  <Text className="text-xs text-adaptive-emerald-700-300">
+                    +{formatDiffCount(file.insertions)}
+                  </Text>
+                  <Text className="text-xs text-adaptive-rose-700-300">
+                    −{formatDiffCount(file.deletions)}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })
+        )}
+      </View>
+      {isWorkflow ? (
+        <View className="gap-2">
+          <Button
+            label={rewriteHistory ? "Rebuild history" : "Create logical commits"}
+            icon="arrow.branch"
+            tone="primary"
+            fullWidth
+            disabled={!canStartWorkflow || workflowUnavailable || busy}
+            onPress={() => void runWorkflow()}
+          />
+          {!rewriteHistory ? (
+            <Button
+              label="Commit on a new branch"
+              icon="arrow.branch"
+              tone="text"
+              fullWidth
+              disabled={!canStartWorkflow || !canChangeThreadBranch || workflowUnavailable || busy}
+              onPress={() => void runWorkflow(true)}
+            />
+          ) : null}
+        </View>
+      ) : (
+        <View className="gap-2">
+          <Button
+            label="Commit changes"
+            icon="checkmark"
+            tone="primary"
+            fullWidth
+            disabled={!canWriteSourceControl || noneSelected || busy}
+            onPress={() => void runCommitAction(false)}
+          />
+          <Button
+            label="Commit on a new branch"
+            icon="arrow.branch"
+            tone="text"
+            fullWidth
+            disabled={!canWriteSourceControl || !canChangeThreadBranch || noneSelected || busy}
+            onPress={() => void runCommitAction(true)}
+          />
+        </View>
+      )}
     </FitSheet>
   );
 }

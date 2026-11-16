@@ -48,13 +48,17 @@ export function turnItemToolActivityPresentation(item: OrchestrationV2TurnItem) 
         title: item.title,
         data: { command: item.input },
       });
-    case "file_change":
-      return deriveToolActivityPresentation({
+    case "file_change": {
+      const presentation = deriveToolActivityPresentation({
         itemType: item.type,
         status,
         title: item.title,
         data: item,
       });
+      return item.changes !== undefined && item.changes.length > 1
+        ? { ...presentation, detail: `${item.changes[0]!.path} +${item.changes.length - 1} more` }
+        : presentation;
+    }
     case "file_search":
       return {
         ...deriveToolActivityPresentation({

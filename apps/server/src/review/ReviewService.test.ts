@@ -66,6 +66,7 @@ function layer(input: {
                   pinnedAt: null,
                   archivedAt: null,
                   title: "Review project",
+                  hasCustomTitle: false,
                   workspaceRoot: input.threadWorkspace.workspaceRoot,
                   defaultModelSelection: null,
                   defaultThreadEnvMode: null,

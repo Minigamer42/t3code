@@ -8,6 +8,7 @@ import { makeThreadFind } from "./ThreadFind.ts";
 import { unsentManualContinuationSource } from "./manualContinuation.ts";
 import type {
   OrchestrationV2ThreadLinkMetadata,
+  PullRequestRef,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -637,6 +638,9 @@ export interface ProjectionStoreV2Shape {
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionSettlementCandidate>, ProjectionStoreV2Error>;
+  readonly getPullRequestLinkUrl: (
+    ref: PullRequestRef,
+  ) => Effect.Effect<string | null, ProjectionStoreV2Error>;
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
@@ -8446,6 +8450,25 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
 
+    const getPullRequestLinkUrl = Effect.fn("ProjectionStore.getPullRequestLinkUrl")(
+      function* (ref: PullRequestRef) {
+        if (ref.host === undefined) return null;
+        const rows = yield* sql<{ readonly url: string }>`
+          SELECT json_extract(link.value, '$.url') AS url
+          FROM orchestration_v2_projection_threads AS thread,
+            json_each(thread.payload_json, '$.pullRequests') AS link
+          WHERE thread.project_id = ${ref.projectId} AND thread.deleted_at IS NULL
+            AND lower(json_extract(link.value, '$.host')) = ${ref.host.toLowerCase()}
+            AND lower(json_extract(link.value, '$.repository')) = ${ref.repository.toLowerCase()}
+            AND json_extract(link.value, '$.number') = ${ref.number}
+          ORDER BY thread.updated_at DESC
+          LIMIT 1
+        `;
+        return rows[0]?.url ?? null;
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
     const getThreadsWithPullRequests: ProjectionStoreV2Shape["getThreadsWithPullRequests"] =
       Effect.fn("ProjectionStore.getThreadsWithPullRequests")(
         function* (threadId) {
@@ -9298,6 +9321,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThread: readOnReader(getThread),
       getSettlementCandidates: readOnReader(getSettlementCandidates),
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),
+      getPullRequestLinkUrl: readOnReader(getPullRequestLinkUrl),
       getThreadTitles: readOnReader(getThreadTitles),
       getThreadLinkMetadata: readOnReader(getThreadLinkMetadata),
       getThreadWorktreePaths: readOnReader(getThreadWorktreePaths),

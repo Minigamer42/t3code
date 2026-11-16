@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { alternateComposerDispatchAction, resolveComposerDispatchMode, compactionBlocksSteering, composerRunsDraftLocally } from "./composerDispatch.ts";
+import {
+  alternateComposerDispatchAction,
+  resolveComposerDispatchMode,
+  compactionBlocksSteering,
+  composerRunsDraftLocally,
+} from "./composerDispatch.ts";
 
 it("blocks steering for explicit compaction, and for automatic compaction unless the provider takes steers then", () => {
   const during = (
@@ -138,7 +143,16 @@ describe("resolveComposerDispatchMode", () => {
   });
 });
 
-
-it.each(["queue", "steer", "restart"] as const)("queues when steering is unavailable with %s configured", (activeTurnDefault) => {
-  expect(resolveComposerDispatchMode({ running: true, alternateModifier: true, activeTurnDefault, canSteer: false })).toBe("queue");
-});
+it.each(["queue", "steer", "restart"] as const)(
+  "queues when steering is unavailable with %s configured",
+  (activeTurnDefault) => {
+    expect(
+      resolveComposerDispatchMode({
+        running: true,
+        alternateModifier: true,
+        activeTurnDefault,
+        canSteer: false,
+      }),
+    ).toBe("queue");
+  },
+);

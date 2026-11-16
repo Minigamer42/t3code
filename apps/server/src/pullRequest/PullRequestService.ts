@@ -79,6 +79,8 @@ import {
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import { resolvePermanentPullRequestRedirect } from "./permanentRedirect.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
@@ -754,6 +756,65 @@ export const make = Effect.gen(function* () {
   const filesViewedStore = yield* PullRequestFilesViewed.PullRequestFilesViewedRepository;
   const readCache = yield* PullRequestReadCache.PullRequestReadCache;
   const clock = yield* Clock.Clock;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const redirects = yield* Cache.makeWith(resolvePermanentPullRequestRedirect, {
+    capacity: 2_000,
+    timeToLive: () => Duration.minutes(15),
+  });
+  const redirectKey = (input: PullRequestRef) =>
+    JSON.stringify([input.projectId, input.host ?? null, input.repository, input.number]);
+  const redirectRef = (key: string) => {
+    const [projectId, host, repository, number] = JSON.parse(key) as [
+      ProjectId,
+      string | null,
+      string,
+      number,
+    ];
+    return { projectId, ...(host === null ? {} : { host }), repository, number };
+  };
+  const referenceRedirects = yield* Cache.makeWith(
+    (key: string) =>
+      Effect.gen(function* () {
+        const input = redirectRef(key);
+        const url = yield* projections.getPullRequestLinkUrl(input).pipe(
+          Effect.mapError(
+            (cause) =>
+              new PullRequestOperationError({
+                operation: "resolveRepository",
+                detail: "The stored review URL could not be read.",
+                cause,
+              }),
+          ),
+        );
+        if (url === null) return null;
+        const resolved = yield* Cache.get(redirects, url);
+        const target = sourceControlDefinitions.parseChangeRequestUrl(resolved)?.link;
+        if (resolved === url || target === undefined) return null;
+        yield* PubSub.publish(stateChanges, {
+          host: input.host ?? new URL(url).host,
+          repository: input.repository,
+          number: input.number,
+        });
+        return { host: target.host, repository: target.repository, number: target.number };
+      }),
+    { capacity: 2_000, timeToLive: () => Duration.minutes(15) },
+  );
+  const forgetReferenceRedirect = Effect.fn("PullRequestService.forgetReferenceRedirect")(
+    function* (input: PullRequestRef) {
+      const url = yield* projections
+        .getPullRequestLinkUrl(input)
+        .pipe(Effect.orElseSucceed(() => null));
+      if (url === null) return;
+      yield* Cache.invalidate(redirects, url);
+      yield* Cache.invalidate(referenceRedirects, redirectKey(input));
+    },
+  );
+  const resolveReference = Effect.fn("PullRequestService.resolveReference")(function* <
+    I extends PullRequestRef,
+  >(input: I) {
+    const target = yield* Cache.get(referenceRedirects, redirectKey(input));
+    return target === null ? input : { ...input, ...target };
+  });
 
   /**
    * Where each project's remote is served from, by the remote's recognised base URL: a remote no
@@ -1122,9 +1183,22 @@ export const make = Effect.gen(function* () {
   const canonicalRef = Effect.fn("PullRequestService.canonicalRef")(function* <
     I extends PullRequestRef,
   >(input: I) {
-    const project = yield* requireProject(input);
+    const cached = yield* Cache.has(referenceRedirects, redirectKey(input));
+    let resolved = yield* resolveReference(input);
+    const project = yield* requireProject(resolved).pipe(
+      Effect.catchTags({
+        PullRequestUnavailableError: (error) =>
+          cached
+            ? Effect.gen(function* () {
+                yield* forgetReferenceRedirect(input);
+                resolved = yield* resolveReference(input);
+                return yield* requireProject(resolved);
+              })
+            : Effect.fail(error),
+      }),
+    );
     return {
-      ...input,
+      ...resolved,
       projectId: project.project.id,
       host: project.host,
       repository: project.repository,
@@ -1725,11 +1799,12 @@ export const make = Effect.gen(function* () {
         operation: "routeIdentity",
         detail: "The signed-in account could not be verified before starting the operation.",
       });
-    const project = yield* requireProject(input).pipe(Effect.mapError(rejected));
+    const resolved = yield* canonicalRef(input).pipe(Effect.mapError(rejected));
+    const project = yield* requireProject(resolved).pipe(Effect.mapError(rejected));
     const api = registry.get(project.api.kind);
     if (
       api?.withVerifiedCredential === undefined ||
-      input.host?.toLowerCase() !== project.host.toLowerCase()
+      resolved.host?.toLowerCase() !== project.host.toLowerCase()
     ) {
       return yield* rejected();
     }
@@ -3713,6 +3788,7 @@ export const make = Effect.gen(function* () {
           );
     }
     if (reference !== undefined) {
+      yield* forgetReferenceRedirect(reference);
       yield* canonicalRef(reference).pipe(
         Effect.flatMap((ref) =>
           forgetProviderReads({ repository: ref.repository, number: ref.number }).pipe(
@@ -3934,9 +4010,18 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  // Wrapped operations already own their tracing spans.
+  const withCanonicalRef = <I extends PullRequestRef, Args extends ReadonlyArray<unknown>, A, E>(
+    operation: (input: I, ...args: Args) => Effect.Effect<A, E>,
+  ) =>
+    Effect.fnUntraced(function* (input: I, ...args: Args) {
+      const ref = yield* canonicalRef(input);
+      return yield* operation(ref, ...args);
+    });
+
   return PullRequestService.of({
     withSharedProjectReads,
-    routing,
+    routing: withCanonicalRef(routing),
     routingIdentity,
     withRoutingCredential,
     list,
@@ -3949,7 +4034,12 @@ export const make = Effect.gen(function* () {
       return yield* listStats({ ...input, refs: refs.flatMap(Option.toArray) });
     }),
     summary: credentialCached(summary),
-    batchesReads,
+    batchesReads: Effect.fn("PullRequestService.resolveBatchesReads")((input) =>
+      resolveReference(input).pipe(
+        Effect.flatMap(batchesReads),
+        Effect.orElseSucceed(() => false),
+      ),
+    ),
     stack: credentialCached(stack),
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
@@ -3972,28 +4062,34 @@ export const make = Effect.gen(function* () {
       Cache.get(watchFingerprintCache, refCacheKey(input)),
     ),
     activity: credentialCached(activity),
-    changes,
+    changes: (input) =>
+      Stream.unwrap(
+        canonicalRef(input).pipe(
+          Effect.map(changes),
+          Effect.orElseSucceed(() => Stream.empty),
+        ),
+      ),
     preview: credentialCached(preview),
-    threadComments,
+    threadComments: withCanonicalRef(threadComments),
     diff: credentialCached(diff),
-    diffFileContents,
+    diffFileContents: withCanonicalRef(diffFileContents),
     filesViewed: credentialCached(filesViewed),
-    setFilesViewed,
+    setFilesViewed: withCanonicalRef(setFilesViewed),
     changeBreakdown: credentialCached((input) =>
       Cache.get(changeBreakdownCache, refCacheKey(input)),
     ),
-    runAction: runActionAndInvalidate,
-    update: invalidatedByMutation(update),
-    comment: invalidatedByMutation(comment),
-    updateComment: invalidatedByMutation(updateComment),
-    submitReview: invalidatedByMutation(submitReview),
-    replyToThread: invalidatedByMutation(replyToThread),
-    setThreadResolution: invalidatedByMutation(setThreadResolution),
-    setReaction: invalidatedByMutation(setReaction),
-    reviewerCandidates,
-    requestReviewers: invalidatedByMutation(requestReviewers),
-    labelCandidates,
-    setLabels: invalidatedByMutation(setLabels),
+    runAction: withCanonicalRef(runActionAndInvalidate),
+    update: withCanonicalRef(invalidatedByMutation(update)),
+    comment: withCanonicalRef(invalidatedByMutation(comment)),
+    updateComment: withCanonicalRef(invalidatedByMutation(updateComment)),
+    submitReview: withCanonicalRef(invalidatedByMutation(submitReview)),
+    replyToThread: withCanonicalRef(invalidatedByMutation(replyToThread)),
+    setThreadResolution: withCanonicalRef(invalidatedByMutation(setThreadResolution)),
+    setReaction: withCanonicalRef(invalidatedByMutation(setReaction)),
+    reviewerCandidates: withCanonicalRef(reviewerCandidates),
+    requestReviewers: withCanonicalRef(invalidatedByMutation(requestReviewers)),
+    labelCandidates: withCanonicalRef(labelCandidates),
+    setLabels: withCanonicalRef(invalidatedByMutation(setLabels)),
     invalidate,
   });
 });

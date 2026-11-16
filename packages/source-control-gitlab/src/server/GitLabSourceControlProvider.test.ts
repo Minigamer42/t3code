@@ -323,7 +323,11 @@ it.effect.each([
         run: (input) => {
           requests.push(input.args);
           if (input.args[1] === "projects/:fullpath") {
-            return Effect.succeed(processOutput(JSON.stringify({ id: 100, path: "t3code" })));
+            return Effect.succeed(
+              processOutput(
+                JSON.stringify({ id: 100, path: "t3code", remove_source_branch_after_merge: true }),
+              ),
+            );
           }
           assert.deepStrictEqual(input.args, [
             "api",
@@ -338,6 +342,8 @@ it.effect.each([
             "target_project_id=100",
             "--raw-field",
             "title=Fix remote flow",
+            "--field",
+            "remove_source_branch=true",
             "--field",
             "description=@/tmp/body.md",
           ]);

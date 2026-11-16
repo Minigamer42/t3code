@@ -358,7 +358,12 @@ function UsageScreen(props: {
                         />
                         <CostSection merged={merged} wide={wide} />
                         <ModelsSection merged={merged} metric={metric} columns={wide ? 2 : 1} />
-                        {metric === "tokens" ? <GenerationSpeedStats environments={selectedEnvironments} timeZone={window.timeZone} /> : null}
+                        {metric === "tokens" ? (
+                          <GenerationSpeedStats
+                            environments={selectedEnvironments}
+                            timeZone={window.timeZone}
+                          />
+                        ) : null}
                       </UsageUpdating>
                     </>
                   )}

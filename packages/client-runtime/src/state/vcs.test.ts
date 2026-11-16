@@ -540,37 +540,36 @@ describe("cached VCS refs", () => {
       expect(yield* Ref.get(clears)).toBe(2);
       expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(2);
 
-        const prepareResult = yield* Effect.promise(() =>
-          createGitEnvironmentAtoms(
-            runtime,
-            createVcsActionManager(runtime).track,
-          ).preparePullRequestThread.run(registry, {
-            environmentId: TARGET.environmentId,
-            input: { cwd: "/repo", reference: "42", mode: "local" },
-          }),
-        );
+      const prepareResult = yield* Effect.promise(() =>
+        createGitEnvironmentAtoms(
+          runtime,
+          createVcsActionManager(runtime).track,
+        ).preparePullRequestThread.run(registry, {
+          environmentId: TARGET.environmentId,
+          input: { cwd: "/repo", reference: "42", mode: "local" },
+        }),
+      );
 
       expect(AsyncResult.isSuccess(prepareResult)).toBe(true);
       expect(yield* Ref.get(clears)).toBe(3);
       expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(3);
-        const split = createGitEnvironmentAtoms(
-          runtime,
-          createVcsActionManager(runtime).track,
-        ).startCommitWorkflow;
-        const splitInput = {
-          commandId: CommandId.make("split"),
-          cwd: "/repo",
-          threadId: ThreadId.make("thread"),
-          expectedBranch: "main",
-          scope: { type: "working_tree_new_branch" as const },
-        };
-        const splitResult = yield* Effect.promise(() =>
-          split.run(registry, { environmentId: TARGET.environmentId, input: splitInput }),
-        );
-        expect(AsyncResult.isFailure(splitResult)).toBe(true);
-        expect(yield* Ref.get(clears)).toBe(4);
-        expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(4);
-
+      const split = createGitEnvironmentAtoms(
+        runtime,
+        createVcsActionManager(runtime).track,
+      ).startCommitWorkflow;
+      const splitInput = {
+        commandId: CommandId.make("split"),
+        cwd: "/repo",
+        threadId: ThreadId.make("thread"),
+        expectedBranch: "main",
+        scope: { type: "working_tree_new_branch" as const },
+      };
+      const splitResult = yield* Effect.promise(() =>
+        split.run(registry, { environmentId: TARGET.environmentId, input: splitInput }),
+      );
+      expect(AsyncResult.isFailure(splitResult)).toBe(true);
+      expect(yield* Ref.get(clears)).toBe(4);
+      expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(4);
     }),
   );
 

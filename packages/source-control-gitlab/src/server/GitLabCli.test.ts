@@ -327,9 +327,10 @@ layer("GitLabCli.layer", (it) => {
           target_project_id: 100,
         }));
         mockedRun.mockImplementation((input) => {
-          const size = Number(input.args[input.args.indexOf("--per-page") + 1]);
-          const pageIndex = input.args.indexOf("--page");
-          const page = pageIndex < 0 ? 1 : Number(input.args[pageIndex + 1]);
+          const size = Number(input.args.find((arg) => arg.startsWith("per_page="))?.split("=")[1]);
+          const page = Number(
+            input.args.find((arg) => arg.startsWith("page="))?.split("=")[1] ?? 1,
+          );
           const raw = JSON.stringify(entries.slice((page - 1) * size, page * size));
           const cap = input.maxOutputBytes ?? 1_000_000;
           return Effect.succeed({
@@ -352,8 +353,11 @@ layer("GitLabCli.layer", (it) => {
       }),
   );
 
-  it.effect("creates same-project MRs without a repository lookup", () =>
+  it.effect("creates same-project MRs with the configured source-branch removal policy", () =>
     Effect.gen(function* () {
+      mockedRun.mockReturnValueOnce(
+        Effect.succeed(processOutput(JSON.stringify({ remove_source_branch_after_merge: false }))),
+      );
       mockedRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
       const glab = yield* GitLabCli.GitLabCli;
       yield* glab.createMergeRequest({
@@ -363,7 +367,9 @@ layer("GitLabCli.layer", (it) => {
         title: "Fix remote flow",
         bodyFile: "/tmp/body.md",
       });
-      expect(mockedRun).toHaveBeenCalledExactlyOnceWith(
+      expect(mockedRun).toHaveBeenCalledTimes(2);
+      expect(mockedRun).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
           args: [
             "api",
@@ -376,6 +382,8 @@ layer("GitLabCli.layer", (it) => {
             "target_branch=main",
             "--raw-field",
             "title=Fix remote flow",
+            "--field",
+            "remove_source_branch=false",
             "--field",
             "description=@/tmp/body.md",
           ],

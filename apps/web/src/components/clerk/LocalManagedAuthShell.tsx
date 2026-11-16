@@ -119,8 +119,11 @@ function NativeAccount({ children }: { readonly children: ReactNode }) {
         const factor = attempt.supportedFirstFactors?.find(
           (factor) => factor.strategy === "email_code",
         );
-        if (!factor || factor.strategy !== "email_code")
-          throw new Error("Email verification is not available for this account.");
+        if (!factor || factor.strategy !== "email_code") {
+          setError("Email verification is not available for this account.");
+          setBusy(false);
+          return;
+        }
         await signIn.prepareFirstFactor({
           strategy: "email_code",
           emailAddressId: factor.emailAddressId,
@@ -131,8 +134,11 @@ function NativeAccount({ children }: { readonly children: ReactNode }) {
           strategy: "email_code",
           code: code.trim(),
         });
-        if (attempt.status !== "complete" || !attempt.createdSessionId)
-          throw new Error("Sign-in needs another verification step.");
+        if (attempt.status !== "complete" || !attempt.createdSessionId) {
+          setError("Sign-in needs another verification step.");
+          setBusy(false);
+          return;
+        }
         await clerk.setActive({ session: attempt.createdSessionId });
         setSignInOpen(false);
       }
@@ -142,9 +148,8 @@ function NativeAccount({ children }: { readonly children: ReactNode }) {
           ? cause.message
           : "Could not sign in. Check your details and try again.",
       );
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   };
   const signOut = async () => {
     await clerk.signOut();

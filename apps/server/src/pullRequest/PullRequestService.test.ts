@@ -11,6 +11,8 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import { FetchHttpClient } from "effect/http";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as TestClock from "effect/testing/TestClock";
 import type {
   OrchestrationProjectShell,
@@ -326,6 +328,7 @@ function makeService(input: {
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
   readonly resolveRepositoryIdentity?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolve"];
   readonly onProjectRead?: () => void;
+  readonly storedReviewUrl?: string;
 }) {
   // Build in the test scope; per-call Effect.provide would close the marks database on service acquisition.
   return Effect.flatMap(
@@ -363,6 +366,9 @@ function makeService(input: {
         }),
         Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
           resolve: input.resolveRepositoryIdentity ?? (() => Effect.succeed(null)),
+        }),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getPullRequestLinkUrl: () => Effect.succeed(input.storedReviewUrl ?? null),
         }),
         SourceControlRateLimit.layer,
         PullRequestFilesViewed.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
@@ -5264,4 +5270,58 @@ it.effect.each(["expiry", "commit expiry", "cache hit", "commit cache hit", "ref
       assert.strictEqual(error.reason, "not-found");
       assert.strictEqual(diffReads, 2);
     }),
+);
+
+it.effect.each([false, true])(
+  "resolves a stored review redirect before host routing (cached: %s)",
+  (primed) => {
+    let reads = 0;
+    return Effect.gen(function* () {
+      const oldUrl = "http://old.example.test/team/project/-/merge_requests/12";
+      const url = "https://new.example.test/moved/project/-/merge_requests/42";
+      const service = yield* makeService({
+        projects: [
+          project({
+            id: "redirect",
+            title: "Moved repo",
+            workspaceRoot: "/repo",
+            repository: "moved/project",
+            provider: "gitlab",
+            host: "new.example.test",
+          }),
+        ],
+        storedReviewUrl: oldUrl,
+        providers: [
+          fakePullRequestProvider(SourceControlProviderKind.make("gitlab"), {
+            getChangeRequestSummary: (input) => {
+              assert.equal(input.host, "new.example.test");
+              assert.equal(input.repository, "moved/project");
+              assert.equal(input.number, 42);
+              return Effect.succeed({ ...changeRequest(42, "2026-11-16T00:00:00Z"), url });
+            },
+          }),
+        ],
+      });
+      const reference = {
+        projectId: "redirect" as ProjectId,
+        host: "old.example.test",
+        repository: "team/project",
+        number: 12,
+      };
+      if (primed) yield* service.batchesReads(reference);
+      const response = yield* service.summary(reference);
+      assert.equal(response.url, url);
+      assert.equal(response.number, 42);
+    }).pipe(
+      Effect.provideService(FetchHttpClient.Fetch, async (input) =>
+        String(input) === "http://old.example.test/team/project/-/merge_requests/12" &&
+        (!primed || reads++ > 0)
+          ? new Response(null, {
+              status: 301,
+              headers: { location: "https://new.example.test/moved/project/-/merge_requests/42" },
+            })
+          : new Response(null, { status: 200 }),
+      ),
+    );
+  },
 );

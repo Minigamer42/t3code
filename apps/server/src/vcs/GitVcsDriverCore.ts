@@ -3598,7 +3598,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       yield* executeGitWithStableDiagnostics(
         "GitVcsDriver.pushCurrentBranch.pushUpstream",
         cwd,
-        ["push", ...forceArgs, "--", destination.remoteName, `HEAD:refs/heads/${destination.branchName}`],
+        [
+          "push",
+          ...forceArgs,
+          "--",
+          destination.remoteName,
+          `HEAD:refs/heads/${destination.branchName}`,
+        ],
         { timeoutMs: null },
       );
       return {
@@ -3614,9 +3620,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* executeGitWithStableDiagnostics("GitVcsDriver.pushCurrentBranch.push", cwd, ["push", ...forceArgs], {
-      timeoutMs: null,
-    });
+    yield* executeGitWithStableDiagnostics(
+      "GitVcsDriver.pushCurrentBranch.push",
+      cwd,
+      ["push", ...forceArgs],
+      {
+        timeoutMs: null,
+      },
+    );
     return {
       status: "pushed" as const,
       branch,
@@ -5339,18 +5350,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       const identity = `${yield* readGitCommonDir(input.cwd)}\0${targetBranch}`;
       const hash = yield* digest.digest(Digest.sha256, new TextEncoder().encode(identity));
-      const readableName = input.newRefName && !isTemporaryWorktreeBranch(targetBranch)
-        ? path.basename(targetBranch)
-        : null;
+      const readableName =
+        input.newRefName && !isTemporaryWorktreeBranch(targetBranch)
+          ? path.basename(targetBranch)
+          : null;
       const directoryName = readableName ?? targetBranch.replace(/\//g, "-");
       let prefix = "";
       for (const character of directoryName) {
         if (Buffer.byteLength(prefix + character) > 23) break;
         prefix += character;
       }
-      const folderName = readableName !== null && Buffer.byteLength(directoryName) <= 40
-        ? directoryName
-        : `${prefix}-${Hex.encode(hash).slice(0, 16)}`;
+      const folderName =
+        readableName !== null && Buffer.byteLength(directoryName) <= 40
+          ? directoryName
+          : `${prefix}-${Hex.encode(hash).slice(0, 16)}`;
       const basePath = path.join(parentDir, repoName, input.worktreeName ?? folderName);
       worktreePath = basePath;
       for (

@@ -2474,6 +2474,20 @@ const backgroundThreadUpdatesKeepTimestamp = Effect.gen(function* () {
   const synced = yield* readActivity;
   assert.deepEqual(synced.updatedAt, createdAt);
   assert.equal(synced.thread.pullRequests?.[0]?.number, 42);
+  const reviewRef = {
+    projectId: thread.projectId,
+    host: link.host.toUpperCase(),
+    repository: link.repository.toUpperCase(),
+    number: link.number,
+  };
+  assert.equal(yield* store.getPullRequestLinkUrl(reviewRef), link.url);
+  assert.isNull(yield* store.getPullRequestLinkUrl({ ...reviewRef, number: 43 }));
+  assert.isNull(
+    yield* store.getPullRequestLinkUrl({
+      ...reviewRef,
+      projectId: ProjectId.make("other-project"),
+    }),
+  );
 
   const snapshot = {
     state: "open" as const,

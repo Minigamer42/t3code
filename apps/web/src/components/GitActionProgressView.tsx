@@ -42,7 +42,13 @@ function RunningGitActionElapsedTime({
   );
 }
 
-function GitActionProgressButtonContent({ progress, id }: { progress: GitActionProgressPresentation; id: string }) {
+function GitActionProgressButtonContent({
+  progress,
+  id,
+}: {
+  progress: GitActionProgressPresentation;
+  id: string;
+}) {
   const hasOutput = progress.output !== null;
 
   return (
@@ -97,7 +103,14 @@ export function GitActionProgressView({
   const progressLabelId = useId();
   return (
     <div className="flex min-w-0 items-start rounded-lg bg-black/[0.035] dark:bg-white/[0.055]">
-      <ThreadDetailsControl aria-labelledby={progressLabelId} variant="ghost" multiline disabled part="row" panel>
+      <ThreadDetailsControl
+        aria-labelledby={progressLabelId}
+        variant="ghost"
+        multiline
+        disabled
+        part="row"
+        panel
+      >
         <GitActionProgressButtonContent id={progressLabelId} progress={progress} />
       </ThreadDetailsControl>
     </div>

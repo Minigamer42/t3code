@@ -194,7 +194,6 @@ function isCliRemoteRefinementSpec(
   return spec.type === "cli" && spec.refineUnknownRemote !== undefined;
 }
 
-const isVcsProcessTimeoutError = Schema.is(VcsProcessTimeoutError);
 const isVcsProcessExitError = Schema.is(VcsProcessExitError);
 
 function probeCli(input: {

@@ -1,5 +1,5 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -47,6 +47,7 @@ function loaderReturning(oldContents: string, newContents: string) {
     {
       environmentId: EnvironmentId.make("environment-diff-contents-test"),
       cwd: "/repo",
+      threadId: ThreadId.make("thread-diff-test"),
       sourceKind: "working-tree",
       baseRef: null,
       headRef: null,

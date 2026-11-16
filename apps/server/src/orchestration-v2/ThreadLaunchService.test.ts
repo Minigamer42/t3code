@@ -3372,6 +3372,7 @@ it.effect.each([null, "/already-checked-out"])(
           Parameters<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]>[0]
         >();
       const harness = makeHarness({
+        hasCommit: ({ refName }) => Effect.succeed(refName === "feature/reuse"),
         listRefs: () =>
           Effect.succeed({
             refs: [{ name: "feature/reuse", current: false, isDefault: false, worktreePath }],

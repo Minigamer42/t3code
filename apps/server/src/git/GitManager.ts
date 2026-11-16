@@ -2739,6 +2739,7 @@ export const make = Effect.gen(function* () {
     cwd: string,
     status: { branch: string; upstreamRef: string | null; hasUpstream: boolean },
     changeRequestLabel: string,
+    stackParent?: string,
   ) {
     const target = yield* gitCore.resolvePushTarget(cwd, status);
     if (!target) return;
@@ -2748,12 +2749,9 @@ export const make = Effect.gen(function* () {
       remoteName: target.remoteName,
     });
     if (headContext.isCrossRepository) return;
-    const { baseBranch } = yield* resolvePrBase(
-      cwd,
-      status.branch,
-      status.upstreamRef,
-      headContext,
-    );
+    const baseBranch =
+      stackParent ??
+      (yield* resolvePrBase(cwd, status.branch, status.upstreamRef, headContext)).baseBranch;
     if (baseBranch !== target.branchName) return;
     if (yield* findOpenPr(cwd, headContext)) return;
     return yield* new GitManagerError({
@@ -2902,7 +2900,19 @@ export const make = Effect.gen(function* () {
       if (boundary.baseRef)
         request = { ...request, scope: { ...request.scope, baseRef: boundary.baseRef } };
     }
+    const { projectId } = yield* projectSettingsFor(request).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitManagerError({
+            operation: "runCommitWorkflow",
+            cwd: request.cwd,
+            detail: "Failed to get project settings.",
+            cause,
+          }),
+      ),
+    );
     const result = yield* performCommitWorkflow(request, {
+      projectId,
       modelSelection: input.modelSelection,
       style: input.style,
     });
@@ -2953,36 +2963,24 @@ export const make = Effect.gen(function* () {
     refs?: { readonly base: string; readonly head: string },
   ) {
     const provider = yield* sourceControlProvider(cwd);
-    const descriptionBaseBranch =
-      refs ? baseBranch : (yield* resolveDescriptionBaseBranch(cwd, headBranch, baseBranch)) ?? baseBranch;
     const baseRangeRef = refs?.base ?? (yield* resolveBaseRangeRef(cwd, baseRef ?? baseBranch));
-    const descriptionRangeRef =
-      descriptionBaseBranch === baseBranch
-        ? baseRangeRef
-        : yield* resolveBaseRangeRef(cwd, descriptionBaseBranch);
-    const rangeContext = yield* gitCore.readRangeContext(cwd, descriptionRangeRef, refs?.head);
+    const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef, refs?.head);
     const stylePolicy = yield* resolveStylePolicy(cwd, settings);
     const repositoryChangeRequestInstructions = yield* readRepositoryInstructions(
       cwd,
       ".t3code/change-request.md",
     );
-    const descriptionScopeInstructions =
-      descriptionBaseBranch !== baseBranch
-        ? `This change request targets ${baseBranch}. Describe only the supplied commits and diff above ${descriptionBaseBranch}; earlier changes belong to a separate review.`
-        : undefined;
-    const policy =
-      repositoryChangeRequestInstructions || descriptionScopeInstructions
-        ? {
-            ...stylePolicy,
-            changeRequestInstructions: [
-              stylePolicy.changeRequestInstructions,
-              repositoryChangeRequestInstructions,
-              descriptionScopeInstructions,
-            ]
-              .filter((instructions): instructions is string => Boolean(instructions))
-              .join("\n\n"),
-          }
-        : stylePolicy;
+    const policy = repositoryChangeRequestInstructions
+      ? {
+          ...stylePolicy,
+          changeRequestInstructions: [
+            stylePolicy.changeRequestInstructions,
+            repositoryChangeRequestInstructions,
+          ]
+            .filter((instructions): instructions is string => Boolean(instructions))
+            .join("\n\n"),
+        }
+      : stylePolicy;
     const changeRequestTemplate =
       settings.style.followChangeRequestTemplates && provider.readChangeRequestTemplate
         ? Option.getOrUndefined(
@@ -4343,6 +4341,7 @@ export const make = Effect.gen(function* () {
               providers,
               projectId,
             ),
+            projectId,
             style: settings.sourceControlWritingStyle,
           })),
         ),
@@ -4401,7 +4400,11 @@ export const make = Effect.gen(function* () {
             ...(policy ? { policy } : {}),
             modelSelection: settings.modelSelection,
           })
-          .pipe(Effect.map(sanitizeCommitMessage));
+          .pipe(
+            Effect.map((result) =>
+              sanitizeCommitMessage(result, policy?.kind === "conventional_commits"),
+            ),
+          );
         messages.set(commit.sha, {
           message: formatCommitMessage(generated.subject, generated.body),
           subject: generated.subject,
@@ -4630,6 +4633,7 @@ export const make = Effect.gen(function* () {
             providers,
             input.projectId,
           ),
+          projectId: input.projectId,
           style: resolved.settings.sourceControlWritingStyle,
         },
         input.cwd,
@@ -4962,7 +4966,8 @@ export const make = Effect.gen(function* () {
 
         const currentBranch = branchStep.name ?? initialStatus.branch;
         const commitAction = wantsCommit && isCommitAction(input.action) ? input.action : null;
-        const changeRequestTerms = wantsPr || maintainStack ? yield* changeRequestTermsFor(input.cwd) : null;
+        const changeRequestTerms =
+          wantsPr || maintainStack ? yield* changeRequestTermsFor(input.cwd) : null;
         // A stale or missing origin/HEAD hides the default branch from status, so check here
         // before anything is committed or pushed to it.
         if (changeRequestTerms && !input.featureBranch && initialStatus.branch) {
@@ -4970,6 +4975,7 @@ export const make = Effect.gen(function* () {
             input.cwd,
             { ...initialStatus, branch: initialStatus.branch },
             changeRequestTerms.shortLabelWithArticle,
+            maintainStack ? localStack.layers[layerIndex]?.parent : undefined,
           );
         }
 
@@ -5180,7 +5186,9 @@ export const make = Effect.gen(function* () {
                         currentBranch,
                         input.threadId,
                         progress.emit,
-                        "pushRemote" in push && push.pushRemote && push.upstreamBranch
+                        "pushRemote" in push &&
+                          typeof push.pushRemote === "string" &&
+                          push.upstreamBranch
                           ? { remoteName: push.pushRemote, upstreamRef: push.upstreamBranch }
                           : undefined,
                       ),

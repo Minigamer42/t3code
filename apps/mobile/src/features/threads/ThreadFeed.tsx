@@ -45,7 +45,6 @@ import {
   runGenerationSpeedLabel,
   GENERATION_SPEED_DESCRIPTION,
 } from "@t3tools/client-runtime/generation-speed";
-import { environmentThreadDetails } from "../../state/threads";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
 import {
   IDLE_COMPACTING_LABELS,

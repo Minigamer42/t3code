@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatWorkspaceRelativePath, formatWorkspaceAbsolutePath, resolveChangedFilePaths } from "./filePathDisplay";
+import {
+  formatWorkspaceRelativePath,
+  formatWorkspaceAbsolutePath,
+  resolveChangedFilePaths,
+} from "./filePathDisplay";
 
 describe("formatWorkspaceRelativePath", () => {
   it("labels only relative paths, not Windows paths outside the workspace", () => {

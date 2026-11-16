@@ -126,7 +126,7 @@ describe("when: ref is clean, up to date, and has no open PR", () => {
         label: "Commit & push",
       },
     );
-    assert.equal(pushDisabledReason(dirtyFeature), "No local commits to push.");
+    assert.equal(pushDisabledReason(dirtyFeature), null);
   });
 
   it("offers the actions menu only when something in it is usable", () => {

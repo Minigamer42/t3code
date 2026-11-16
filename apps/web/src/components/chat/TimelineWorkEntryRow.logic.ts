@@ -5,7 +5,11 @@ import {
   toolGroupAction,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
-import { formatWorkspaceRelativePath, formatWorkspaceAbsolutePath, resolveChangedFilePaths } from "../../filePathDisplay";
+import {
+  formatWorkspaceRelativePath,
+  formatWorkspaceAbsolutePath,
+  resolveChangedFilePaths,
+} from "../../filePathDisplay";
 import { type TimelineWorkEntry, type TimelineRow } from "./timelineRowContext";
 import { type WorkEntryIconName } from "./TimelineToolActivityIcon";
 

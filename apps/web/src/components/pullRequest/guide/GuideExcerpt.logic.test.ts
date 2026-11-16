@@ -1,6 +1,6 @@
 import { DiffHunksRenderer, hydratePartialDiff, type FileDiffMetadata } from "@pierre/diffs";
 import { excerptRows, fileDiffRows, rowsToPatch } from "@t3tools/client-runtime/review-guide-tour";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { expect, it } from "vite-plus/test";
 
@@ -55,6 +55,7 @@ it("expands an excerpt whose file has another hunk that changes its length", asy
     {
       environmentId: EnvironmentId.make("environment-guide-excerpt-test"),
       cwd: "/repo",
+      threadId: ThreadId.make("thread-diff-test"),
       sourceKind: "working-tree",
       baseRef: null,
       headRef: null,

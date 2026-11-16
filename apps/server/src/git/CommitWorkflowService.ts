@@ -116,7 +116,11 @@ export const make = Effect.gen(function* () {
               cwd,
               expectedBranch: input.expectedBranch,
               ...(input.scope.filePaths ? { filePaths: input.scope.filePaths } : {}),
-              settings: { modelSelection, style: settings.sourceControlWritingStyle },
+              settings: {
+                modelSelection,
+                projectId: thread.projectId,
+                style: settings.sourceControlWritingStyle,
+              },
             });
             yield* threads.dispatch({
               type: "thread.metadata.update",
