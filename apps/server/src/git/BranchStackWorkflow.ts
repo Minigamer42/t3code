@@ -64,42 +64,42 @@ function stackProgress(
     "stack" | "index" | "phase" | "pushedBranches" | "hookIndex" | "publishBranches"
   >,
 ): GitWorkflowStep[] {
-  return journal.stack.layers.flatMap((layer, index) => [
-    {
+  return journal.stack.layers.flatMap((layer, index) => {
+    const rebase: GitWorkflowStep = {
       id: `${layer.branch}:rebase`,
       group: layer.branch,
       label: "Rebase",
       state: index < journal.index ? "completed" : "pending",
-    },
-    {
-      id: `${layer.branch}:push`,
-      group: layer.branch,
-      label: "Push",
-      state:
-        journal.publishBranches && !journal.publishBranches.includes(layer.branch)
-          ? "skipped"
-          : journal.phase === "hooks"
+    };
+    if (journal.publishBranches && !journal.publishBranches.includes(layer.branch)) return [rebase];
+    return [
+      rebase,
+      {
+        id: `${layer.branch}:push`,
+        group: layer.branch,
+        label: "Push",
+        state:
+          journal.phase === "hooks"
             ? journal.pushedBranches?.includes(layer.branch)
               ? "completed"
               : "skipped"
             : "pending",
-    },
-    {
-      id: `${layer.branch}:hooks`,
-      group: layer.branch,
-      label: "Post-push hooks",
-      state:
-        journal.publishBranches && !journal.publishBranches.includes(layer.branch)
-          ? "skipped"
-          : journal.phase === "hooks"
+      },
+      {
+        id: `${layer.branch}:hooks`,
+        group: layer.branch,
+        label: "Post-push hooks",
+        state:
+          journal.phase === "hooks"
             ? !journal.pushedBranches?.includes(layer.branch)
               ? "skipped"
               : journal.pushedBranches.indexOf(layer.branch) < (journal.hookIndex ?? 0)
                 ? "completed"
                 : "pending"
             : "pending",
-    },
-  ]);
+      },
+    ];
+  });
 }
 
 export const make = Effect.gen(function* () {

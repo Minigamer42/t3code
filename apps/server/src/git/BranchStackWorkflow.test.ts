@@ -75,11 +75,23 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
       const remoteHeads = yield* f.git(["ls-remote", "fork"]);
       yield* f.commit("local.txt", "local change\n");
       const hooks: string[] = [];
-      const update = yield* f.stacks.manage({ cwd: f.cwd, action: "update" }, [], (_cwd, branch) =>
-        Effect.sync(() => {
-          hooks.push(branch);
-        }),
+      const updates: GitWorkflowProgressUpdate[] = [];
+      const update = yield* f.stacks.manage(
+        { cwd: f.cwd, action: "update" },
+        [],
+        (_cwd, branch) =>
+          Effect.sync(() => {
+            hooks.push(branch);
+          }),
+        (progress) =>
+          Effect.sync(() => {
+            updates.push(progress);
+          }),
       );
+      expect(updates.length).toBeGreaterThan(0);
+      for (const progress of updates) {
+        expect(progress.steps.map((step) => step.id)).toEqual(["a:rebase", "b:rebase", "c:rebase"]);
+      }
       expect(yield* f.git(["show", "c:local.txt"])).toBe("local change");
       expect(yield* f.git(["branch", "--show-current"])).toBe("b");
       expect(yield* f.git(["ls-remote", "fork"])).toBe(remoteHeads);
