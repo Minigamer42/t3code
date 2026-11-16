@@ -4703,15 +4703,10 @@ export const make = Effect.gen(function* () {
             value: layer.parent,
           });
           if (
-            input.action !== "adopt" &&
-            input.action !== "edit" &&
-            input.action !== "abort" &&
-            input.action !== "untrack" &&
-            (!status.operation?.publishThrough ||
-              updated.layers.findIndex((item) => item.branch === layer.branch) <=
-                updated.layers.findIndex(
-                  (item) => item.branch === status.operation!.publishThrough,
-                ))
+            input.action === "continue" &&
+            status.operation?.publishThrough !== undefined &&
+            updated.layers.findIndex((item) => item.branch === layer.branch) <=
+              updated.layers.findIndex((item) => item.branch === status.operation!.publishThrough)
           ) {
             const pr = yield* branchPullRequest(
               { cwd: input.cwd, branch: layer.branch },
