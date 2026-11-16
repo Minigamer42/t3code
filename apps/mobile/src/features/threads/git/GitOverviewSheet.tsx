@@ -122,22 +122,9 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       ? gitEnvironment.stackStatus({ environmentId, input: { cwd: selectedThreadCwd } })
       : null,
   );
-  const hasStackDescendants =
-    stackQuery.data?.managed === true &&
-    stackQuery.data.layers.some(
-      (layer, index) => layer.current && index < stackQuery.data!.layers.length - 1,
-    );
-  const menuItems = (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote) : []).map(
-    (item) =>
-      hasStackDescendants && item.id === "push"
-        ? {
-            ...item,
-            label: gitStatus.data?.hasWorkingTreeChanges
-              ? "Commit, restack & push"
-              : "Restack & push",
-          }
-        : item,
-  );
+  const menuItems = isRepo
+    ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote, stackQuery.data)
+    : [];
 
   const sheetMenuItems = menuItems.map((item) => ({
     item: {

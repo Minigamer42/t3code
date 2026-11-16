@@ -1,3 +1,7 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useProjects, useThreadShell } from "../../state/entities";
+import { useEnvironmentQuery } from "../../state/query";
+import { gitEnvironment } from "../../state/git";
 import { useThreadWorkspaceMenu } from "./use-thread-workspace-menu";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -119,6 +123,22 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
   const threadId = props.threadId;
   const { gitStatus, gitOperationLabel, onPull, onRunAction } = props;
 
+  const thread = useThreadShell(
+    scopeThreadRef(EnvironmentId.make(String(environmentId)), ThreadId.make(String(threadId))),
+  );
+  const project = useProjects().find(
+    (candidate) => candidate.environmentId === environmentId && candidate.id === thread?.projectId,
+  );
+  const cwd = thread?.worktreePath ?? project?.workspaceRoot;
+  const stackQuery = useEnvironmentQuery(
+    cwd
+      ? gitEnvironment.stackStatus({
+          environmentId: EnvironmentId.make(String(environmentId)),
+          input: { cwd },
+        })
+      : null,
+  );
+
   const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? "Detached HEAD";
   const busy = gitOperationLabel !== null;
   const isRepo = gitStatus?.isRepo ?? true;
@@ -134,7 +154,13 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
         hint: "This workspace is not a git repository.",
       };
     }
-    const action = resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote);
+    const action = resolveQuickAction(
+      gitStatus,
+      busy,
+      isDefaultRef,
+      hasPrimaryRemote,
+      stackQuery.data,
+    );
     return !canWriteSourceControl && (action.kind === "run_pull" || action.kind === "run_action")
       ? {
           ...action,

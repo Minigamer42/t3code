@@ -1,4 +1,8 @@
-import { SourceControlProviderKind, type VcsStatusResult } from "@t3tools/contracts";
+import {
+  SourceControlProviderKind,
+  type GitStackStatusResult,
+  type VcsStatusResult,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { sourceControlClients } from "../sourceControlClients.ts";
@@ -126,6 +130,74 @@ describe("git action copy", () => {
       });
     }
   });
+
+  it.each([
+    { behind: 0, dirty: false, current: 1, restack: false },
+    { behind: 2, dirty: false, current: 1, restack: true },
+    { behind: 0, dirty: true, current: 1, restack: true },
+    { behind: 0, dirty: true, current: 2, restack: false },
+  ])(
+    "uses parent ancestry and pending commits for stack publishing copy: %j",
+    ({ behind, dirty, current, restack }) => {
+      const names = ["first", "second", "third"];
+      const stack: GitStackStatusResult = {
+        managed: true,
+        base: "main",
+        baseIsDefault: true,
+        remote: "origin",
+        operation: null,
+        layers: names.map((branch, index) => ({
+          branch,
+          parent: names[index - 1] ?? "main",
+          headSha: branch,
+          current: index === current,
+          needsRestack: index === 2 && behind > 0,
+          behindCount: index === 2 ? behind : 0,
+          hasChanges: false,
+          worktreePath: null,
+          pullRequest: null,
+        })),
+      };
+      const gitStatus = status({
+        ...gitLab,
+        refName: names[current]!,
+        hasWorkingTreeChanges: dirty,
+        aheadCount: 1,
+      });
+      const items = buildMenuItems(gitStatus, false, true, stack);
+      expect(items.find((item) => item.id === "push")?.label).toBe(
+        restack
+          ? dirty
+            ? "Commit, restack & push"
+            : "Restack & push"
+          : dirty
+            ? "Commit & push"
+            : "Push",
+      );
+      expect(items.find((item) => item.id === "pr")?.label).toBe(
+        restack
+          ? dirty
+            ? "Commit, restack, push & create MR"
+            : "Restack, push & create MR"
+          : dirty
+            ? "Commit, push & create MR"
+            : "Push & create MR",
+      );
+      const quick = resolveQuickAction(gitStatus, false, false, true, stack);
+      expect(quick.label.toLowerCase().includes("restack")).toBe(restack);
+      if (behind > 0) {
+        const clean = { ...gitStatus, aheadCount: 0, pr: openPr };
+        expect(
+          buildMenuItems(clean, false, true, stack).find((item) => item.id === "push")?.disabled,
+        ).toBe(false);
+        expect(resolveQuickAction(clean, false, false, true, stack)).toMatchObject({
+          label: "Restack & push",
+          action: "push",
+          disabled: false,
+        });
+      }
+    },
+  );
 
   it("names the host's change request in the default-branch dialog", () => {
     const input = { action: "commit_push_pr", branchName: "main", includesCommit: true } as const;

@@ -492,8 +492,9 @@ checkout and a target branch that is not checked out in another worktree.
 
 Commit and Commit dialog commit only to the current layer. Publishing a stack pushes branches
 from the bottom through the current layer, then creates any missing reviews in that order, each
-targeting its parent branch. Existing reviews are reused. Upper layers are rebased locally;
-their remote branches and reviews are left unchanged. Publish those layers when they are ready.
+targeting its parent branch. Existing reviews are reused. Upper layers are rebased locally only
+when their parent history changed; up-to-date layers stay untouched, including in other worktrees.
+Their remote branches and reviews are left unchanged. Publish those layers when they are ready.
 Unambiguous local stacks are tracked automatically on their first publish. Rewriting commit
 messages or regrouping commits is restricted to the current layer. Its parent is a fixed boundary;
 selecting a range cannot include commits from lower layers.

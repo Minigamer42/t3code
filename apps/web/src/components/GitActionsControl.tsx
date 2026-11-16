@@ -1185,41 +1185,19 @@ export default function GitActionsControl({
       ? gitEnvironment.stackStatus({ environmentId: activeEnvironmentId, input: { cwd: gitCwd } })
       : null,
   );
-  const hasStackDescendants =
-    stackQuery.data?.managed === true &&
-    stackQuery.data.layers.some(
-      (layer, index) => layer.current && index < stackQuery.data!.layers.length - 1,
-    );
   const gitActionMenuItems = buildMenuItems(
     gitStatusForActions,
     isGitActionRunning,
     hasPrimaryRemote,
-  ).map((item) =>
-    hasStackDescendants && item.id === "push"
-      ? {
-          ...item,
-          label: gitStatusForActions?.hasWorkingTreeChanges
-            ? "Commit, restack & push"
-            : "Restack & push",
-        }
-      : item,
+    stackQuery.data,
   );
-  const initialQuickAction = resolveQuickAction(
+  const quickAction = resolveQuickAction(
     gitStatusForActions,
     isGitActionRunning,
     isDefaultRef,
     hasPrimaryRemote,
+    stackQuery.data,
   );
-  const quickAction =
-    hasStackDescendants &&
-    (initialQuickAction.action === "commit_push" || initialQuickAction.action === "push")
-      ? {
-          ...initialQuickAction,
-          label: gitStatusForActions?.hasWorkingTreeChanges
-            ? "Commit, restack & push"
-            : "Restack & push",
-        }
-      : initialQuickAction;
   const gitActionProgress = resolveGitActionProgressPresentation(
     workflow?.state === "running"
       ? {
@@ -1441,6 +1419,7 @@ export default function GitActionsControl({
       false,
       status.isDefaultRef,
       status.hasPrimaryRemote,
+      stackQuery.data,
     );
     if (refreshedQuickAction.kind === "open_commit_dialog") {
       setExcludedFiles(new Set());

@@ -134,8 +134,10 @@ export function BranchStackControl({
             {layer.needsRestack ? (
               <Text className="text-xs text-warning-foreground">
                 {layer.behindCount
-                  ? `${layer.behindCount} commit${layer.behindCount === 1 ? "" : "s"} behind`
-                  : "Needs restacking"}
+                  ? `${layer.behindCount} commit${layer.behindCount === 1 ? "" : "s"} behind ${layer.parent}`
+                  : layer.behindCount === 0
+                    ? "Parent history changed"
+                    : "Needs restacking"}
               </Text>
             ) : null}
           </View>

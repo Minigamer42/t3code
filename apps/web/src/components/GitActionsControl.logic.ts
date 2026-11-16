@@ -1,3 +1,5 @@
+import { getStackRestackRequired, getStackPushLabel } from "@t3tools/client-runtime/state/vcs";
+import type { GitStackStatusResult } from "@t3tools/contracts";
 import type {
   GitRunStackedActionResult,
   GitStackedAction,
@@ -176,10 +178,12 @@ export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
   hasPrimaryRemote = true,
+  stack?: GitStackStatusResult | null,
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
   const terminology = changeRequestTerminologyFor(gitStatus);
 
+  const needsRestack = getStackRestackRequired(gitStatus, stack);
   const hasBranch = gitStatus.refName !== null;
   const needsFeatureBranch = !hasBranch || gitStatus.isDefaultRef;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
@@ -193,7 +197,9 @@ export function buildMenuItems(
   const canPush =
     !isBusy &&
     hasPrimaryRemote &&
-    (needsFeatureBranch ? hasFeatureChanges : gitStatus.aheadCount > 0 || hasChanges) &&
+    (needsFeatureBranch
+      ? hasFeatureChanges
+      : gitStatus.aheadCount > 0 || hasChanges || needsRestack) &&
     (needsFeatureBranch ||
       (isBehind
         ? !hasChanges && gitStatus.hasUpstream
@@ -244,7 +250,12 @@ export function buildMenuItems(
 
   const pushItem: GitActionMenuItem = {
     id: "push",
-    label: hasChanges ? "Commit & push" : "Push",
+    label: getStackPushLabel(
+      gitStatus,
+      stack,
+      "commit_push",
+      hasChanges ? "Commit & push" : "Push",
+    ),
     action: "commit_push",
     ...(needsFeatureBranch ? { featureBranch: true } : {}),
     disabled: !canPush,
@@ -263,11 +274,16 @@ export function buildMenuItems(
     pushItem,
     {
       id: "pr",
-      label: hasChanges
-        ? `Commit, push & create ${terminology.shortLabel}`
-        : needsFeatureBranch || !gitStatus.hasUpstream || gitStatus.aheadCount > 0
-          ? `Push & create ${terminology.shortLabel}`
-          : `Create ${terminology.shortLabel}`,
+      label: getStackPushLabel(
+        gitStatus,
+        stack,
+        "commit_push_pr",
+        hasChanges
+          ? `Commit, push & create ${terminology.shortLabel}`
+          : needsFeatureBranch || !gitStatus.hasUpstream || gitStatus.aheadCount > 0
+            ? `Push & create ${terminology.shortLabel}`
+            : `Create ${terminology.shortLabel}`,
+      ),
       action: "commit_push_pr",
       ...(needsFeatureBranch ? { featureBranch: true } : {}),
       disabled: !canCreatePr,
@@ -355,6 +371,7 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultRef = false,
   hasPrimaryRemote = true,
+  stack?: GitStackStatusResult | null,
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -372,11 +389,18 @@ export function resolveQuickAction(
   const hasBranch = gitStatus.refName !== null;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
   const hasOpenPr = gitStatus.pr?.state === "open";
-  const isAhead = gitStatus.aheadCount > 0;
+  const isAhead = gitStatus.aheadCount > 0 || getStackRestackRequired(gitStatus, stack);
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
   const isBehind = gitStatus.behindCount > 0;
-  const isDiverged = isAhead && isBehind;
+  const isDiverged = gitStatus.aheadCount > 0 && isBehind;
   const terminology = changeRequestTerminologyFor(gitStatus);
+  const pushLabel = getStackPushLabel(gitStatus, stack, "push", "Push");
+  const createPrLabel = getStackPushLabel(
+    gitStatus,
+    stack,
+    "create_pr",
+    `Push & create ${terminology.shortLabel}`,
+  );
 
   if (!hasBranch) {
     return {
@@ -411,7 +435,7 @@ export function resolveQuickAction(
         };
       }
       return {
-        label: "Push",
+        label: pushLabel,
         disabled: true,
         kind: "show_hint",
         hint: "No local commits to push.",
@@ -419,14 +443,14 @@ export function resolveQuickAction(
     }
     if (hasOpenPr || isDefaultRef) {
       return {
-        label: "Push",
+        label: pushLabel,
         disabled: false,
         kind: "run_action",
         action: isDefaultRef ? "commit_push" : "push",
       };
     }
     return {
-      label: `Push & create ${terminology.shortLabel}`,
+      label: createPrLabel,
       disabled: false,
       kind: "run_action",
       action: "create_pr",
@@ -435,7 +459,7 @@ export function resolveQuickAction(
 
   if (isDiverged) {
     return {
-      label: "Push",
+      label: pushLabel,
       disabled: false,
       kind: "open_push_dialog",
     };
@@ -452,14 +476,14 @@ export function resolveQuickAction(
   if (isAhead) {
     if (hasOpenPr || isDefaultRef) {
       return {
-        label: "Push",
+        label: pushLabel,
         disabled: false,
         kind: "run_action",
         action: isDefaultRef ? "commit_push" : "push",
       };
     }
     return {
-      label: `Push & create ${terminology.shortLabel}`,
+      label: createPrLabel,
       disabled: false,
       kind: "run_action",
       action: "create_pr",
@@ -477,7 +501,7 @@ export function resolveQuickAction(
 
   if (hasDefaultBranchDelta && !isDefaultRef) {
     return {
-      label: `Create ${terminology.shortLabel}`,
+      label: getStackPushLabel(gitStatus, stack, "create_pr", `Create ${terminology.shortLabel}`),
       disabled: false,
       kind: "run_action",
       action: "create_pr",
