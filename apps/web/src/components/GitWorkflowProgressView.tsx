@@ -10,8 +10,12 @@ const stepColors: Record<GitWorkflowStep["state"], string> = {
   failed: "bg-destructive",
 };
 export function GitWorkflowProgressView({ progress }: { readonly progress: GitWorkflowProgress }) {
+  const visibleSteps =
+    progress.kind === "stack"
+      ? progress.steps.filter((step) => step.state !== "skipped")
+      : progress.steps;
   const groups = new Map<string, GitWorkflowStep[]>();
-  for (const step of progress.steps) {
+  for (const step of visibleSteps) {
     const group = groups.get(step.group) ?? [];
     group.push(step);
     groups.set(step.group, group);
@@ -19,7 +23,7 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
   const stages =
     progress.kind === "logical_commits"
       ? progress.steps.filter((step) => !step.id.startsWith("commit:"))
-      : progress.steps;
+      : visibleSteps;
   const finished = stages.filter(
     (step) => step.state === "completed" || step.state === "skipped",
   ).length;
@@ -48,24 +52,19 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
           </span>
         ) : null}
       </div>
-      {progress.kind === "stack" ? (
-        <p className="text-2xs text-muted-foreground">
-          Rebase · Push · Hooks
-          {progress.steps.some((step) => step.id.endsWith(":review")) ? " · Review" : ""}
-        </p>
-      ) : null}
       <div className="max-h-40 space-y-2 overflow-y-auto">
         {[...groups].map(([group, steps]) => {
-          const nested =
+          const multipleCommits =
             progress.kind === "logical_commits" &&
+            steps.length > 1 &&
             steps.every((step) => step.id.startsWith("commit:"));
           const completed = steps.filter((step) => step.state === "completed").length;
           return (
             <div
               key={group}
-              className={cn("space-y-1", nested && "ml-1 border-l border-border pl-3")}
+              className={cn("space-y-1", multipleCommits && "ml-1 border-l border-border pl-3")}
             >
-              {nested ? (
+              {multipleCommits ? (
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>Create commits</span>
                   <span className="shrink-0 tabular-nums">
@@ -81,36 +80,58 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
                   <TooltipPopup>{group}</TooltipPopup>
                 </Tooltip>
               ) : null}
-              <div
-                role="progressbar"
-                aria-label={group}
-                aria-valuemin={0}
-                aria-valuemax={steps.length}
-                aria-valuenow={
-                  nested
-                    ? completed
-                    : steps.filter((step) => step.state === "completed" || step.state === "skipped")
-                        .length
-                }
-                aria-valuetext={steps.map((step) => `${step.label}: ${step.state}`).join(", ")}
-                className="flex gap-1"
-              >
-                {steps.map((step) => (
-                  <Tooltip key={step.id}>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          aria-hidden="true"
-                          className={cn("h-1.5 min-w-0 flex-1 rounded-sm", stepColors[step.state])}
-                        />
-                      }
-                    />
-                    <TooltipPopup>
-                      {step.label}: {step.state}
-                    </TooltipPopup>
-                  </Tooltip>
-                ))}
-              </div>
+              {multipleCommits ? (
+                <div
+                  role="progressbar"
+                  aria-label={group}
+                  aria-valuemin={0}
+                  aria-valuemax={steps.length}
+                  aria-valuenow={completed}
+                  aria-valuetext={steps.map((step) => `${step.label}: ${step.state}`).join(", ")}
+                  className="flex gap-1"
+                >
+                  {steps.map((step) => (
+                    <Tooltip key={step.id}>
+                      <TooltipTrigger
+                        render={
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "h-1.5 min-w-0 flex-1 rounded-sm",
+                              stepColors[step.state],
+                            )}
+                          />
+                        }
+                      />
+                      <TooltipPopup>
+                        {step.label}: {step.state}
+                      </TooltipPopup>
+                    </Tooltip>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {steps.map((step) => (
+                    <div
+                      key={step.id}
+                      className="flex items-baseline justify-between gap-2 text-xs"
+                    >
+                      <span className="min-w-0 truncate text-muted-foreground">{step.label}</span>
+                      <span
+                        className={cn("shrink-0", {
+                          "text-muted-foreground":
+                            step.state === "pending" || step.state === "skipped",
+                          "text-primary": step.state === "running",
+                          "text-success": step.state === "completed",
+                          "text-destructive": step.state === "failed",
+                        })}
+                      >
+                        {step.state}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

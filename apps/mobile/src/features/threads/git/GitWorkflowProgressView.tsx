@@ -11,8 +11,12 @@ const stepColors: Record<GitWorkflowStep["state"], string> = {
   failed: "bg-danger-foreground",
 };
 export function GitWorkflowProgressView({ progress }: { readonly progress: GitWorkflowProgress }) {
+  const visibleSteps =
+    progress.kind === "stack"
+      ? progress.steps.filter((step) => step.state !== "skipped")
+      : progress.steps;
   const groups = new Map<string, GitWorkflowStep[]>();
-  for (const step of progress.steps) {
+  for (const step of visibleSteps) {
     const group = groups.get(step.group) ?? [];
     group.push(step);
     groups.set(step.group, group);
@@ -20,7 +24,7 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
   const stages =
     progress.kind === "logical_commits"
       ? progress.steps.filter((step) => !step.id.startsWith("commit:"))
-      : progress.steps;
+      : visibleSteps;
   const finished = stages.filter(
     (step) => step.state === "completed" || step.state === "skipped",
   ).length;
@@ -38,23 +42,18 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
           {finished}/{stages.length} {progress.kind === "logical_commits" ? "stages" : "steps"}
         </Text>
       </View>
-      {progress.kind === "stack" ? (
-        <Text className="text-xs text-foreground-secondary">
-          Rebase · Push · Hooks
-          {progress.steps.some((step) => step.id.endsWith(":review")) ? " · Review" : ""}
-        </Text>
-      ) : null}
       {[...groups].map(([group, steps]) => {
-        const nested =
+        const multipleCommits =
           progress.kind === "logical_commits" &&
+          steps.length > 1 &&
           steps.every((step) => step.id.startsWith("commit:"));
         const completed = steps.filter((step) => step.state === "completed").length;
         return (
           <View
             key={group}
-            className={cn("gap-1", nested && "ml-1 border-l border-subtle-strong pl-3")}
+            className={cn("gap-1", multipleCommits && "ml-1 border-l border-subtle-strong pl-3")}
           >
-            {nested ? (
+            {multipleCommits ? (
               <View className="flex-row items-center justify-between gap-2">
                 <Text className="text-xs text-foreground-secondary">Create commits</Text>
                 <Text className="text-xs text-foreground-secondary">
@@ -67,28 +66,51 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
                 {group}
               </Text>
             ) : null}
-            <View
-              accessible
-              accessibilityRole="progressbar"
-              accessibilityLabel={group}
-              accessibilityValue={{
-                min: 0,
-                max: steps.length,
-                now: nested
-                  ? completed
-                  : steps.filter((step) => step.state === "completed" || step.state === "skipped")
-                      .length,
-                text: steps.map((step) => `${step.label}: ${step.state}`).join(", "),
-              }}
-              className="flex-row gap-1"
-            >
-              {steps.map((step) => (
-                <View
-                  key={step.id}
-                  className={cn("h-1.5 min-w-0 flex-1 rounded-sm", stepColors[step.state])}
-                />
-              ))}
-            </View>
+            {multipleCommits ? (
+              <View
+                accessible
+                accessibilityRole="progressbar"
+                accessibilityLabel={group}
+                accessibilityValue={{
+                  min: 0,
+                  max: steps.length,
+                  now: completed,
+                  text: steps.map((step) => `${step.label}: ${step.state}`).join(", "),
+                }}
+                className="flex-row gap-1"
+              >
+                {steps.map((step) => (
+                  <View
+                    key={step.id}
+                    className={cn("h-1.5 min-w-0 flex-1 rounded-sm", stepColors[step.state])}
+                  />
+                ))}
+              </View>
+            ) : (
+              <View className="gap-1">
+                {steps.map((step) => (
+                  <View key={step.id} className="flex-row items-baseline justify-between gap-2">
+                    <Text
+                      numberOfLines={1}
+                      className="min-w-0 flex-1 text-xs text-foreground-secondary"
+                    >
+                      {step.label}
+                    </Text>
+                    <Text
+                      className={cn("text-xs", {
+                        "text-foreground-secondary":
+                          step.state === "pending" || step.state === "skipped",
+                        "text-primary": step.state === "running",
+                        "text-emerald-500": step.state === "completed",
+                        "text-danger-foreground": step.state === "failed",
+                      })}
+                    >
+                      {step.state}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         );
       })}
