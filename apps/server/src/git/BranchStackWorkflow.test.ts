@@ -118,11 +118,21 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         .pipe(Effect.flip);
       expect((yield* f.stacks.inspect(f.cwd)).operation?.publishThrough).toBe("b");
       const retried: string[] = [];
-      yield* f.stacks.manage({ cwd: f.cwd, action: "continue" }, [], (_cwd, branch) =>
-        Effect.sync(() => {
-          retried.push(branch);
-        }),
+      const updates: GitWorkflowProgressUpdate[] = [];
+      yield* f.stacks.manage(
+        { cwd: f.cwd, action: "continue" },
+        [],
+        (_cwd, branch) =>
+          Effect.sync(() => {
+            retried.push(branch);
+          }),
+        (update) =>
+          Effect.sync(() => {
+            updates.push(update);
+          }),
       );
+      expect(updates[0]?.steps.find((step) => step.id === "b:rebase")?.state).toBe("skipped");
+      expect(updates[0]?.steps.find((step) => step.id === "c:rebase")?.state).toBe("completed");
       expect(retried).toEqual(["b"]);
       expect(yield* f.remoteHead("fork", "c")).toBe(oldC);
       expect(yield* f.git(["rev-parse", "c"])).not.toBe(oldC);
@@ -152,6 +162,46 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         yield* f.git(["checkout", "c"]);
         yield* f.stacks.update(f.cwd, { publishThrough: "c" });
         expect(yield* f.remoteHead("fork", "c")).toBe(yield* f.git(["rev-parse", "c"]));
+      }).pipe(Effect.scoped),
+  );
+  it.effect.each(["unchanged", "externally-restacked", "merged-parent-rewrite"] as const)(
+    "leaves an up-to-date child in its worktree while publishing: %s",
+    (mode) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* f.adopt;
+        if (mode === "externally-restacked") {
+          const oldB = yield* f.git(["rev-parse", "b"]);
+          yield* f.commit("parent.txt", "parent change\n");
+          yield* f.git(["rebase", "--onto", "b", oldB, "c"]);
+          yield* f.git(["checkout", "b"]);
+        } else if (mode === "merged-parent-rewrite") {
+          yield* f.git(["commit", "--amend", "-m", "Rewrite parent"]);
+          yield* f.git(["checkout", "c"]);
+          yield* f.git(["merge", "b", "--no-edit"]);
+          yield* f.git(["checkout", "b"]);
+        }
+        const child = yield* f.git(["rev-parse", "c"]);
+        expect((yield* f.stacks.inspect(f.cwd)).layers[2]).toMatchObject({
+          behindCount: 0,
+          needsRestack: false,
+        });
+        yield* f.git(["worktree", "add", f.path.join(f.root, "child"), "c"]);
+        const progress: GitWorkflowProgressUpdate[] = [];
+        yield* f.stacks.update(f.cwd, {
+          publishThrough: "b",
+          onProgress: (update) =>
+            Effect.sync(() => {
+              progress.push(update);
+            }),
+        });
+        expect(yield* f.git(["rev-parse", "c"])).toBe(child);
+        expect(
+          progress
+            .at(-1)
+            ?.steps.filter((step) => step.id.endsWith(":rebase"))
+            .every((step) => step.state === "skipped"),
+        ).toBe(true);
       }).pipe(Effect.scoped),
   );
   it.effect.each([
@@ -205,6 +255,11 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         ]);
       }
       const externallyRebased = yield* f.git(["rev-parse", branch]);
+      if (mode === "rewound-parent")
+        expect((yield* f.stacks.inspect(f.cwd)).layers[2]).toMatchObject({
+          behindCount: 0,
+          needsRestack: true,
+        });
       const result = yield* f.stacks.update(f.cwd, { includeLatestBase: mode !== "base-local" });
       expect(result.operation).toBeNull();
       expect(result.layers.every((layer) => !layer.needsRestack)).toBe(true);
@@ -363,8 +418,10 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         yield* f.adopt;
         const oldC = yield* f.git(["rev-parse", "c"]);
         if (mode === "dirty") yield* f.fs.writeFileString(f.path.join(f.cwd, "b.txt"), "dirty\n");
-        if (mode === "worktree")
+        if (mode === "worktree") {
+          yield* f.commit("parent.txt", "parent change\n");
           yield* f.git(["worktree", "add", f.path.join(f.root, "other"), "c"]);
+        }
         if (mode === "remote")
           yield* f.git([
             `--git-dir=${f.path.join(f.root, "fork")}`,

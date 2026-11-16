@@ -30,6 +30,7 @@ const Journal = Schema.Struct({
   index: Schema.Number,
   phase: Schema.Literals(["rebase", "push", "hooks"]),
   publishBranches: Schema.optional(Schema.Array(Schema.String)),
+  rebasedBranches: Schema.optional(Schema.Array(Schema.String)),
   pushedBranches: Schema.optional(Schema.Array(Schema.String)),
   hookIndex: Schema.optional(Schema.Number),
   hookCwd: Schema.optional(Schema.String),
@@ -61,7 +62,13 @@ const GlabRef = Schema.Struct({
 function stackProgress(
   journal: Pick<
     Operation,
-    "stack" | "index" | "phase" | "pushedBranches" | "hookIndex" | "publishBranches"
+    | "stack"
+    | "index"
+    | "phase"
+    | "pushedBranches"
+    | "hookIndex"
+    | "publishBranches"
+    | "rebasedBranches"
   >,
 ): GitWorkflowStep[] {
   return journal.stack.layers.flatMap((layer, index) => {
@@ -69,7 +76,12 @@ function stackProgress(
       id: `${layer.branch}:rebase`,
       group: layer.branch,
       label: "Rebase",
-      state: index < journal.index ? "completed" : "pending",
+      state:
+        index < journal.index
+          ? journal.rebasedBranches && !journal.rebasedBranches.includes(layer.branch)
+            ? "skipped"
+            : "completed"
+          : "pending",
     };
     if (journal.publishBranches && !journal.publishBranches.includes(layer.branch)) return [rebase];
     return [
@@ -198,7 +210,11 @@ export const make = Effect.gen(function* () {
     parent: string,
     current: string,
   ) {
-    if (previous === parent && (yield* isAncestor(cwd, parent, current))) return parent;
+    if (
+      (yield* isAncestor(cwd, parent, current)) &&
+      (previous === parent || !(yield* isAncestor(cwd, parent, previous)))
+    )
+      return parent;
     const shared = yield* text(cwd, ["merge-base", parent, current]);
     if (yield* isAncestor(cwd, previous, shared)) return shared;
     // A rewritten parent may share only the stack base; its old tip still delimits this layer.
@@ -403,13 +419,20 @@ export const make = Effect.gen(function* () {
           index === 0 ? (active?.baseRef ?? `refs/heads/${base}`) : `refs/heads/${parent}`;
         const target = yield* git(cwd, ["rev-parse", "--verify", `${parentRef}^{commit}`], true);
         const headSha = yield* head(cwd, name);
-        const needsRestack =
-          !!active &&
+        const parentSha = target.stdout.trim();
+        const behindCount =
+          target.exitCode === 0
+            ? Number(yield* text(cwd, ["rev-list", "--count", `${headSha}..${parentSha}`]))
+            : 0;
+        const previousParent = active?.layers[index]?.parentHead;
+        const parentWasRewound =
+          behindCount === 0 &&
           target.exitCode === 0 &&
-          active.layers[index]!.parentHead !== target.stdout.trim();
-        const behindCount = needsRestack
-          ? Number(yield* text(cwd, ["rev-list", "--count", `${headSha}..${target.stdout.trim()}`]))
-          : 0;
+          previousParent !== undefined &&
+          previousParent !== parentSha &&
+          (yield* isAncestor(cwd, parentSha, previousParent)) &&
+          (yield* isAncestor(cwd, previousParent, headSha));
+        const needsRestack = behindCount > 0 || parentWasRewound;
         layers.push({
           branch: name,
           parent,
@@ -543,8 +566,6 @@ export const make = Effect.gen(function* () {
     while (journal.index < journal.stack.layers.length) {
       const index = journal.index;
       const layer = journal.stack.layers[index]!;
-      if (report) yield* report(`Restacking ${layer.branch}...`);
-      yield* step(`${layer.branch}:rebase`, "running", `Restacking ${layer.branch}...`);
       const parent =
         index === 0
           ? journal.targetBase
@@ -556,9 +577,9 @@ export const make = Effect.gen(function* () {
           `Branch ${layer.branch} changed during the stack operation. Recovery metadata has been kept.`,
         );
       yield* write(cwd, files.journal, journal);
-      yield* git(cwd, ["checkout", "--quiet", layer.branch]);
       const remoteHead = journal.expectedRemoteHeads[layer.branch];
       if (remoteHead && remoteHead !== current && (yield* isAncestor(cwd, current, remoteHead))) {
+        yield* git(cwd, ["checkout", "--quiet", layer.branch]);
         yield* git(cwd, ["merge", "--ff-only", remoteHead]);
         journal = Object.assign({}, journal, {
           installedHeads: Object.assign({}, journal.installedHeads, { [layer.branch]: remoteHead }),
@@ -576,6 +597,9 @@ export const make = Effect.gen(function* () {
               journal.installedHeads[layer.branch]!,
             );
       if (parentHead !== parent) {
+        if (report) yield* report(`Restacking ${layer.branch}...`);
+        yield* step(`${layer.branch}:rebase`, "running", `Restacking ${layer.branch}...`);
+        yield* git(cwd, ["checkout", "--quiet", layer.branch]);
         const rebase = yield* git(cwd, ["rebase", "--onto", parent, parentHead], true);
         if (rebase.exitCode !== 0)
           return yield* failure(
@@ -586,6 +610,14 @@ export const make = Effect.gen(function* () {
       const newHead = yield* head(cwd, layer.branch);
       journal = Object.assign({}, journal, {
         index: index + 1,
+        ...(journal.rebasedBranches === undefined
+          ? {}
+          : {
+              rebasedBranches:
+                parentHead !== parent
+                  ? [...journal.rebasedBranches, layer.branch]
+                  : journal.rebasedBranches,
+            }),
         installedHeads: { ...journal.installedHeads, [layer.branch]: newHead },
         stack: {
           ...journal.stack,
@@ -595,7 +627,11 @@ export const make = Effect.gen(function* () {
         },
       });
       yield* write(cwd, files.journal, journal);
-      yield* step(`${layer.branch}:rebase`, "completed", `Restacked ${layer.branch}`);
+      yield* step(
+        `${layer.branch}:rebase`,
+        parentHead !== parent ? "completed" : "skipped",
+        parentHead !== parent ? `Restacked ${layer.branch}` : `${layer.branch} is up to date`,
+      );
     }
     if (journal.publishBranches?.length === 0) {
       yield* git(cwd, ["checkout", "--quiet", journal.originalBranch]);
@@ -757,15 +793,6 @@ export const make = Effect.gen(function* () {
         );
       let layers = saved.layers.slice(first);
       const root = yield* text(cwd, ["rev-parse", "--show-toplevel"]);
-      const owners = yield* worktrees(cwd);
-      for (const layer of layers) {
-        const owner = owners.get(layer.branch);
-        if (owner && owner !== root)
-          return yield* failure(
-            cwd,
-            `Stack branch ${layer.branch} is checked out at ${owner}. Move that checkout off the branch before restacking.`,
-          );
-      }
       const publishIndex =
         options.publishThrough === undefined
           ? layers.length - 1
@@ -835,12 +862,48 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.map((parentHead) => ({ ...layer, parentHead }))),
       );
       const targetBase = options.includeLatestBase || first > 0 ? baseHead : layers[0]!.parentHead;
+      const owners = yield* worktrees(cwd);
+      let parentWillRebase = false;
+      let parent = targetBase;
+      const lastExternalLayer = layers.findLastIndex((layer) => {
+        const owner = owners.get(layer.branch);
+        return owner !== undefined && owner !== root;
+      });
+      for (const layer of layers.slice(0, lastExternalLayer + 1)) {
+        const current = originalHeads[layer.branch]!;
+        const remoteHead = remote[layer.branch];
+        const effectiveHead =
+          remoteHead && remoteHead !== current && (yield* isAncestor(cwd, current, remoteHead))
+            ? remoteHead
+            : current;
+        const boundary = yield* refreshParentHead(
+          cwd,
+          layer.branch,
+          layer.parentHead,
+          parent,
+          effectiveHead,
+        );
+        const willRebase: boolean = parentWillRebase || boundary !== parent;
+        const willPublish =
+          options.publishThrough !== undefined &&
+          publishLayers.some((item) => item.branch === layer.branch) &&
+          remoteHead !== effectiveHead;
+        const owner = owners.get(layer.branch);
+        if (owner && owner !== root && (willRebase || effectiveHead !== current || willPublish))
+          return yield* failure(
+            cwd,
+            `Stack branch ${layer.branch} is checked out at ${owner}. Move that checkout off the branch before restacking.`,
+          );
+        parentWillRebase = willRebase;
+        parent = effectiveHead;
+      }
       const journal: Operation = {
         cwd: root,
         originalBranch: branch,
         stack: { ...saved, layers },
         index: 0,
         phase: "rebase",
+        rebasedBranches: [],
         originalHeads,
         installedHeads: originalHeads,
         expectedRemoteHeads: remote,
@@ -949,6 +1012,11 @@ export const make = Effect.gen(function* () {
             resumed = {
               ...pending,
               index: pending.index + 1,
+              ...(pending.rebasedBranches === undefined
+                ? {}
+                : {
+                    rebasedBranches: [...pending.rebasedBranches, layer.branch],
+                  }),
               installedHeads: {
                 ...pending.installedHeads,
                 [layer.branch]: yield* head(cwd, layer.branch),
