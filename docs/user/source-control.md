@@ -281,7 +281,7 @@ Add `hooks.afterPush` commands to `.t3code/vcs.json` to run project-specific com
 successful push:
 
 For a stack, these commands run once per changed branch with that branch checked out, including
-when publishing through **Update stack** or **Continue**. Unchanged branches are skipped. If a hook
+when resuming publication through **Continue**. Unchanged branches are skipped. If a hook
 fails, the remote push remains complete; **Continue** retries the unfinished branch without rerunning
 hooks for branches that already finished. Git's native `pre-push` hook still runs once for the atomic
 push and receives all of its branch updates together.
@@ -499,10 +499,11 @@ messages or regrouping commits is restricted to the current layer. Its parent is
 selecting a range cannot include commits from lower layers.
 
 **Update stack** incorporates remote branch updates and removes merged layers from tracking before
-restacking and pushing the remaining branches. Enable **Include latest base** to also bring in new
-changes from the base branch. A conflict pauses the operation in the checkout shown in the sidebar;
+restacking the remaining branches locally. It does not push, run post-push hooks, or change reviews.
+Use the publishing actions when you are ready to update remote branches and reviews. Enable
+**Include latest base** to also bring in new changes from the base branch. A conflict pauses the operation in the checkout shown in the sidebar;
 resolve and stage its files, then choose **Continue**, or **Abort** to restore local branches.
-Completed remote pushes are not undone. **Untrack** stops T3 maintenance without deleting branches
+**Untrack** stops T3 maintenance without deleting branches
 and disables automatic tracking for those branches. Choose **Update stack** or save the hierarchy in **Edit layers** to enable it again.
 
 Updating requires a clean working tree. Branches checked out in another worktree must be released

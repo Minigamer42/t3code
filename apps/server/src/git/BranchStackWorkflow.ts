@@ -408,6 +408,9 @@ export const make = Effect.gen(function* () {
           pullRequest: null,
         });
       }
+      const publishThrough = journal
+        ? (journal.publishBranches ?? journal.stack.layers.map((layer) => layer.branch)).at(-1)
+        : undefined;
       return {
         managed: active !== undefined,
         baseIsDefault: base === settings.base,
@@ -421,9 +424,7 @@ export const make = Effect.gen(function* () {
                   ? (journal.pushedBranches?.[journal.hookIndex ?? 0] ?? journal.originalBranch)
                   : (journal.stack.layers[journal.index]?.branch ?? journal.originalBranch),
               cwd: journal.cwd,
-              ...(journal.publishBranches?.at(-1)
-                ? { publishThrough: journal.publishBranches.at(-1)! }
-                : {}),
+              ...(publishThrough ? { publishThrough } : {}),
               phase: journal.phase,
             }
           : null,
@@ -568,6 +569,22 @@ export const make = Effect.gen(function* () {
       yield* write(cwd, files.journal, journal);
       yield* step(`${layer.branch}:rebase`, "completed", `Restacked ${layer.branch}`);
     }
+    if (journal.publishBranches?.length === 0) {
+      yield* git(cwd, ["checkout", "--quiet", journal.originalBranch]);
+      yield* saveStack(
+        cwd,
+        {
+          ...journal.stack,
+          layers: journal.stack.layers.map((layer) => ({
+            ...layer,
+            remoteHead: journal.expectedRemoteHeads[layer.branch] ?? null,
+          })),
+        },
+        oldBranches,
+      );
+      yield* fs.remove(files.journal);
+      return yield* inspect(cwd);
+    }
     if (journal.phase !== "hooks") {
       const branches = journal.publishBranches ?? journal.stack.layers.map((layer) => layer.branch);
       journal = Object.assign({}, journal, {
@@ -692,7 +709,12 @@ export const make = Effect.gen(function* () {
       if (options.onProgress)
         yield* options.onProgress({
           label: "Checking stack branches...",
-          steps: stackProgress({ stack: saved, index: 0, phase: "rebase" }),
+          steps: stackProgress({
+            stack: saved,
+            index: 0,
+            phase: "rebase",
+            ...(options.publishThrough === undefined ? { publishBranches: [] } : {}),
+          }),
         });
       let first = 0;
       while (
@@ -785,9 +807,8 @@ export const make = Effect.gen(function* () {
         originalHeads,
         installedHeads: originalHeads,
         expectedRemoteHeads: remote,
-        ...(options.publishThrough
-          ? { publishBranches: publishLayers.map((layer) => layer.branch) }
-          : {}),
+        publishBranches:
+          options.publishThrough === undefined ? [] : publishLayers.map((layer) => layer.branch),
         targetBase,
         hookCwd: cwd,
       };

@@ -68,6 +68,27 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect(yield* f.stacks.canAutoTrack(f.cwd, ["a", "b", "c"])).toBe(true);
       }).pipe(Effect.scoped),
   );
+  it.effect("updates the stack locally without publishing or running post-push hooks", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.adopt;
+      const remoteHeads = yield* f.git(["ls-remote", "fork"]);
+      yield* f.commit("local.txt", "local change\n");
+      const hooks: string[] = [];
+      const update = yield* f.stacks.manage({ cwd: f.cwd, action: "update" }, [], (_cwd, branch) =>
+        Effect.sync(() => {
+          hooks.push(branch);
+        }),
+      );
+      expect(yield* f.git(["show", "c:local.txt"])).toBe("local change");
+      expect(yield* f.git(["branch", "--show-current"])).toBe("b");
+      expect(yield* f.git(["ls-remote", "fork"])).toBe(remoteHeads);
+      expect(hooks).toEqual([]);
+      expect(update.operation).toBeNull();
+      yield* f.stacks.update(f.cwd, { publishThrough: "c" });
+      expect(yield* f.remoteHead("fork", "c")).toBe(yield* f.git(["rev-parse", "c"]));
+    }).pipe(Effect.scoped),
+  );
   it.effect("keeps the publication boundary when continuing unfinished hooks", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
@@ -181,6 +202,7 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         });
         const updates: GitWorkflowProgressUpdate[] = [];
         yield* f.stacks.update(f.cwd, {
+          publishThrough: "c",
           onProgress: (update) =>
             Effect.sync(() => {
               updates.push(update);
@@ -225,6 +247,7 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         yield* f.git(["checkout", "b"]);
         yield* f.adopt;
         const oldC = yield* f.git(["rev-parse", "c"]);
+        const oldB = yield* f.remoteHead("fork", "b");
         yield* f.commit("shared.txt", "middle change\n");
         const failure = yield* f.stacks.update(f.cwd).pipe(Effect.flip);
         expect(failure.message).toContain("stopped at c");
@@ -237,6 +260,8 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         yield* resumed.manage({ cwd: f.cwd, action });
         expect(yield* f.git(["branch", "--show-current"])).toBe("b");
         expect((yield* resumed.inspect(f.cwd)).operation).toBeNull();
+        expect(yield* f.remoteHead("fork", "b")).toBe(oldB);
+        expect(yield* f.remoteHead("fork", "c")).toBe(oldC);
         if (action === "abort") expect(yield* f.git(["rev-parse", "c"])).toBe(oldC);
         else expect(yield* f.git(["show", "c:shared.txt"])).toBe("both changes");
       }).pipe(Effect.scoped),
@@ -274,7 +299,7 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         yield* f.commit("review.txt", "review fix\n");
         const remoteDir = `--git-dir=${f.path.join(f.root, "fork")}`;
         yield* f.git([remoteDir, "config", "receive.denyNonFastForwards", "true"]);
-        yield* f.stacks.update(f.cwd).pipe(Effect.flip);
+        yield* f.stacks.update(f.cwd, { publishThrough: "c" }).pipe(Effect.flip);
         expect(yield* f.remoteHead("fork", "b")).toBe(oldB);
         expect(yield* f.remoteHead("fork", "c")).toBe(oldC);
         expect((yield* f.stacks.inspect(f.cwd)).operation?.phase).toBe("push");
@@ -301,7 +326,7 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
           if (branch === "c" && calls.filter((name) => name === "c").length === 1)
             return yield* new GitManagerError({ operation: "test", cwd, detail: "Hook failed" });
         });
-        yield* f.stacks.update(f.cwd, { afterPush }).pipe(Effect.flip);
+        yield* f.stacks.update(f.cwd, { publishThrough: "c", afterPush }).pipe(Effect.flip);
         expect(calls).toEqual(["b", "c"]);
         expect((yield* f.stacks.inspect(f.cwd)).operation).toMatchObject({
           phase: "hooks",
@@ -343,6 +368,7 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
       yield* f.git(["checkout", "b"]);
       const parents: string[] = [];
       const result = yield* f.stacks.update(f.cwd, {
+        publishThrough: "c",
         mergedBranches: ["a"],
         afterPush: Effect.fn("test.parentAfterPush")(function* (_cwd: string, branch: string) {
           parents.push(
