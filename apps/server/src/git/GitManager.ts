@@ -1155,7 +1155,7 @@ export const make = Effect.gen(function* () {
               new GitManagerError({
                 operation: "runAfterPushHook",
                 cwd,
-                detail: "The configured hooks.afterPush command failed.",
+                detail: `The configured hooks.afterPush command ${JSON.stringify(configuredCommand)} failed (cwd: ${JSON.stringify(cwd)}).`,
                 cause,
               }),
           ),
@@ -1166,8 +1166,13 @@ export const make = Effect.gen(function* () {
                   new GitManagerError({
                     operation: "runAfterPushHook",
                     cwd,
-                    detail: `The configured hooks.afterPush command failed with exit code ${result.exitCode}.`,
-                    diagnostics: (result.stderr.trim() || result.stdout.trim()).slice(0, 2_000),
+                    detail: `The configured hooks.afterPush command ${JSON.stringify(configuredCommand)} failed with exit code ${result.exitCode} (cwd: ${JSON.stringify(cwd)}).`,
+                    diagnostics: [
+                      result.stderr.trim() && `stderr:\n${result.stderr.trim().slice(0, 990)}`,
+                      result.stdout.trim() && `stdout:\n${result.stdout.trim().slice(0, 990)}`,
+                    ]
+                      .filter(Boolean)
+                      .join("\n\n"),
                   }),
                 ),
           ),
