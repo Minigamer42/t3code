@@ -576,7 +576,10 @@ function summarizeGitActionResult(
   title: string;
   description?: string;
 } {
-  if (result.pr.status === "created" || result.pr.status === "opened_existing") {
+  if (
+    result.pr.status === "created" ||
+    (result.pr.status === "opened_existing" && result.push.status !== "pushed")
+  ) {
     const prNumber = result.pr.number ? ` #${result.pr.number}` : "";
     const title = `${result.pr.status === "created" ? "Created" : "Opened"} ${terms.shortLabel}${prNumber}`;
     return withDescription(title, truncateText(result.pr.title));
@@ -5135,11 +5138,7 @@ export const make = Effect.gen(function* () {
               .emit({
                 kind: "phase_started",
                 phase: "push",
-                label: maintainStack
-                  ? "Restacking and pushing..."
-                  : input.forceWithLease
-                    ? "Force pushing with lease..."
-                    : "Pushing...",
+                label: input.forceWithLease ? "Force pushing with lease..." : "Pushing...",
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),

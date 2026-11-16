@@ -6872,6 +6872,7 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
 
   it.effect.each([
     { layer: "stack/second", action: "commit_push" },
+    { layer: "stack/second", action: "push" },
     { layer: "stack/second", action: "commit_push_pr" },
     { layer: "stack/second", action: "commit_push", retarget: true },
     { layer: "stack/second", action: "commit" },
@@ -6906,6 +6907,10 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
       const previousTop = (yield* runGit(cwd, ["rev-parse", "stack/feature"])).stdout.trim();
       const previousMiddle = (yield* runGit(cwd, ["rev-parse", "stack/second"])).stdout.trim();
       NodeFS.writeFileSync(NodePath.join(cwd, "updated-layer.txt"), "review fix\n");
+      if (action === "push") {
+        yield* runGit(cwd, ["add", "updated-layer.txt"]);
+        yield* runGit(cwd, ["commit", "-m", "Address review"]);
+      }
       const result = yield* runStackedAction(manager, {
         cwd,
         action,
@@ -6914,6 +6919,11 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
       expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(layer);
       expect(created(providerCalls)).toEqual([]);
       if (action !== "commit") {
+        expect(result.toast.title).toMatch(/^Pushed(?: [0-9a-f]{7})? to origin\//);
+        expect(result.toast.cta).toMatchObject({
+          kind: "open_pr",
+          label: retarget ? "View MR" : "View PR",
+        });
         const snapshot = (yield* manager
           .subscribeWorkflowProgress({ cwd })
           .pipe(Stream.take(1), Stream.runCollect))[0];
@@ -6976,6 +6986,7 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
           commitMessage: "Review fix",
         });
         expect(result.push.status).toBe("pushed");
+        expect(result.toast.title).toBe("Created MR");
         const prefix = branches.slice(0, branches.indexOf(layer) + 1);
         const snapshot = (yield* manager
           .subscribeWorkflowProgress({ cwd })
