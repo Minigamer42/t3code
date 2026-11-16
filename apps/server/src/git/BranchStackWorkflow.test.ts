@@ -142,6 +142,83 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect(yield* f.remoteHead("fork", "c")).toBe(yield* f.git(["rev-parse", "c"]));
       }).pipe(Effect.scoped),
   );
+  it.effect.each([
+    "base",
+    "base-local",
+    "middle",
+    "partial-base",
+    "rewritten-parent",
+    "rewound-parent",
+    "missing-boundary",
+  ] as const)("refreshes stale boundaries after an external rebase: %s", (mode) =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.adopt;
+      const parent =
+        mode === "middle" ||
+        mode === "rewritten-parent" ||
+        mode === "rewound-parent" ||
+        mode === "missing-boundary"
+          ? "b"
+          : "main";
+      const branch = parent === "b" ? "c" : "a";
+      const previousParent = yield* f.git(["rev-parse", parent]);
+      yield* f.git(["checkout", parent]);
+      if (mode === "missing-boundary") {
+        yield* f.git(["rebase", "--onto", "main", "b", "c"]);
+        const before = yield* f.git(["show-ref", "--heads"]);
+        const error = yield* f.stacks.update(f.cwd).pipe(Effect.flip);
+        expect(error.message).toContain("no longer matches its history");
+        expect(yield* f.git(["show-ref", "--heads"])).toBe(before);
+        expect((yield* f.stacks.inspect(f.cwd)).operation).toBeNull();
+        return;
+      }
+      if (mode === "rewound-parent") {
+        yield* f.git(["reset", "--hard", "a"]);
+        yield* f.git(["push", "--force", "fork", "b"]);
+        yield* f.git(["checkout", branch]);
+      } else if (mode === "rewritten-parent") {
+        yield* f.git(["commit", "--amend", "-m", "Rewrite parent"]);
+        yield* f.git(["checkout", branch]);
+      } else {
+        const intermediate = yield* f.commit("shared.txt", "upstream one\n");
+        yield* f.commit("shared.txt", "upstream two\n");
+        if (parent === "main") yield* f.git(["push", "origin", "main"]);
+        yield* f.git([
+          "rebase",
+          "--onto",
+          mode === "partial-base" ? intermediate : parent,
+          previousParent,
+          branch,
+        ]);
+      }
+      const externallyRebased = yield* f.git(["rev-parse", branch]);
+      const result = yield* f.stacks.update(f.cwd, { includeLatestBase: mode !== "base-local" });
+      expect(result.operation).toBeNull();
+      expect(result.layers.every((layer) => !layer.needsRestack)).toBe(true);
+      if (mode !== "partial-base" && mode !== "rewritten-parent" && mode !== "rewound-parent")
+        expect(yield* f.git(["rev-parse", branch])).toBe(externallyRebased);
+      for (const [index, name] of ["a", "b", "c"].entries()) {
+        expect(
+          yield* f.git([
+            "rev-list",
+            "--count",
+            `${index === 0 ? "main" : ["a", "b"][index - 1]}..${name}`,
+          ]),
+        ).toBe(
+          mode === "middle" && name === "b"
+            ? "3"
+            : mode === "rewound-parent" && name === "b"
+              ? "0"
+              : "1",
+        );
+      }
+      expect(yield* f.git(["show", "c:shared.txt"])).toBe(
+        mode === "rewritten-parent" || mode === "rewound-parent" ? "base" : "upstream two",
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect(
     "edits an adopted hierarchy without rewriting branches and preserves it on invalid edits",
     () =>

@@ -191,6 +191,24 @@ export const make = Effect.gen(function* () {
   ) {
     return (yield* git(cwd, ["merge-base", "--is-ancestor", a, b], true)).exitCode === 0;
   });
+  const refreshParentHead = Effect.fn("BranchStack.refreshParentHead")(function* (
+    cwd: string,
+    branch: string,
+    previous: string,
+    parent: string,
+    current: string,
+  ) {
+    if (previous === parent && (yield* isAncestor(cwd, parent, current))) return parent;
+    const shared = yield* text(cwd, ["merge-base", parent, current]);
+    if (yield* isAncestor(cwd, previous, shared)) return shared;
+    // A rewritten parent may share only the stack base; its old tip still delimits this layer.
+    if (yield* isAncestor(cwd, previous, current)) return previous;
+    if (shared === parent) return parent;
+    return yield* failure(
+      cwd,
+      `The saved parent boundary for ${branch} no longer matches its history. Check its parent in Edit layers before retrying.`,
+    );
+  });
   const worktrees = Effect.fn("BranchStack.worktrees")(function* (cwd: string) {
     const output = yield* text(cwd, ["worktree", "list", "--porcelain", "-z"]);
     const result = new Map<string, string>();
@@ -547,8 +565,18 @@ export const make = Effect.gen(function* () {
         });
         yield* write(cwd, files.journal, journal);
       }
-      if (layer.parentHead !== parent) {
-        const rebase = yield* git(cwd, ["rebase", "--onto", parent, layer.parentHead], true);
+      const parentHead =
+        layer.parentHead === parent
+          ? parent
+          : yield* refreshParentHead(
+              cwd,
+              layer.branch,
+              layer.parentHead,
+              parent,
+              journal.installedHeads[layer.branch]!,
+            );
+      if (parentHead !== parent) {
+        const rebase = yield* git(cwd, ["rebase", "--onto", parent, parentHead], true);
         if (rebase.exitCode !== 0)
           return yield* failure(
             cwd,
@@ -727,7 +755,7 @@ export const make = Effect.gen(function* () {
           cwd,
           "Every layer has merged. Untrack this completed stack from the sidebar.",
         );
-      const layers = saved.layers.slice(first);
+      let layers = saved.layers.slice(first);
       const root = yield* text(cwd, ["rev-parse", "--show-toplevel"]);
       const owners = yield* worktrees(cwd);
       for (const layer of layers) {
@@ -781,7 +809,6 @@ export const make = Effect.gen(function* () {
         }
       }
 
-      let targetBase = layers[0]!.parentHead;
       if (options.includeLatestBase || first > 0) {
         if (saved.baseRef.startsWith("refs/remotes/")) {
           const ref = saved.baseRef.slice(13);
@@ -793,11 +820,21 @@ export const make = Effect.gen(function* () {
             `+refs/heads/${ref.slice(slash + 1)}:${saved.baseRef}`,
           ]);
         }
-        targetBase = yield* text(cwd, ["rev-parse", "--verify", `${saved.baseRef}^{commit}`]);
       }
+      const baseHead = yield* text(cwd, ["rev-parse", "--verify", `${saved.baseRef}^{commit}`]);
       const originalHeads: Record<string, string> = {};
       for (const layer of saved.layers)
         originalHeads[layer.branch] = yield* head(cwd, layer.branch);
+      layers = yield* Effect.forEach(layers, (layer, index) =>
+        refreshParentHead(
+          cwd,
+          layer.branch,
+          layer.parentHead,
+          index === 0 ? baseHead : originalHeads[layers[index - 1]!.branch]!,
+          originalHeads[layer.branch]!,
+        ).pipe(Effect.map((parentHead) => ({ ...layer, parentHead }))),
+      );
+      const targetBase = options.includeLatestBase || first > 0 ? baseHead : layers[0]!.parentHead;
       const journal: Operation = {
         cwd: root,
         originalBranch: branch,
