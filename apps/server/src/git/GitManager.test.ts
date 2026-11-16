@@ -1530,14 +1530,25 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
   it.effect.each([
     {
       command: "printf 'Compilation failed: missing module' >&2; printf 'build output'; exit 7",
-      diagnostics: "Compilation failed: missing module",
+      diagnostics: "stderr:\nCompilation failed: missing module\n\nstdout:\nbuild output",
     },
     {
       command: "printf 'Compilation failed on stdout'; exit 7",
-      diagnostics: "Compilation failed on stdout",
+      diagnostics: "stdout:\nCompilation failed on stdout",
     },
     { command: "exit 7", diagnostics: "" },
-    { command: "printf '%02001d' 0 >&2; exit 7", diagnostics: "0".repeat(2_000) },
+    {
+      command: "printf '%02001d' 0 >&2; printf '%02001d' 1; exit 7",
+      diagnostics: `stderr:\n${"0".repeat(990)}\n\nstdout:\n${"0".repeat(990)}`,
+    },
+    {
+      command: [
+        process.execPath,
+        "-e",
+        "console.log('started'); console.error('failed'); process.exit(7)",
+      ],
+      diagnostics: "stderr:\nfailed\n\nstdout:\nstarted",
+    },
   ])(
     "fails the action and stops remaining hooks.afterPush commands ($command)",
     ({ command, diagnostics }) =>
@@ -1553,7 +1564,20 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         NodeFS.writeFileSync(
           NodePath.join(repoDir, ".t3code", "vcs.json"),
           JSON.stringify({
-            hooks: { afterPush: [command, `touch ${shellQuote(skippedMarker)}`] },
+            hooks: {
+              afterPush:
+                typeof command === "string"
+                  ? [command, `touch ${shellQuote(skippedMarker)}`]
+                  : [
+                      command,
+                      [
+                        process.execPath,
+                        "-e",
+                        `require('node:fs').writeFileSync(process.argv[1], '')`,
+                        skippedMarker,
+                      ],
+                    ],
+            },
           }),
         );
         yield* runGit(repoDir, ["add", ".t3code/vcs.json"]);
@@ -1566,7 +1590,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         }).pipe(Effect.flip);
 
         expect(error.message).toBe(
-          `Git manager failed in runAfterPushHook: The configured hooks.afterPush command failed with exit code 7.${diagnostics ? `\n\n${diagnostics}` : ""}`,
+          `Git manager failed in runAfterPushHook: The configured hooks.afterPush command ${JSON.stringify(command)} failed with exit code 7 (cwd: ${JSON.stringify(repoDir)}).${diagnostics ? `\n\n${diagnostics}` : ""}`,
         );
         expect(NodeFS.existsSync(skippedMarker)).toBe(false);
         expect(
