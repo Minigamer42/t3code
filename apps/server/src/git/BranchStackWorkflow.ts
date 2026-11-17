@@ -416,8 +416,19 @@ export const make = Effect.gen(function* () {
       for (const [index, name] of branches.entries()) {
         const parent = branches[index - 1] ?? base;
         const parentRef =
-          index === 0 ? (active?.baseRef ?? `refs/heads/${base}`) : `refs/heads/${parent}`;
-        const target = yield* git(cwd, ["rev-parse", "--verify", `${parentRef}^{commit}`], true);
+          index === 0
+            ? active?.baseRef.startsWith("refs/remotes/")
+              ? active.baseRef
+              : `refs/remotes/${settings.baseRemote}/${base}`
+            : `refs/heads/${parent}`;
+        let target = yield* git(cwd, ["rev-parse", "--verify", `${parentRef}^{commit}`], true);
+        if (index === 0 && target.exitCode !== 0 && !active?.baseRef.startsWith("refs/remotes/")) {
+          target = yield* git(
+            cwd,
+            ["rev-parse", "--verify", `${active?.baseRef ?? `refs/heads/${base}`}^{commit}`],
+            true,
+          );
+        }
         const headSha = yield* head(cwd, name);
         const parentSha = target.stdout.trim();
         const behindCount =

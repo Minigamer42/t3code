@@ -528,48 +528,78 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
       expect(yield* f.git(["rev-list", "--count", "main..c"])).toBe("2");
     }).pipe(Effect.scoped),
   );
-  it.effect.each(["glab", "parents", "ancestry", "ancestry-base", "ancestry-remote-base"] as const)(
-    "discovers branch order from %s without changing its metadata",
-    (source) =>
-      Effect.gen(function* () {
-        const f = yield* fixture;
-        if (source === "ancestry-remote-base") {
+  it.effect.each([
+    "glab",
+    "parents",
+    "ancestry",
+    "ancestry-base",
+    "ancestry-remote-base",
+    "remote-ahead",
+    "remote-ahead-no-local",
+    "local-ahead",
+  ] as const)("discovers branch order from %s without changing its metadata", (source) =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      if (
+        source === "remote-ahead" ||
+        source === "remote-ahead-no-local" ||
+        source === "local-ahead"
+      ) {
+        const localMain = yield* f.git(["rev-parse", "main"]);
+        yield* f.git(
+          source === "local-ahead" ? ["checkout", "main"] : ["checkout", "--detach", "origin/main"],
+        );
+        yield* f.commit("upstream.txt", "one\n");
+        yield* f.commit("upstream.txt", "two\n");
+        if (source !== "local-ahead") yield* f.git(["push", "origin", "HEAD:main"]);
+        yield* f.git(["checkout", "b"]);
+        if (source !== "local-ahead") expect(yield* f.git(["rev-parse", "main"])).toBe(localMain);
+        if (source === "remote-ahead-no-local") {
           yield* f.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
           yield* f.git(["branch", "-D", "main"]);
-        } else if (source === "ancestry-base") {
-          yield* f.git(["config", "branch.b.t3-merge-base", "origin/main"]);
-          yield* f.git(["config", "branch.c.t3-merge-base", "origin/main"]);
-        } else if (source === "parents") {
-          yield* f.git(["config", "branch.b.t3-merge-base", "a"]);
-          yield* f.git(["config", "branch.c.gh-merge-base", "b"]);
-        } else if (source === "glab") {
-          const root = f.path.join(f.cwd, ".git", "stacked", "feature");
-          yield* f.fs.makeDirectory(root, { recursive: true });
-          yield* f.fs.writeFileString(f.path.join(root, "BASE_BRANCH"), "main\n");
-          yield* f.fs.writeFileString(
-            f.path.join(root, "1.json"),
-            '{"sha":"1","branch":"a","prev":"","next":"2"}',
-          );
-          yield* f.fs.writeFileString(
-            f.path.join(root, "2.json"),
-            '{"sha":"2","branch":"b","prev":"1","next":"3"}',
-          );
-          yield* f.fs.writeFileString(
-            f.path.join(root, "3.json"),
-            '{"sha":"3","branch":"c","prev":"2","next":""}',
-          );
         }
-        expect((yield* f.stacks.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual([
-          "a",
-          "b",
-          "c",
-        ]);
-        yield* f.adopt;
-        if (source === "glab")
-          expect(
-            yield* f.fs.readFileString(f.path.join(f.cwd, ".git", "stacked", "feature", "2.json")),
-          ).toBe('{"sha":"2","branch":"b","prev":"1","next":"3"}');
-      }).pipe(Effect.scoped),
+        expect((yield* f.stacks.inspect(f.cwd)).layers[0]).toMatchObject({
+          behindCount: source === "local-ahead" ? 0 : 2,
+          needsRestack: source !== "local-ahead",
+        });
+      }
+      if (source === "ancestry-remote-base") {
+        yield* f.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        yield* f.git(["branch", "-D", "main"]);
+      } else if (source === "ancestry-base") {
+        yield* f.git(["config", "branch.b.t3-merge-base", "origin/main"]);
+        yield* f.git(["config", "branch.c.t3-merge-base", "origin/main"]);
+      } else if (source === "parents") {
+        yield* f.git(["config", "branch.b.t3-merge-base", "a"]);
+        yield* f.git(["config", "branch.c.gh-merge-base", "b"]);
+      } else if (source === "glab") {
+        const root = f.path.join(f.cwd, ".git", "stacked", "feature");
+        yield* f.fs.makeDirectory(root, { recursive: true });
+        yield* f.fs.writeFileString(f.path.join(root, "BASE_BRANCH"), "main\n");
+        yield* f.fs.writeFileString(
+          f.path.join(root, "1.json"),
+          '{"sha":"1","branch":"a","prev":"","next":"2"}',
+        );
+        yield* f.fs.writeFileString(
+          f.path.join(root, "2.json"),
+          '{"sha":"2","branch":"b","prev":"1","next":"3"}',
+        );
+        yield* f.fs.writeFileString(
+          f.path.join(root, "3.json"),
+          '{"sha":"3","branch":"c","prev":"2","next":""}',
+        );
+      }
+      expect((yield* f.stacks.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual([
+        "a",
+        "b",
+        "c",
+      ]);
+      yield* f.adopt;
+      if (source === "glab")
+        expect(
+          yield* f.fs.readFileString(f.path.join(f.cwd, ".git", "stacked", "feature", "2.json")),
+        ).toBe('{"sha":"2","branch":"b","prev":"1","next":"3"}');
+    }).pipe(Effect.scoped),
   );
   it.effect(
     "only includes newer main when requested and removes merged prefix layers without deleting their branches",
