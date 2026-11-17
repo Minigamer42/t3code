@@ -592,6 +592,60 @@ export const make = Effect.gen(function* () {
     if ((yield* text(cwd, ["status", "--porcelain"])) !== "")
       return yield* failure(cwd, "Commit or stash changes before updating the stack.");
   });
+  const isRebasing = Effect.fn("BranchStack.isRebasing")(function* (cwd: string) {
+    for (const marker of ["rebase-merge", "rebase-apply"]) {
+      const filename = yield* text(cwd, [
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        marker,
+      ]);
+      if (yield* fs.exists(filename)) return true;
+    }
+    return false;
+  });
+  const externallyFinishedRebase = Effect.fn("BranchStack.externallyFinishedRebase")(function* (
+    cwd: string,
+    branch: string,
+    previous: string,
+    current: string,
+    parent: string,
+  ) {
+    if (!(yield* isAncestor(cwd, parent, current))) return false;
+    for (const marker of ["MERGE_HEAD", "CHERRY_PICK_HEAD"]) {
+      if (
+        yield* fs.exists(
+          yield* text(cwd, ["rev-parse", "--path-format=absolute", "--git-path", marker]),
+        )
+      )
+        return false;
+    }
+    // Ancestry alone also accepts resets that discard the layer's commits.
+    const log = yield* git(
+      cwd,
+      ["reflog", "show", "--format=%H%x09%gs", "--max-count=100", `refs/heads/${branch}`],
+      true,
+    );
+    if (log.exitCode !== 0) return false;
+    const entries = log.stdout
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const [sha, ...message] = line.split("\t");
+        return { sha, message: message.join("\t") };
+      });
+    if (entries[0]?.sha !== current) return false;
+    const completed = entries.findIndex(
+      (entry, index) =>
+        entry.message.startsWith("rebase (finish): ") &&
+        entry.message.endsWith(` onto ${parent}`) &&
+        entries[index + 1]?.sha === previous,
+    );
+    return (
+      completed >= 0 &&
+      entries.slice(0, completed).every((entry) => /^commit(?: \([^)]*\))?: /.test(entry.message))
+    );
+  });
   const assertIdle = Effect.fn("BranchStack.assertIdle")(
     function* (cwd: string, checkGitOperation = true) {
       const files = yield* paths(cwd);
@@ -1024,13 +1078,7 @@ export const make = Effect.gen(function* () {
         if (pending.cwd !== (yield* text(cwd, ["rev-parse", "--show-toplevel"])))
           return yield* failure(cwd, `Resume this stack operation from ${pending.cwd}.`);
         if (input.action === "abort") {
-          const rebasePath = yield* text(cwd, [
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "rebase-merge",
-          ]);
-          if (yield* fs.exists(rebasePath)) yield* git(cwd, ["rebase", "--abort"]);
+          if (yield* isRebasing(cwd)) yield* git(cwd, ["rebase", "--abort"]);
           yield* assertClean(cwd);
           const current = yield* text(cwd, ["symbolic-ref", "--short", "HEAD"]);
           for (const [branch, sha] of Object.entries(pending.originalHeads)) {
@@ -1057,14 +1105,17 @@ export const make = Effect.gen(function* () {
         }
         let resumed = pending;
         if (pending.phase === "rebase" && pending.index < pending.stack.layers.length) {
-          const rebasePath = yield* text(cwd, [
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "rebase-merge",
-          ]);
-          if (yield* fs.exists(rebasePath)) {
-            const branch = pending.stack.layers[pending.index]!.branch;
+          const layer = pending.stack.layers[pending.index]!;
+          const branch = layer.branch;
+          const parentBranch = pending.stack.layers[pending.index - 1]?.branch;
+          const parent = parentBranch ? yield* head(cwd, parentBranch) : pending.targetBase;
+          if (parentBranch && parent !== pending.installedHeads[parentBranch])
+            return yield* failure(
+              cwd,
+              `Parent branch ${parentBranch} changed since the stack paused. Recovery metadata has been kept.`,
+            );
+          let completed = false;
+          if (yield* isRebasing(cwd)) {
             if (onProgress)
               yield* onProgress({
                 label: `Continuing rebase of ${branch}...`,
@@ -1078,11 +1129,28 @@ export const make = Effect.gen(function* () {
                 cwd,
                 "Conflicts remain. Resolve and stage them before continuing.",
               );
-            const layer = pending.stack.layers[pending.index]!;
-            const parent =
-              pending.index === 0
-                ? pending.targetBase
-                : yield* head(cwd, pending.stack.layers[pending.index - 1]!.branch);
+            completed = true;
+          } else {
+            yield* assertClean(cwd);
+            const current = yield* head(cwd, branch);
+            if (current !== pending.installedHeads[branch]) {
+              if (
+                !(yield* externallyFinishedRebase(
+                  cwd,
+                  branch,
+                  pending.installedHeads[branch]!,
+                  current,
+                  parent,
+                ))
+              )
+                return yield* failure(
+                  cwd,
+                  `Branch ${branch} changed during the stack operation. Recovery metadata has been kept.`,
+                );
+              completed = true;
+            }
+          }
+          if (completed) {
             resumed = {
               ...pending,
               index: pending.index + 1,

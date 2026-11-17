@@ -473,36 +473,129 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect(yield* f.git(["rev-parse", "b"])).toBe(newB);
       }).pipe(Effect.scoped),
   );
-  it.effect.each(["abort", "continue"] as const)(
-    "keeps conflict recovery durable and supports %s",
-    (action) =>
-      Effect.gen(function* () {
-        const f = yield* fixture;
-        yield* f.git(["checkout", "c"]);
-        yield* f.commit("shared.txt", "top change\n");
-        yield* f.git(["push", "fork", "c"]);
-        yield* f.git(["checkout", "b"]);
-        yield* f.adopt;
-        const oldC = yield* f.git(["rev-parse", "c"]);
-        const oldB = yield* f.remoteHead("fork", "b");
-        yield* f.commit("shared.txt", "middle change\n");
-        const failure = yield* f.stacks.update(f.cwd).pipe(Effect.flip);
-        expect(failure.message).toContain("stopped at c");
-        const resumed = yield* make;
-        expect((yield* resumed.inspect(f.cwd)).operation?.branch).toBe("c");
-        if (action === "continue") {
-          yield* f.fs.writeFileString(f.path.join(f.cwd, "shared.txt"), "both changes\n");
-          yield* f.git(["add", "shared.txt"]);
+  it.effect.each([
+    "abort",
+    "continue",
+    "external",
+    "external-amend",
+    "external-apply",
+    "external-reset",
+    "external-reset-after-finish",
+    "external-wrong-parent",
+    "external-dirty",
+    "external-parent-moved",
+  ] as const)("keeps conflict recovery durable and supports %s", (action) =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.git(["checkout", "c"]);
+      yield* f.commit("shared.txt", "top change\n");
+      yield* f.git(["push", "fork", "c"]);
+      yield* f.git(["checkout", "b"]);
+      yield* f.adopt;
+      const oldC = yield* f.git(["rev-parse", "c"]);
+      const oldB = yield* f.remoteHead("fork", "b");
+      yield* f.commit("shared.txt", "middle change\n");
+      if (action === "external-apply") yield* f.git(["config", "rebase.backend", "apply"]);
+      const failure = yield* f.stacks.update(f.cwd).pipe(Effect.flip);
+      expect(failure.message).toContain("stopped at c");
+      const resumed = yield* make;
+      expect((yield* resumed.inspect(f.cwd)).operation?.branch).toBe("c");
+      if (action === "external-reset" || action === "external-wrong-parent") {
+        yield* f.git(["rebase", "--abort"]);
+        if (action === "external-reset") yield* f.git(["reset", "--hard", "b"]);
+        else yield* f.git(["rebase", "--onto", "a", oldB, "c"]);
+      } else if (action !== "abort") {
+        yield* f.fs.writeFileString(f.path.join(f.cwd, "shared.txt"), "both changes\n");
+        yield* f.git(["add", "shared.txt"]);
+        if (action.startsWith("external"))
+          yield* f.git(["-c", "core.editor=true", "rebase", "--continue"]);
+        if (action === "external-amend")
+          yield* f.git(["commit", "--amend", "-m", "Amended resolution"]);
+        if (action === "external-reset-after-finish") yield* f.git(["reset", "--hard", "b"]);
+        if (action === "external-dirty")
+          yield* f.fs.writeFileString(f.path.join(f.cwd, "dirty.txt"), "dirty\n");
+        if (action === "external-parent-moved") {
+          yield* f.git(["checkout", "b"]);
+          yield* f.commit("parent-extra.txt", "parent moved\n");
+          yield* f.git(["checkout", "c"]);
         }
-        yield* resumed.manage({ cwd: f.cwd, action });
-        expect(yield* f.git(["branch", "--show-current"])).toBe("b");
-        expect((yield* resumed.inspect(f.cwd)).operation).toBeNull();
-        expect(yield* f.remoteHead("fork", "b")).toBe(oldB);
-        expect(yield* f.remoteHead("fork", "c")).toBe(oldC);
-        if (action === "abort") expect(yield* f.git(["rev-parse", "c"])).toBe(oldC);
-        else expect(yield* f.git(["show", "c:shared.txt"])).toBe("both changes");
-      }).pipe(Effect.scoped),
+      }
+      const currentC = yield* f.git(["rev-parse", "c"]);
+      const journalPath = f.path.join(f.cwd, ".git", "t3-stack-operation.json");
+      const beforeJournal = yield* f.fs.readFileString(journalPath);
+      const operation = resumed.manage({
+        cwd: f.cwd,
+        action: action === "abort" ? "abort" : "continue",
+      });
+      if (
+        [
+          "external-reset",
+          "external-wrong-parent",
+          "external-reset-after-finish",
+          "external-dirty",
+          "external-parent-moved",
+        ].includes(action)
+      ) {
+        yield* operation.pipe(Effect.flip);
+        expect(yield* f.fs.readFileString(journalPath)).toBe(beforeJournal);
+        expect(yield* f.git(["rev-parse", "c"])).toBe(currentC);
+        expect((yield* resumed.inspect(f.cwd)).operation?.branch).toBe("c");
+        return;
+      }
+      yield* operation;
+      if (action.startsWith("external")) expect(yield* f.git(["rev-parse", "c"])).toBe(currentC);
+      expect(yield* f.git(["branch", "--show-current"])).toBe("b");
+      expect((yield* resumed.inspect(f.cwd)).operation).toBeNull();
+      expect(yield* f.remoteHead("fork", "b")).toBe(oldB);
+      expect(yield* f.remoteHead("fork", "c")).toBe(oldC);
+      if (action === "abort") expect(yield* f.git(["rev-parse", "c"])).toBe(oldC);
+      else expect(yield* f.git(["show", "c:shared.txt"])).toBe("both changes");
+    }).pipe(Effect.scoped),
   );
+  it.effect("continues descendant layers after the base rebase finishes externally", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.adopt;
+      const remoteBefore = yield* f.git(["ls-remote", "fork"]);
+      const oldC = yield* f.git(["rev-parse", "c"]);
+      yield* f.git(["checkout", "a"]);
+      yield* f.commit("shared.txt", "layer change\n");
+      yield* f.git(["checkout", "main"]);
+      yield* f.commit("shared.txt", "main change\n");
+      yield* f.git(["push", "origin", "main"]);
+      yield* f.git(["checkout", "a"]);
+      yield* f.stacks.update(f.cwd, { includeLatestBase: true }).pipe(Effect.flip);
+      expect((yield* f.stacks.inspect(f.cwd)).operation?.branch).toBe("a");
+      yield* f.fs.writeFileString(f.path.join(f.cwd, "shared.txt"), "resolved main and layer\n");
+      yield* f.git(["add", "shared.txt"]);
+      yield* f.git(["-c", "core.editor=true", "rebase", "--continue"]);
+      const completedA = yield* f.git(["rev-parse", "a"]);
+      const updates: GitWorkflowProgressUpdate[] = [];
+      const restarted = yield* make;
+      const result = yield* restarted.manage(
+        { cwd: f.cwd, action: "continue" },
+        [],
+        undefined,
+        (update) =>
+          Effect.sync(() => {
+            updates.push(update);
+          }),
+      );
+      expect(result.operation).toBeNull();
+      expect(yield* f.git(["rev-parse", "a"])).toBe(completedA);
+      expect(yield* f.git(["rev-parse", "c"])).not.toBe(oldC);
+      expect(yield* f.git(["show", "c:shared.txt"])).toBe("resolved main and layer");
+      expect(yield* f.git(["branch", "--show-current"])).toBe("a");
+      expect(yield* f.git(["ls-remote", "fork"])).toBe(remoteBefore);
+      expect(
+        updates
+          .at(-1)
+          ?.steps.filter((step) => step.id.endsWith(":rebase"))
+          .every((step) => step.state === "completed"),
+      ).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect.each(["dirty", "worktree", "remote"] as const)(
     "stops before rewriting when %s state is unsafe",
     (mode) =>
