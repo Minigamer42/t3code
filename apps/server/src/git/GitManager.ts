@@ -4687,7 +4687,7 @@ export const make = Effect.gen(function* () {
       report?: WorkflowProgress.ProgressReporter,
     ) {
       let status = initialStatus;
-      if (input.action === "update" && !status.managed) {
+      if (input.action === "update" && status.needsAdoption) {
         yield* branchStacks.manage({
           ...input,
           action: "adopt",
@@ -4979,7 +4979,7 @@ export const make = Effect.gen(function* () {
           );
         }
 
-        if (maintainStack && !localStack.managed) {
+        if (maintainStack && localStack.needsAdoption) {
           localStack = yield* branchStacks.manage({
             cwd: input.cwd,
             action: "adopt",

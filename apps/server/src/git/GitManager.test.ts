@@ -27,6 +27,7 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -145,6 +146,12 @@ type FakeProviderCall =
       readonly reference: string;
       readonly baseBranch: string;
     };
+
+const decodeSavedStacks = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ layers: Schema.Array(Schema.Struct({ branch: Schema.String })) })),
+  ),
+);
 
 const listed = (calls: ReadonlyArray<FakeProviderCall>) =>
   calls.flatMap((call) => (call.operation === "listChangeRequests" ? [call] : []));
@@ -1347,154 +1354,188 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect.each(["publish", "update", "continue", "top", "lazy-update", "lazy-single"] as const)(
-    "limits the post-push lifecycle to publishing actions via %s",
-    (mode) =>
-      Effect.gen(function* () {
-        const cwd = yield* createStackedBranches();
-        const branches =
-          mode === "lazy-single"
-            ? ["stack/feature"]
-            : ["stack/first", "stack/second", "stack/feature"];
-        if (mode === "lazy-single")
-          yield* runGit(cwd, ["branch", "-D", "stack/first", "stack/second"]);
-        const scenario: FakeProviderScenario = {
-          prListByHeadSelector: Object.fromEntries(
-            branches.map((branch, index) => [
-              branch,
+  it.effect.each([
+    "publish",
+    "update",
+    "continue",
+    "top",
+    "lazy-update",
+    "lazy-single",
+    "extend-push",
+    "extend-update",
+  ] as const)("limits the post-push lifecycle to publishing actions via %s", (mode) =>
+    Effect.gen(function* () {
+      const cwd = yield* createStackedBranches();
+      const branches =
+        mode === "lazy-single"
+          ? ["stack/feature"]
+          : ["stack/first", "stack/second", "stack/feature"];
+      if (mode === "lazy-single")
+        yield* runGit(cwd, ["branch", "-D", "stack/first", "stack/second"]);
+      const scenario: FakeProviderScenario = {
+        prListByHeadSelector: Object.fromEntries(
+          branches.map((branch, index) => [
+            branch,
+            [
+              {
+                number: index + 1,
+                title: branch,
+                url: `https://github.com/example/repo/pull/${index + 1}`,
+                headRefName: branch,
+                baseRefName: branches[index - 1] ?? "main",
+                state: "open" as const,
+                isCrossRepository: false,
+              },
+            ],
+          ]),
+        ),
+      };
+      const { service, calls } = createFakeSourceControlProvider(scenario);
+      const recorded: string[] = [];
+      const { manager } = yield* makeManager({
+        sourceControlProvider: {
+          ...service,
+          recordBranchBase: ({ branch }) =>
+            Effect.sync(() => {
+              recorded.push(branch);
+            }),
+          getChangeRequest: (input) =>
+            service.getChangeRequest(input).pipe(
+              Effect.map((pr) => ({
+                ...pr,
+                baseRefName:
+                  mode === "update" ||
+                  mode === "lazy-update" ||
+                  mode === "lazy-single" ||
+                  mode === "extend-update"
+                    ? "outdated-base"
+                    : input.reference.endsWith("/3")
+                      ? "stack/second"
+                      : input.reference.endsWith("/2")
+                        ? "stack/first"
+                        : "main",
+              })),
+            ),
+        },
+      });
+      const marker = NodePath.join(cwd, ".git", "after-push-branches");
+      NodeFS.appendFileSync(NodePath.join(cwd, ".git", "info", "exclude"), "\n.t3code/vcs.json\n");
+      NodeFS.mkdirSync(NodePath.join(cwd, ".t3code"), { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(cwd, ".t3code", "vcs.json"),
+        JSON.stringify({
+          hooks: {
+            afterPush: [
               [
-                {
-                  number: index + 1,
-                  title: branch,
-                  url: `https://github.com/example/repo/pull/${index + 1}`,
-                  headRefName: branch,
-                  baseRefName: branches[index - 1] ?? "main",
-                  state: "open" as const,
-                  isCrossRepository: false,
-                },
+                process.execPath,
+                "-e",
+                "const cp=require('node:child_process');require('node:fs').appendFileSync(process.argv[1],cp.execFileSync('git',['branch','--show-current'],{encoding:'utf8'}));",
+                marker,
               ],
-            ]),
-          ),
-        };
-        const { service, calls } = createFakeSourceControlProvider(scenario);
-        const recorded: string[] = [];
-        const { manager } = yield* makeManager({
-          sourceControlProvider: {
-            ...service,
-            recordBranchBase: ({ branch }) =>
-              Effect.sync(() => {
-                recorded.push(branch);
-              }),
-            getChangeRequest: (input) =>
-              service.getChangeRequest(input).pipe(
-                Effect.map((pr) => ({
-                  ...pr,
-                  baseRefName:
-                    mode === "update" || mode === "lazy-update" || mode === "lazy-single"
-                      ? "outdated-base"
-                      : input.reference.endsWith("/3")
-                        ? "stack/second"
-                        : input.reference.endsWith("/2")
-                          ? "stack/first"
-                          : "main",
-                })),
-              ),
+            ],
           },
+        }),
+      );
+      const remoteBefore = (yield* runGit(cwd, ["ls-remote", "origin"])).stdout;
+      const current =
+        mode === "top" ||
+        mode === "lazy-single" ||
+        mode === "continue" ||
+        mode === "extend-push" ||
+        mode === "extend-update"
+          ? "stack/feature"
+          : "stack/second";
+      yield* runGit(cwd, ["checkout", current]);
+      if (mode === "lazy-update" || mode === "lazy-single") {
+        const detected = yield* manager.stackStatus({ cwd });
+        expect(detected.managed).toBe(false);
+        expect(detected.layers.map((layer) => layer.branch)).toEqual(branches);
+        expect(NodeFS.existsSync(NodePath.join(cwd, ".git/t3-branch-stacks.json"))).toBe(false);
+        const initialized = yield* manager.manageStack({
+          cwd,
+          action: "update",
+          expectedBranch: current,
         });
-        const marker = NodePath.join(cwd, ".git", "after-push-branches");
-        NodeFS.appendFileSync(
-          NodePath.join(cwd, ".git", "info", "exclude"),
-          "\n.t3code/vcs.json\n",
-        );
-        NodeFS.mkdirSync(NodePath.join(cwd, ".t3code"), { recursive: true });
-        NodeFS.writeFileSync(
-          NodePath.join(cwd, ".t3code", "vcs.json"),
-          JSON.stringify({
-            hooks: {
-              afterPush: [
-                [
-                  process.execPath,
-                  "-e",
-                  "const cp=require('node:child_process');require('node:fs').appendFileSync(process.argv[1],cp.execFileSync('git',['branch','--show-current'],{encoding:'utf8'}));",
-                  marker,
-                ],
-              ],
-            },
-          }),
-        );
-        const remoteBefore = (yield* runGit(cwd, ["ls-remote", "origin"])).stdout;
-        const current =
-          mode === "top" || mode === "lazy-single" || mode === "continue"
-            ? "stack/feature"
-            : "stack/second";
-        yield* runGit(cwd, ["checkout", current]);
-        if (mode === "lazy-update" || mode === "lazy-single") {
-          const detected = yield* manager.stackStatus({ cwd });
-          expect(detected.managed).toBe(false);
-          expect(detected.layers.map((layer) => layer.branch)).toEqual(branches);
-          expect(NodeFS.existsSync(NodePath.join(cwd, ".git/t3-branch-stacks.json"))).toBe(false);
-          const initialized = yield* manager.manageStack({
-            cwd,
-            action: "update",
-            expectedBranch: current,
-          });
-          expect(initialized.managed).toBe(true);
-          expect(initialized.layers.map((layer) => layer.branch)).toEqual(branches);
-          expect(recorded).toEqual([]);
-        } else {
-          yield* manager.manageStack({ cwd, action: "adopt", base: "main", branches });
-        }
-        if (mode === "continue") yield* runGit(cwd, ["checkout", "stack/second"]);
-        NodeFS.writeFileSync(NodePath.join(cwd, "review-fix.txt"), "fix\n");
-        yield* runGit(cwd, ["add", "review-fix.txt"]);
-        yield* runGit(cwd, ["commit", "-m", "Review fix"]);
-        if (mode === "continue") yield* runGit(cwd, ["checkout", current]);
-        if (mode === "publish" || mode === "top")
-          yield* runStackedAction(manager, { cwd, action: "push" });
-        else if (mode === "update" || mode === "lazy-update" || mode === "lazy-single")
-          yield* manager.manageStack({ cwd, action: "update" });
-        else {
-          const remote = (yield* runGit(cwd, ["remote", "get-url", "origin"])).stdout.trim();
-          yield* runGit(cwd, [
-            `--git-dir=${remote}`,
-            "config",
-            "receive.denyNonFastForwards",
-            "true",
-          ]);
-          yield* runStackedAction(manager, { cwd, action: "push" }).pipe(Effect.flip);
-          expect(NodeFS.existsSync(marker)).toBe(false);
-          expect(recorded).toEqual([]);
-          yield* runGit(cwd, [
-            `--git-dir=${remote}`,
-            "config",
-            "receive.denyNonFastForwards",
-            "false",
-          ]);
-          yield* manager.manageStack({ cwd, action: "continue" });
-        }
-        const expected =
-          mode === "top"
-            ? ["stack/feature"]
-            : mode === "publish"
-              ? ["stack/second"]
-              : mode === "continue"
-                ? ["stack/second", "stack/feature"]
-                : [];
-        expect(
-          NodeFS.existsSync(marker) ? NodeFS.readFileSync(marker, "utf8").trim().split("\n") : [],
-        ).toEqual(expected);
-        expect(recorded).toEqual(expected);
-        expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(current);
+        expect(initialized.managed).toBe(true);
+        expect(initialized.layers.map((layer) => layer.branch)).toEqual(branches);
+        expect(recorded).toEqual([]);
+      } else {
+        yield* manager.manageStack({
+          cwd,
+          action: "adopt",
+          base: "main",
+          branches:
+            mode === "extend-push" || mode === "extend-update" ? ["stack/feature"] : branches,
+        });
+      }
+      if (mode === "continue") yield* runGit(cwd, ["checkout", "stack/second"]);
+      NodeFS.writeFileSync(NodePath.join(cwd, "review-fix.txt"), "fix\n");
+      yield* runGit(cwd, ["add", "review-fix.txt"]);
+      yield* runGit(cwd, ["commit", "-m", "Review fix"]);
+      if (mode === "continue") yield* runGit(cwd, ["checkout", current]);
+      if (mode === "publish" || mode === "top" || mode === "extend-push")
+        yield* runStackedAction(manager, { cwd, action: "push" });
+      else if (
+        mode === "update" ||
+        mode === "lazy-update" ||
+        mode === "lazy-single" ||
+        mode === "extend-update"
+      )
         yield* manager.manageStack({ cwd, action: "update" });
-        expect(
-          NodeFS.existsSync(marker) ? NodeFS.readFileSync(marker, "utf8").trim().split("\n") : [],
-        ).toEqual(expected);
-        expect(recorded).toEqual(expected);
-        if (mode === "update" || mode === "lazy-update" || mode === "lazy-single") {
-          expect((yield* runGit(cwd, ["ls-remote", "origin"])).stdout).toBe(remoteBefore);
-          expect(calls.filter((call) => call.operation === "retargetChangeRequest")).toEqual([]);
-        }
-      }),
+      else {
+        const remote = (yield* runGit(cwd, ["remote", "get-url", "origin"])).stdout.trim();
+        yield* runGit(cwd, [
+          `--git-dir=${remote}`,
+          "config",
+          "receive.denyNonFastForwards",
+          "true",
+        ]);
+        yield* runStackedAction(manager, { cwd, action: "push" }).pipe(Effect.flip);
+        expect(NodeFS.existsSync(marker)).toBe(false);
+        expect(recorded).toEqual([]);
+        yield* runGit(cwd, [
+          `--git-dir=${remote}`,
+          "config",
+          "receive.denyNonFastForwards",
+          "false",
+        ]);
+        yield* manager.manageStack({ cwd, action: "continue" });
+      }
+      if (mode === "extend-push" || mode === "extend-update") {
+        const saved = decodeSavedStacks(
+          NodeFS.readFileSync(NodePath.join(cwd, ".git/t3-branch-stacks.json"), "utf8"),
+        );
+        expect(saved).toHaveLength(1);
+        expect(saved[0]?.layers.map((layer) => layer.branch)).toEqual(branches);
+      }
+      const expected =
+        mode === "top" || mode === "extend-push"
+          ? ["stack/feature"]
+          : mode === "publish"
+            ? ["stack/second"]
+            : mode === "continue"
+              ? ["stack/second", "stack/feature"]
+              : [];
+      expect(
+        NodeFS.existsSync(marker) ? NodeFS.readFileSync(marker, "utf8").trim().split("\n") : [],
+      ).toEqual(expected);
+      expect(recorded).toEqual(expected);
+      expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(current);
+      yield* manager.manageStack({ cwd, action: "update" });
+      expect(
+        NodeFS.existsSync(marker) ? NodeFS.readFileSync(marker, "utf8").trim().split("\n") : [],
+      ).toEqual(expected);
+      expect(recorded).toEqual(expected);
+      if (
+        mode === "update" ||
+        mode === "lazy-update" ||
+        mode === "lazy-single" ||
+        mode === "extend-update"
+      ) {
+        expect((yield* runGit(cwd, ["ls-remote", "origin"])).stdout).toBe(remoteBefore);
+        expect(calls.filter((call) => call.operation === "retargetChangeRequest")).toEqual([]);
+      }
+    }),
   );
 
   it.effect("runs argv-style hooks.afterPush commands sequentially", () =>
@@ -7160,18 +7201,31 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
                       return TestSourceControlHost.processOutput("{}");
                     }
                     if (input.args.includes("projects/:fullpath/merge_requests")) {
+                      const first = input.args.includes("source_branch=stack/first");
                       const parent = input.args.includes("source_branch=stack/second");
                       const feature = input.args.includes("source_branch=stack/feature");
                       return TestSourceControlHost.processOutput(
                         JSON.stringify(
-                          parent || (feature && created)
+                          first || parent || (feature && created)
                             ? [
                                 {
-                                  iid: parent ? 2 : 3,
-                                  title: parent ? "Second layer" : "Feature",
-                                  web_url: `https://gitlab.example/group/repo/-/merge_requests/${parent ? 2 : 3}`,
-                                  source_branch: parent ? "stack/second" : "stack/feature",
-                                  target_branch: parent ? "main" : "stack/second",
+                                  iid: first ? 1 : parent ? 2 : 3,
+                                  title: first
+                                    ? "First layer"
+                                    : parent
+                                      ? "Second layer"
+                                      : "Feature",
+                                  web_url: `https://gitlab.example/group/repo/-/merge_requests/${first ? 1 : parent ? 2 : 3}`,
+                                  source_branch: first
+                                    ? "stack/first"
+                                    : parent
+                                      ? "stack/second"
+                                      : "stack/feature",
+                                  target_branch: first
+                                    ? "main"
+                                    : parent
+                                      ? "stack/first"
+                                      : "stack/second",
                                   state: "opened",
                                   source_project_id: 1,
                                   target_project_id: 1,

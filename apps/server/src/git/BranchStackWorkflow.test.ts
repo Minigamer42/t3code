@@ -4,9 +4,26 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { GitManagerError, type GitWorkflowProgressUpdate } from "@t3tools/contracts";
 import { make } from "./BranchStackWorkflow.ts";
+
+const decodeSavedStacks = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        remote: Schema.String,
+        layers: Schema.Array(
+          Schema.Struct({
+            branch: Schema.String,
+            remoteHead: Schema.NullOr(Schema.String),
+          }),
+        ),
+      }),
+    ),
+  ),
+);
 
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -66,6 +83,13 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect(yield* f.stacks.canAutoTrack(f.cwd, ["a", "b", "c"])).toBe(false);
         yield* f.adopt;
         expect(yield* f.stacks.canAutoTrack(f.cwd, ["a", "b", "c"])).toBe(true);
+        yield* f.git(["checkout", "c"]);
+        yield* f.stacks.manage({ cwd: f.cwd, action: "edit", base: "main", branches: ["a", "c"] });
+        expect((yield* f.stacks.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual([
+          "a",
+          "c",
+        ]);
+        expect(yield* f.stacks.canAutoTrack(f.cwd, ["b"])).toBe(false);
       }).pipe(Effect.scoped),
   );
   it.effect("updates the stack locally without publishing or running post-push hooks", () =>
@@ -284,6 +308,75 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         mode === "rewritten-parent" || mode === "rewound-parent" ? "base" : "upstream two",
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.effect.each(["prepend", "insert", "append", "overlap", "subset", "base-change"] as const)(
+    "adopting a detected hierarchy extends only one complete existing stack: %s",
+    (mode) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const tracked =
+          mode === "prepend" || mode === "base-change"
+            ? ["c"]
+            : mode === "insert"
+              ? ["a", "c"]
+              : mode === "subset"
+                ? ["a", "b", "c"]
+                : ["a", "b"];
+        yield* f.git(["checkout", tracked[0]!]);
+        yield* f.stacks.manage({ cwd: f.cwd, action: "adopt", base: "main", branches: tracked });
+        if (mode === "insert") yield* f.git(["config", "branch.c.t3-merge-base", "a"]);
+        if (mode === "overlap") {
+          yield* f.git(["checkout", "c"]);
+          yield* f.stacks.manage({ cwd: f.cwd, action: "adopt", base: "main", branches: ["c"] });
+        }
+        const statePath = f.path.join(f.cwd, ".git", "t3-branch-stacks.json");
+        const before = yield* f.fs.readFileString(statePath);
+        const originalRefs = yield* f.git(["show-ref", "--heads"]);
+        const originalLease = yield* f.remoteHead("fork", tracked[0]!);
+        yield* f.git(["config", "remote.pushDefault", "origin"]);
+        yield* f.git([
+          `--git-dir=${f.path.join(f.root, "fork")}`,
+          "update-ref",
+          `refs/heads/${tracked[0]}`,
+          yield* f.git(["rev-parse", "c"]),
+        ]);
+        yield* f.git(["checkout", mode === "append" ? "c" : mode === "prepend" ? "a" : "b"]);
+        if (mode === "base-change") yield* f.git(["branch", "base-alias", "main"]);
+        if (mode === "prepend" || mode === "insert" || mode === "append") {
+          for (const branch of ["a", "b", "c"]) {
+            yield* f.git(["checkout", branch]);
+            const detected = yield* f.stacks.inspect(f.cwd);
+            expect(detected.layers.map((layer) => layer.branch)).toEqual(["a", "b", "c"]);
+            expect(detected.layers.map((layer) => layer.parent)).toEqual(["main", "a", "b"]);
+            expect(yield* f.fs.readFileString(statePath)).toBe(before);
+          }
+          yield* f.git(["checkout", mode === "append" ? "c" : mode === "prepend" ? "a" : "b"]);
+        }
+        const operation = f.stacks.manage({
+          cwd: f.cwd,
+          action: "adopt",
+          base: mode === "base-change" ? "base-alias" : "main",
+          branches: mode === "subset" ? ["a", "b"] : ["a", "b", "c"],
+        });
+        if (mode === "overlap" || mode === "subset" || mode === "base-change") {
+          const error = yield* operation.pipe(Effect.flip);
+          expect(error.message).toContain("already managed in another stack");
+          expect(yield* f.fs.readFileString(statePath)).toBe(before);
+        } else {
+          const result = yield* operation;
+          expect(result.managed).toBe(true);
+          expect(result.remote).toBe("fork");
+          expect(result.layers.map((layer) => layer.branch)).toEqual(["a", "b", "c"]);
+          const saved = decodeSavedStacks(yield* f.fs.readFileString(statePath));
+          expect(saved).toHaveLength(1);
+          expect(saved[0]?.layers.find((layer) => layer.branch === tracked[0])?.remoteHead).toBe(
+            originalLease,
+          );
+        }
+        if (mode !== "base-change")
+          expect(yield* f.git(["show-ref", "--heads"])).toBe(originalRefs);
+      }).pipe(Effect.scoped),
   );
 
   it.effect(
@@ -531,6 +624,8 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
   it.effect.each([
     "glab",
     "parents",
+    "stale-parent",
+    "diverged-parent",
     "ancestry",
     "ancestry-base",
     "ancestry-remote-base",
@@ -569,9 +664,18 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
       } else if (source === "ancestry-base") {
         yield* f.git(["config", "branch.b.t3-merge-base", "origin/main"]);
         yield* f.git(["config", "branch.c.t3-merge-base", "origin/main"]);
-      } else if (source === "parents") {
+      } else if (
+        source === "parents" ||
+        source === "stale-parent" ||
+        source === "diverged-parent"
+      ) {
         yield* f.git(["config", "branch.b.t3-merge-base", "a"]);
-        yield* f.git(["config", "branch.c.gh-merge-base", "b"]);
+        yield* f.git(["config", "branch.c.gh-merge-base", source === "parents" ? "b" : "a"]);
+        if (source === "diverged-parent") {
+          yield* f.git(["checkout", "a"]);
+          yield* f.commit("parent-new.txt", "parent change\n");
+          yield* f.git(["checkout", "b"]);
+        }
       } else if (source === "glab") {
         const root = f.path.join(f.cwd, ".git", "stacked", "feature");
         yield* f.fs.makeDirectory(root, { recursive: true });
@@ -589,11 +693,10 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
           '{"sha":"3","branch":"c","prev":"2","next":""}',
         );
       }
-      expect((yield* f.stacks.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual([
-        "a",
-        "b",
-        "c",
-      ]);
+      expect((yield* f.stacks.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual(
+        source === "diverged-parent" ? ["a", "b"] : ["a", "b", "c"],
+      );
+      if (source === "diverged-parent") return;
       yield* f.adopt;
       if (source === "glab")
         expect(

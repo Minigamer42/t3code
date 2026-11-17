@@ -59,6 +59,15 @@ const GlabRef = Schema.Struct({
   branch: Schema.String,
 });
 
+const extendsStack = (stack: Stack, base: string, branches: readonly string[]) =>
+  stack.base === base &&
+  stack.layers.every(
+    (layer, index) =>
+      branches.includes(layer.branch) &&
+      (index === 0 ||
+        branches.indexOf(stack.layers[index - 1]!.branch) < branches.indexOf(layer.branch)),
+  );
+
 function stackProgress(
   journal: Pick<
     Operation,
@@ -351,19 +360,24 @@ export const make = Effect.gen(function* () {
           }),
       );
       for (const [name, sha] of refs) {
-        if (
-          name === base ||
-          (parents.has(name!) &&
-            branches.includes(parents.get(name!)!) &&
-            parents.get(name!) !== base)
-        )
-          continue;
+        if (name === base) continue;
         let ancestor = previous.get(sha!);
         while (ancestor) {
           if (!previous.has(ancestor)) break;
           const candidates = namesByHead.get(ancestor);
           if (candidates) {
-            if (candidates.length === 1) parents.set(name!, candidates[0]!);
+            if (candidates.length === 1) {
+              const candidate = candidates[0]!;
+              const recorded = parents.get(name!);
+              if (
+                !recorded ||
+                !branches.includes(recorded) ||
+                recorded === candidate ||
+                (yield* isAncestor(cwd, `refs/heads/${recorded}`, `refs/heads/${candidate}`))
+              ) {
+                parents.set(name!, candidate);
+              }
+            }
             break;
           }
           ancestor = previous.get(ancestor);
@@ -383,6 +397,18 @@ export const make = Effect.gen(function* () {
     }
     return { base, branches: ordered };
   });
+  const canAutoTrack = Effect.fn("BranchStack.canAutoTrack")(function* (
+    cwd: string,
+    branches: readonly string[],
+  ) {
+    const result = yield* git(
+      cwd,
+      ["config", "--get-regexp", "^branch\\..*\\.t3-stack-disabled$"],
+      true,
+    );
+    const disabled = new Set(result.stdout.trim().split("\n"));
+    return !branches.some((branch) => disabled.has(`branch.${branch}.t3-stack-disabled true`));
+  });
   const inspect = Effect.fn("BranchStack.inspect")(
     function* (cwd: string, includeCandidates = true) {
       const files = yield* paths(cwd);
@@ -396,6 +422,7 @@ export const make = Effect.gen(function* () {
       if (!active && !includeCandidates)
         return {
           managed: false,
+          needsAdoption: false,
           baseIsDefault: false,
           base: "",
           remote: "",
@@ -403,14 +430,41 @@ export const make = Effect.gen(function* () {
           operation: null,
         };
       const settings = yield* defaults(cwd, branch);
-      const candidate = active
-        ? null
-        : includeCandidates
-          ? yield* discover(cwd, branch, files.dir, settings.base, settings.baseRemote)
-          : { base: settings.base, branches: [] as string[] };
-      const base = active?.base ?? candidate!.base;
-      const branches =
-        active?.layers.map((layer) => layer.branch) ?? candidate!.branches.filter(Boolean);
+      const candidate =
+        includeCandidates && !journal
+          ? yield* discover(
+              cwd,
+              branch,
+              files.dir,
+              active?.base ?? settings.base,
+              active?.baseRef.startsWith("refs/remotes/")
+                ? active.baseRef.slice(13, -(active.base.length + 1))
+                : settings.baseRemote,
+            )
+          : null;
+      const base = active?.base ?? candidate?.base ?? settings.base;
+      const canExtend =
+        active &&
+        candidate &&
+        candidate.branches.length > active.layers.length &&
+        extendsStack(active, candidate.base, candidate.branches) &&
+        !saved.some(
+          (stack) =>
+            stack !== active &&
+            stack.layers.some((layer) => candidate.branches.includes(layer.branch)),
+        ) &&
+        (yield* canAutoTrack(
+          cwd,
+          candidate.branches.filter(
+            (branch) => !active.layers.some((layer) => layer.branch === branch),
+          ),
+        ));
+      const branches = canExtend
+        ? candidate.branches
+        : (active?.layers.map((layer) => layer.branch) ??
+          candidate?.branches.filter(Boolean) ??
+          []);
+      const needsAdoption = !active || branches.length !== active.layers.length;
       const owners = yield* worktrees(cwd);
       const layers: GitStackStatusResult["layers"][number][] = [];
       for (const [index, name] of branches.entries()) {
@@ -435,7 +489,15 @@ export const make = Effect.gen(function* () {
           target.exitCode === 0
             ? Number(yield* text(cwd, ["rev-list", "--count", `${headSha}..${parentSha}`]))
             : 0;
-        const previousParent = active?.layers[index]?.parentHead;
+        const recordedIndex = active?.layers.findIndex((layer) => layer.branch === name) ?? -1;
+        const recorded = active?.layers[recordedIndex];
+        const recordedParent = active?.layers[recordedIndex - 1]?.branch ?? active?.base;
+        let previousParent =
+          recorded && recordedParent === parent ? recorded.parentHead : undefined;
+        if (active && previousParent === undefined && target.exitCode === 0) {
+          const shared = yield* git(cwd, ["merge-base", headSha, parentSha], true);
+          if (shared.exitCode === 0) previousParent = shared.stdout.trim();
+        }
         const parentWasRewound =
           behindCount === 0 &&
           target.exitCode === 0 &&
@@ -447,7 +509,7 @@ export const make = Effect.gen(function* () {
         layers.push({
           branch: name,
           parent,
-          ...(active ? { parentHead: active.layers[index]!.parentHead } : {}),
+          ...(previousParent ? { parentHead: previousParent } : {}),
           headSha,
           current: name === branch,
           needsRestack,
@@ -465,6 +527,7 @@ export const make = Effect.gen(function* () {
         : undefined;
       return {
         managed: active !== undefined,
+        needsAdoption,
         baseIsDefault: base === settings.base,
         base,
         remote: active?.remote ?? settings.remote,
@@ -1092,10 +1155,16 @@ export const make = Effect.gen(function* () {
         if (branch !== base) yield* head(cwd, branch);
       }
       const all = (yield* read(cwd, files.state, SavedState)) ?? [];
+      const overlaps = all.filter((stack) =>
+        stack.layers.some((layer) => branches.includes(layer.branch)),
+      );
+      const extension = overlaps.length === 1 ? overlaps[0] : undefined;
       const existing =
         input.action === "edit"
           ? all.find((stack) => stack.layers.some((layer) => layer.branch === currentBranch))
-          : undefined;
+          : extension && extendsStack(extension, base, branches)
+            ? extension
+            : undefined;
       if (
         all.some(
           (stack) =>
@@ -1106,11 +1175,13 @@ export const make = Effect.gen(function* () {
           cwd,
           "A branch is already managed in another stack. Untrack that stack first.",
         );
-      const heads = yield* remoteHeads(cwd, status.remote, branches);
+      const remote = existing?.remote ?? status.remote;
+      const heads = yield* remoteHeads(cwd, remote, branches);
       const settings = yield* defaults(cwd, branches[0]!);
       const remoteBase = `refs/remotes/${settings.baseRemote}/${base}`;
       const exists = (yield* git(cwd, ["rev-parse", "--verify", remoteBase], true)).exitCode === 0;
-      const baseRef = exists ? remoteBase : `refs/heads/${base}`;
+      const baseRef =
+        existing?.base === base ? existing.baseRef : exists ? remoteBase : `refs/heads/${base}`;
       const layers: Stack["layers"][number][] = [];
       for (const [index, branch] of branches.entries()) {
         const parent = index === 0 ? baseRef : `refs/heads/${branches[index - 1]}`;
@@ -1133,7 +1204,7 @@ export const make = Effect.gen(function* () {
       }
       yield* saveStack(
         cwd,
-        { base, baseRef, remote: status.remote, layers },
+        { base, baseRef, remote, layers },
         existing?.layers.map((layer) => layer.branch) ?? [],
       );
       for (const layer of existing?.layers ?? []) {
@@ -1159,18 +1230,6 @@ export const make = Effect.gen(function* () {
         ),
       ),
   );
-  const canAutoTrack = Effect.fn("BranchStack.canAutoTrack")(function* (
-    cwd: string,
-    branches: readonly string[],
-  ) {
-    const result = yield* git(
-      cwd,
-      ["config", "--get-regexp", "^branch\\..*\\.t3-stack-disabled$"],
-      true,
-    );
-    const disabled = new Set(result.stdout.trim().split("\n"));
-    return !branches.some((branch) => disabled.has(`branch.${branch}.t3-stack-disabled true`));
-  });
   const pushCurrent = Effect.fn("BranchStack.pushCurrent")(
     function* (cwd: string, branch: string, forceWithLease = false) {
       yield* assertIdle(cwd);
