@@ -26,6 +26,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readProject, readProjects, readThreadShell, useProjects } from "../state/entities";
 import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { readLocalApi } from "../localApi";
 import { reviewEnvironment } from "../state/review";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 
@@ -255,7 +256,12 @@ export function useOpenPrLink(threadRef?: ScopedThreadRef) {
     event.preventDefault();
     if (!openInBrowser && openChangeRequest(event, prUrl, targetThreadRef)) return true;
 
-    void openLink(prUrl, { event, threadRef: targetThreadRef }).catch((error: unknown) => {
+    const opening =
+      event.button === 1
+        ? (readLocalApi()?.shell.openExternal(prUrl) ??
+          Promise.reject(new Error("Link opening is unavailable.")))
+        : openLink(prUrl, { event, threadRef: targetThreadRef });
+    void opening.catch((error: unknown) => {
       console.error(error);
       toastManager.add(
         stackedThreadToast({

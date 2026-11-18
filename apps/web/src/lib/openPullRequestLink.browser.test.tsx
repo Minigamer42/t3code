@@ -6,9 +6,19 @@ import { page } from "vite-plus/test/browser";
 
 import { act, render, stubGlobal } from "../../test/render";
 
-const state = vi.hoisted(() => ({ preview: vi.fn(), openLink: vi.fn() }));
+const state = vi.hoisted(() => ({ preview: vi.fn(), openLink: vi.fn(), openExternal: vi.fn() }));
 vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => state.preview }));
 vi.mock("../browser/useOpenLink", () => ({ useOpenLink: () => state.openLink }));
+vi.mock(import("../localApi"), async (original) => {
+  const module = await original();
+  return {
+    ...module,
+    readLocalApi: () => {
+      const api = module.createLocalApi();
+      return { ...api, shell: { ...api.shell, openExternal: state.openExternal } };
+    },
+  };
+});
 vi.mock(import("../state/environments"), async (original) => ({
   ...(await original()),
   usePrimaryEnvironmentId: () => EnvironmentId.make("local"),
@@ -34,7 +44,7 @@ import { ToastProvider } from "../components/ui/toast";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useDiffPanelStore } from "../diffPanelStore";
-import { useOpenChangeRequestLink } from "./openPullRequestLink";
+import { useOpenPrLink, useOpenChangeRequestLink } from "./openPullRequestLink";
 
 const environmentId = EnvironmentId.make("local");
 const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread"));
@@ -68,6 +78,7 @@ function CommitLink({ url = commitUrl }: { url?: string }) {
 function setup() {
   state.preview.mockReset().mockResolvedValue(AsyncResult.success({ sources: [] }));
   state.openLink.mockReset().mockResolvedValue(undefined);
+  state.openExternal.mockReset().mockResolvedValue(undefined);
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     pullRequestLinksOpenInApp: true,
@@ -157,3 +168,45 @@ it("opens an available commit in the closed Diff pane without the pane resetting
     }),
   );
 });
+
+function PullRequestButton() {
+  const open = useOpenPrLink(threadRef);
+  return (
+    <button
+      onClick={(event) => open(event, "https://github.com/Effect-TS/effect/pull/1")}
+      onAuxClick={(event) => open(event, "https://github.com/Effect-TS/effect/pull/1")}
+    >
+      Open PR
+    </button>
+  );
+}
+
+it.each(["system", "app"] as const)(
+  "opens sidebar PR middle clicks directly on the host with the %s browser preference",
+  async (browserLinkTarget) => {
+    setup();
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      pullRequestLinksOpenInApp: true,
+      browserLinkTarget,
+    });
+    await using screen = await render(
+      <AppAtomRegistryProvider>
+        <PullRequestButton />
+      </AppAtomRegistryProvider>,
+    );
+    const button = screen.getByRole("button", { name: "Open PR" });
+    await button.click({ button: "middle" });
+    expect(state.openExternal).toHaveBeenCalledExactlyOnceWith(
+      "https://github.com/Effect-TS/effect/pull/1",
+    );
+    expect(state.openLink).not.toHaveBeenCalled();
+    expect(useRightPanelStore.getState().byThreadKey).toEqual({});
+
+    await button.click();
+    expect(useRightPanelStore.getState().byThreadKey[scopedThreadKey(threadRef)]).toMatchObject({
+      surfaces: [expect.objectContaining({ kind: "pull-request", number: 1 })],
+    });
+    expect(state.openExternal).toHaveBeenCalledTimes(1);
+  },
+);
