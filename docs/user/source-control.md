@@ -494,9 +494,10 @@ Branches must already follow the selected ancestry; edits do not create branches
 Click a branch in the stack to switch the checkout and thread to it. Switching requires a clean
 checkout and a target branch that is not checked out in another worktree.
 
-Commit and Commit dialog commit only to the current layer. Publishing a stack pushes branches
-from the bottom through the current layer, then creates any missing reviews in that order, each
-targeting its parent branch. Existing reviews are reused. Upper layers are rebased locally only
+Commit and its dialog commit only to the current layer. **Push** publishes branches from the
+bottom through the current layer without creating reviews. **Create MR/PR** also creates missing
+reviews through the current layer, each targeting its parent branch. Existing reviews are reused,
+and the action remains available when a lower layer is missing a review. Upper layers are rebased locally only
 when their parent history changed; up-to-date layers stay untouched, including in other worktrees.
 Their remote branches and reviews are left unchanged. Publish those layers when they are ready.
 Unambiguous local stacks are tracked automatically on their first publish. Rewriting commit

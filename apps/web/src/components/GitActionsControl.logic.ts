@@ -1,4 +1,8 @@
-import { getStackRestackRequired, getStackPushLabel } from "@t3tools/client-runtime/state/vcs";
+import {
+  getStackRestackRequired,
+  getStackPushLabel,
+  getStackHasMissingReviews,
+} from "@t3tools/client-runtime/state/vcs";
 import type { GitStackStatusResult } from "@t3tools/contracts";
 import type {
   GitRunStackedActionResult,
@@ -187,6 +191,7 @@ export function buildMenuItems(
   const hasBranch = gitStatus.refName !== null;
   const needsFeatureBranch = !hasBranch || gitStatus.isDefaultRef;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
+  const missingReviews = getStackHasMissingReviews(gitStatus, stack);
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
@@ -206,8 +211,8 @@ export function buildMenuItems(
         : gitStatus.hasUpstream || canPushWithoutUpstream));
   const canCreatePr =
     !isBusy &&
-    !hasOpenPr &&
-    (hasDefaultBranchDelta || hasChanges || !hasBranch) &&
+    (!hasOpenPr || missingReviews) &&
+    (missingReviews || hasDefaultBranchDelta || hasChanges || !hasBranch) &&
     (needsFeatureBranch || !isBehind) &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
 
@@ -256,7 +261,7 @@ export function buildMenuItems(
     dialogAction: "push",
   };
 
-  if (hasOpenPr) {
+  if (hasOpenPr && !missingReviews) {
     return [...branchItems, ...commitItems, pushItem];
   }
 
@@ -272,7 +277,10 @@ export function buildMenuItems(
         "commit_push_pr",
         hasChanges
           ? `Commit, push & create ${terminology.shortLabel}`
-          : needsFeatureBranch || !gitStatus.hasUpstream || gitStatus.aheadCount > 0
+          : missingReviews ||
+              needsFeatureBranch ||
+              !gitStatus.hasUpstream ||
+              gitStatus.aheadCount > 0
             ? `Push & create ${terminology.shortLabel}`
             : `Create ${terminology.shortLabel}`,
       ),

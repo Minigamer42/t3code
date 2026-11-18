@@ -42,6 +42,24 @@ export function getStackRestackRequired(
   );
 }
 
+export function getStackHasMissingReviews(
+  gitStatus: VcsStatusResult | null,
+  stack: GitStackStatusResult | null | undefined,
+): boolean {
+  if (!gitStatus || !stack || stack.layers.length < 2 || gitStatus.isDefaultRef) return false;
+  const current = stack.layers.findIndex((layer) => layer.branch === gitStatus.refName);
+  return (
+    current >= 0 &&
+    stack.layers
+      .slice(0, current + 1)
+      .some(
+        (layer) =>
+          (layer.current ? (gitStatus.pr ?? layer.pullRequest) : layer.pullRequest)?.state !==
+          "open",
+      )
+  );
+}
+
 export function getStackPushLabel(
   gitStatus: VcsStatusResult | null,
   stack: GitStackStatusResult | null | undefined,
@@ -122,6 +140,7 @@ export function buildMenuItems(
   const hasBranch = gitStatus.refName !== null;
   const needsFeatureBranch = !hasBranch || gitStatus.isDefaultRef;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
+  const missingReviews = getStackHasMissingReviews(gitStatus, stack);
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
   const hasFeatureChanges =
@@ -140,8 +159,11 @@ export function buildMenuItems(
         : gitStatus.hasUpstream || canPushWithoutUpstream));
   const canCreatePr =
     !isBusy &&
-    !hasOpenPr &&
-    ((gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0 || hasChanges || !hasBranch) &&
+    (!hasOpenPr || missingReviews) &&
+    (missingReviews ||
+      (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0 ||
+      hasChanges ||
+      !hasBranch) &&
     (needsFeatureBranch || !isBehind) &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canOpenPr = !isBusy && hasOpenPr;
@@ -185,7 +207,7 @@ export function buildMenuItems(
       kind: "open_dialog",
       dialogAction: "push",
     },
-    hasOpenPr
+    hasOpenPr && !missingReviews
       ? {
           id: "pr",
           label: `View ${terminology.shortLabel}`,
@@ -201,7 +223,10 @@ export function buildMenuItems(
             "commit_push_pr",
             hasChanges
               ? `Commit, push & create ${terminology.shortLabel}`
-              : needsFeatureBranch || !gitStatus.hasUpstream || gitStatus.aheadCount > 0
+              : missingReviews ||
+                  needsFeatureBranch ||
+                  !gitStatus.hasUpstream ||
+                  gitStatus.aheadCount > 0
                 ? `Push & create ${terminology.shortLabel}`
                 : `Create ${terminology.shortLabel}`,
           ),

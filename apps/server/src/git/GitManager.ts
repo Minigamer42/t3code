@@ -4899,7 +4899,7 @@ export const make = Effect.gen(function* () {
           ...(featureBranch ? (["branch"] as const) : []),
           ...(wantsCommit ? (["commit"] as const) : []),
           ...(wantsPush ? (["push"] as const) : []),
-          ...(wantsPr || maintainStack ? (["pr"] as const) : []),
+          ...(wantsPr ? (["pr"] as const) : []),
         ];
 
         yield* progress.emit({
@@ -4989,8 +4989,7 @@ export const make = Effect.gen(function* () {
 
         const currentBranch = branchStep.name ?? initialStatus.branch;
         const commitAction = wantsCommit && isCommitAction(input.action) ? input.action : null;
-        const changeRequestTerms =
-          wantsPr || maintainStack ? yield* changeRequestTermsFor(input.cwd) : null;
+        const changeRequestTerms = wantsPr ? yield* changeRequestTermsFor(input.cwd) : null;
         // A stale or missing origin/HEAD hides the default branch from status, so check here
         // before anything is committed or pushed to it.
         if (changeRequestTerms && !input.featureBranch && initialStatus.branch) {
@@ -5153,7 +5152,7 @@ export const make = Effect.gen(function* () {
               }
             }
           });
-          yield* reviews().pipe(Effect.onError(() => restore.pipe(Effect.ignore)));
+          if (wantsPr) yield* reviews().pipe(Effect.onError(() => restore.pipe(Effect.ignore)));
           yield* restore;
           return {
             status: "pushed" as const,

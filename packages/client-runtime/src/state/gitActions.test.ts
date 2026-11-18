@@ -183,6 +183,37 @@ describe("git action copy", () => {
             ? "Commit, push & create MR"
             : "Push & create MR",
       );
+      const withCurrentReview = { ...gitStatus, aheadCount: 0, pr: openPr };
+      expect(
+        buildMenuItems(withCurrentReview, false, true, stack).find((item) => item.id === "pr"),
+      ).toMatchObject({
+        kind: "open_dialog",
+        disabled: false,
+        action: "commit_push_pr",
+      });
+      const completeStack = {
+        ...stack,
+        layers: stack.layers.map((layer) => ({
+          ...layer,
+          pullRequest: { number: 1, url: openPr.url, state: "open" as const },
+        })),
+      };
+      expect(
+        buildMenuItems(withCurrentReview, false, true, completeStack).find(
+          (item) => item.id === "pr",
+        )?.kind,
+      ).toBe("open_pr");
+      const onlyUpperMissing = {
+        ...completeStack,
+        layers: completeStack.layers.map((layer, index) =>
+          index > current ? { ...layer, pullRequest: null } : layer,
+        ),
+      };
+      expect(
+        buildMenuItems(withCurrentReview, false, true, onlyUpperMissing).find(
+          (item) => item.id === "pr",
+        )?.kind,
+      ).toBe("open_pr");
       const quick = resolveQuickAction(gitStatus, false, false, true, stack);
       expect(quick.label.toLowerCase().includes("restack")).toBe(restack);
       if (behind > 0) {

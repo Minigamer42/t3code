@@ -6938,7 +6938,7 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
     { layer: "stack/second", action: "commit_push" },
     { layer: "stack/second", action: "push" },
     { layer: "stack/second", action: "commit_push_pr" },
-    { layer: "stack/second", action: "commit_push", retarget: true },
+    { layer: "stack/second", action: "commit_push_pr", retarget: true },
     { layer: "stack/second", action: "commit" },
     { layer: "stack/feature", action: "commit_push" },
   ] as const)("maintains an adopted stack when publishing $layer with $action", (scenario) =>
@@ -7029,9 +7029,13 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
     }),
   );
 
-  it.effect.each(["stack/first", "stack/second", "stack/feature"] as const)(
-    "publishes missing GitLab reviews bottom-up only through %s for an inferred local stack",
-    (layer) =>
+  it.effect.each(
+    (["stack/first", "stack/second", "stack/feature"] as const).flatMap((layer) =>
+      (["commit_push", "commit_push_pr"] as const).map((action) => ({ layer, action })),
+    ),
+  )(
+    "publishes missing GitLab reviews bottom-up only through $layer with $action for an inferred local stack",
+    ({ layer, action }) =>
       Effect.gen(function* () {
         const cwd = yield* createStackedBranches();
         const branches = ["stack/first", "stack/second", "stack/feature"];
@@ -7046,11 +7050,12 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
         NodeFS.writeFileSync(NodePath.join(cwd, "review-fix.txt"), "fix\n");
         const result = yield* runStackedAction(manager, {
           cwd,
-          action: "commit_push",
+          action,
           commitMessage: "Review fix",
         });
         expect(result.push.status).toBe("pushed");
-        expect(result.toast.title).toBe("Created MR");
+        const createsReviews = action === "commit_push_pr";
+        expect(result.pr.status).toBe(createsReviews ? "created" : "skipped_not_requested");
         const prefix = branches.slice(0, branches.indexOf(layer) + 1);
         const snapshot = (yield* manager
           .subscribeWorkflowProgress({ cwd })
@@ -7060,9 +7065,11 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
           snapshot?.steps
             .filter((step) => step.id.endsWith(":review"))
             .map((step) => [step.group, step.label, step.state]),
-        ).toEqual(prefix.map((branch) => [branch, "Create MR", "completed"]));
+        ).toEqual(createsReviews ? prefix.map((branch) => [branch, "Create MR", "completed"]) : []);
         expect(created(providerCalls).map((call) => [call.headSelector, call.baseRefName])).toEqual(
-          prefix.map((branch, index) => [branch, branches[index - 1] ?? "main"]),
+          createsReviews
+            ? prefix.map((branch, index) => [branch, branches[index - 1] ?? "main"])
+            : [],
         );
         const remote = (yield* runGit(cwd, ["remote", "get-url", "origin"])).stdout.trim();
         for (const branch of prefix)
@@ -7140,13 +7147,13 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
         NodeFS.writeFileSync(NodePath.join(cwd, "retry.txt"), "retry\n");
         yield* runStackedAction(manager, {
           cwd,
-          action: "commit_push",
+          action: "commit_push_pr",
           commitMessage: "Update middle",
         }).pipe(Effect.flip);
         expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(
           "stack/second",
         );
-        yield* runStackedAction(manager, { cwd, action: "push" });
+        yield* runStackedAction(manager, { cwd, action: "create_pr" });
         expect(created(fake.calls).map((call) => call.headSelector)).toEqual([
           "stack/first",
           "stack/second",
@@ -7189,6 +7196,8 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
       yield* runGit(cwd, ["branch", "-f", "main", "stack/first"]);
       yield* runGit(cwd, ["push", "origin", "main"]);
       yield* runStackedAction(manager, { cwd, action: "push" });
+      expect(created(providerCalls)).toEqual([]);
+      yield* runStackedAction(manager, { cwd, action: "create_pr" });
       expect(created(providerCalls).map((call) => [call.headSelector, call.baseRefName])).toEqual([
         ["stack/second", "main"],
       ]);
