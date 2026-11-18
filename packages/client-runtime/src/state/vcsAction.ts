@@ -82,6 +82,7 @@ export interface RunVcsStackedActionInput {
   readonly action: GitStackedAction;
   readonly forceWithLease?: boolean;
   readonly commitMessage?: string;
+  readonly instructions?: string;
   readonly splitCommits?: boolean;
   readonly featureBranch?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
@@ -477,6 +478,7 @@ export function createVcsActionManager<R, E>(
           action: input.action,
           ...(input.forceWithLease ? { forceWithLease: true } : {}),
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
+          ...(input.instructions ? { instructions: input.instructions } : {}),
           ...(input.splitCommits !== undefined ? { splitCommits: input.splitCommits } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),
           ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),

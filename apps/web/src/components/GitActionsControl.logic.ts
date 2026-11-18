@@ -31,7 +31,7 @@ export {
 } from "@t3tools/client-runtime/state/vcs";
 
 export interface GitActionMenuItem {
-  id: "branch" | "commit" | "commit_dialog" | "push" | "pr";
+  id: "branch" | "commit" | "push" | "pr";
   label: string;
   disabled: boolean;
   icon: GitActionIconName;
@@ -233,14 +233,6 @@ export function buildMenuItems(
       kind: "run_action",
       action: "commit",
       ...(needsFeatureBranch ? { featureBranch: true } : {}),
-    },
-    {
-      id: "commit_dialog",
-      label: "Commit dialog",
-      disabled: !canCommit,
-      icon: "commit",
-      kind: "open_dialog",
-      dialogAction: "commit",
     },
   ];
 

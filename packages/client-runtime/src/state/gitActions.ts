@@ -94,7 +94,13 @@ export type DefaultBranchConfirmableAction =
 
 export type GitActionRequestInput = Pick<
   GitRunStackedActionInput,
-  "action" | "forceWithLease" | "commitMessage" | "splitCommits" | "featureBranch" | "filePaths"
+  | "action"
+  | "forceWithLease"
+  | "commitMessage"
+  | "instructions"
+  | "splitCommits"
+  | "featureBranch"
+  | "filePaths"
 >;
 
 export function changeRequestTerminologyFor(

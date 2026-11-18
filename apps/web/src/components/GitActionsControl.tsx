@@ -1,3 +1,5 @@
+import { GitActionRow } from "./GitActionRow";
+import { GitActionContextDialog } from "./GitActionContextDialog";
 import { GitActionProgressView } from "./GitActionProgressView";
 import { GitWorkflowProgressView } from "./GitWorkflowProgressView";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
@@ -147,6 +149,7 @@ interface PendingDefaultBranchAction {
   branchName: string;
   includesCommit: boolean;
   commitMessage?: string;
+  instructions?: string;
   onConfirmed?: () => void;
   filePaths?: string[];
 }
@@ -156,6 +159,7 @@ interface RunGitActionWithToastInput {
   action: GitStackedAction;
   forceWithLease?: boolean;
   commitMessage?: string;
+  instructions?: string;
   onConfirmed?: () => void;
   skipDefaultBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
@@ -861,6 +865,8 @@ export default function GitActionsControl({
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [isRewriteCommitsDialogOpen, setIsRewriteCommitsDialogOpen] = useState(false);
   const regenerateScopeKey = `${successScopeKey}\u0000${threadRefreshKey ?? ""}`;
+  const [contextAction, setContextAction] = useState<GitActionMenuItem | null>(null);
+  const [dialogInstructions, setDialogInstructions] = useState("");
   const [regenerateSelection, setRegenerateSelection] = useState<{
     readonly scopeKey: string;
     readonly candidates: ReadonlyArray<RegeneratePullRequestCandidate>;
@@ -1072,6 +1078,7 @@ export default function GitActionsControl({
   );
   const runRegenerateDescriptions = async (
     candidates: ReadonlyArray<RegeneratePullRequestCandidate>,
+    instructions?: string,
   ) => {
     if (
       !activeEnvironmentId ||
@@ -1097,6 +1104,7 @@ export default function GitActionsControl({
           cwd: gitCwd,
           projectId,
           reference: candidate.url,
+          ...(instructions ? { instructions } : {}),
           ...(activeServerThread ? { threadId: activeServerThread.id } : {}),
         },
       });
@@ -1248,6 +1256,7 @@ export default function GitActionsControl({
     action,
     forceWithLease = false,
     commitMessage,
+    instructions,
     onConfirmed,
     skipDefaultBranchPrompt = false,
     statusOverride,
@@ -1288,6 +1297,7 @@ export default function GitActionsControl({
         branchName: actionBranch,
         includesCommit,
         ...(commitMessage ? { commitMessage } : {}),
+        ...(instructions ? { instructions } : {}),
         ...(onConfirmed ? { onConfirmed } : {}),
         ...(filePaths ? { filePaths } : {}),
       });
@@ -1305,6 +1315,7 @@ export default function GitActionsControl({
       action,
       ...(forceWithLease ? { forceWithLease: true } : {}),
       ...(commitMessage ? { commitMessage } : {}),
+      ...(instructions ? { instructions } : {}),
       ...(featureBranch ? { featureBranch } : {}),
       ...(filePaths ? { filePaths } : {}),
       ...(activeServerThread ? { threadId: activeServerThread.id } : {}),
@@ -1348,11 +1359,13 @@ export default function GitActionsControl({
     if (!pendingDefaultBranchAction || !canWriteSourceControl) return;
     if (featureBranch && (!canChangeThreadBranch || featureBranchUnavailableReason !== null))
       return;
-    const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
+    const { action, commitMessage, instructions, onConfirmed, filePaths } =
+      pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
     void runGitActionWithToast({
       action,
       ...(commitMessage ? { commitMessage } : {}),
+      ...(instructions ? { instructions } : {}),
       ...(onConfirmed ? { onConfirmed } : {}),
       ...(filePaths ? { filePaths } : {}),
       featureBranch,
@@ -1372,12 +1385,14 @@ export default function GitActionsControl({
 
     setIsCommitDialogOpen(false);
     setDialogCommitMessage("");
+    setDialogInstructions("");
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
 
     void runGitActionWithToast({
       action: "commit",
       splitCommits: false,
+      ...(dialogInstructions.trim() ? { instructions: dialogInstructions.trim() } : {}),
       ...(commitMessage ? { commitMessage } : {}),
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
       featureBranch: true,
@@ -1496,10 +1511,11 @@ export default function GitActionsControl({
     }
   };
 
-  const runMenuItem = (item: GitActionMenuItem) => {
+  const runMenuItem = (item: GitActionMenuItem, instructions?: string) => {
     if (item.disabled) return;
     if (item.kind === "run_action" && item.action) {
       void runGitActionWithToast({
+        ...(instructions ? { instructions } : {}),
         action: item.action,
         featureBranch: item.featureBranch === true,
       });
@@ -1507,6 +1523,7 @@ export default function GitActionsControl({
     }
     if (item.dialogAction === "create_branch") {
       void runGitActionWithToast({
+        ...(instructions ? { instructions } : {}),
         action: "create_branch",
         featureBranch: true,
         skipDefaultBranchPrompt: true,
@@ -1519,6 +1536,7 @@ export default function GitActionsControl({
         return;
       }
       void runGitActionWithToast({
+        ...(instructions ? { instructions } : {}),
         action: item.action ?? "commit_push",
         featureBranch: item.featureBranch === true,
       });
@@ -1526,6 +1544,7 @@ export default function GitActionsControl({
     }
     if (item.dialogAction === "create_pr") {
       void runGitActionWithToast({
+        ...(instructions ? { instructions } : {}),
         action: item.action ?? "commit_push_pr",
         featureBranch: item.featureBranch === true,
       });
@@ -1542,11 +1561,13 @@ export default function GitActionsControl({
     const commitMessage = dialogCommitMessage.trim();
     setIsCommitDialogOpen(false);
     setDialogCommitMessage("");
+    setDialogInstructions("");
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
     void runGitActionWithToast({
       action: "commit",
       splitCommits: false,
+      ...(dialogInstructions.trim() ? { instructions: dialogInstructions.trim() } : {}),
       ...(commitMessage ? { commitMessage } : {}),
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
     }).then(restoreDialogCommitMessageOnFailure(commitMessage));
@@ -1617,6 +1638,20 @@ export default function GitActionsControl({
     })();
   };
   const renderGitMenuItem = (item: GitActionMenuItem) => {
+    const configure =
+      item.id === "commit"
+        ? () => {
+            setExcludedFiles(new Set());
+            setIsEditingFiles(false);
+            setCommitMode("logical");
+            setIsCommitDialogOpen(true);
+          }
+        : item.id === "branch" ||
+            item.id === "pr" ||
+            (item.id === "push" &&
+              (gitStatusForActions?.hasWorkingTreeChanges || item.featureBranch))
+          ? () => setContextAction(item)
+          : undefined;
     const disabledReason = getMenuActionDisabledReason({
       item,
       gitStatus: gitStatusForActions,
@@ -1631,10 +1666,10 @@ export default function GitActionsControl({
             nativeButton={false}
             render={<span className="block w-full cursor-not-allowed" />}
           >
-            <ThreadDetailsControl variant="ghost" part="row" panel className="w-full" disabled>
+            <GitActionRow label={item.label} disabled onRun={() => {}} onConfigure={configure}>
               <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
               <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>{item.label}</span>
-            </ThreadDetailsControl>
+            </GitActionRow>
           </PopoverTrigger>
           <PopoverPopup tooltipStyle side="left" align="center">
             {disabledReason}
@@ -1644,26 +1679,26 @@ export default function GitActionsControl({
     }
 
     return (
-      <ThreadDetailsControl
-        variant="ghost"
-        part="row"
-        panel
+      <GitActionRow
         key={`${item.id}-${item.label}`}
+        label={item.label}
         disabled={
-          !canWriteSourceControl || item.disabled || (item.featureBranch && !canChangeThreadBranch)
+          !canWriteSourceControl ||
+          item.disabled ||
+          (item.featureBranch === true && !canChangeThreadBranch)
         }
-        onClick={() => {
-          runMenuItem(item);
-        }}
+        onRun={() => runMenuItem(item)}
+        onConfigure={configure}
       >
         <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
         <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>{item.label}</span>
-      </ThreadDetailsControl>
+      </GitActionRow>
     );
   };
   const closeCommitDialog = () => {
     setIsCommitDialogOpen(false);
     setDialogCommitMessage("");
+    setDialogInstructions("");
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
   };
@@ -1705,17 +1740,21 @@ export default function GitActionsControl({
       {gitActionMenuItems
         .filter((item) => item.id === "push" || item.id === "pr")
         .map(renderGitMenuItem)}
-      <ThreadDetailsControl
-        variant="ghost"
-        part="row"
-        panel
+      <GitActionRow
+        label={`Regenerate ${changeRequestTerminology.shortLabel} title and description`}
+        onConfigure={() =>
+          setRegenerateSelection({
+            scopeKey: regenerateScopeKey,
+            candidates: availableRegenerateCandidates,
+          })
+        }
         disabled={
           !canRegenerateDescription ||
           isGitActionRunning ||
           !projectId ||
           availableRegenerateCandidates.length === 0
         }
-        onClick={() => {
+        onRun={() => {
           if (availableRegenerateCandidates.length > 1) {
             setRegenerateSelection({
               scopeKey: regenerateScopeKey,
@@ -1732,7 +1771,7 @@ export default function GitActionsControl({
             ? `Regenerating ${changeRequestTerminology.shortLabel} title and description...`
             : `Regenerate ${changeRequestTerminology.shortLabel} title and description${availableRegenerateCandidates.length > 1 ? "..." : ""}`}
         </span>
-      </ThreadDetailsControl>
+      </GitActionRow>
       {canPublishRepository ? (
         <ThreadDetailsControl
           variant="ghost"
@@ -1958,6 +1997,16 @@ export default function GitActionsControl({
                     size="sm"
                   />
                 </div>
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  Additional context (optional)
+                  <Textarea
+                    value={dialogInstructions}
+                    maxLength={10_000}
+                    onChange={(event) => setDialogInstructions(event.target.value)}
+                    placeholder="Guidance for the generated commit message"
+                    size="sm"
+                  />
+                </label>
               </DialogPanel>
               <DialogFooter variant="bare">
                 <Button variant="outline" size="sm" onClick={closeCommitDialog}>
@@ -1984,6 +2033,14 @@ export default function GitActionsControl({
         </DialogPopup>
       </Dialog>
 
+      {contextAction ? (
+        <GitActionContextDialog
+          key={successScopeKey + contextAction.id}
+          label={contextAction.label}
+          onClose={() => setContextAction(null)}
+          onRun={(instructions) => runMenuItem(contextAction, instructions)}
+        />
+      ) : null}
       {regenerateSelection !== null ? (
         <RegeneratePullRequestsDialog
           key={regenerateScopeKey}

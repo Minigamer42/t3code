@@ -1,3 +1,7 @@
+import "~/index.css";
+import { useState } from "react";
+import { GitActionRow } from "./GitActionRow";
+import { GitActionContextDialog } from "./GitActionContextDialog";
 import { SourceControlProviderKind } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { expect, it, vi } from "vite-plus/test";
@@ -79,4 +83,48 @@ it("keeps composition Enter in the repository path from publishing", async () =>
 
   await userEvent.keyboard("{Enter}");
   expect(publish.run).toHaveBeenCalledOnce();
+});
+
+function ConfigurableAction({ onRun }: { onRun: (instructions?: string) => void }) {
+  const [configuring, setConfiguring] = useState(false);
+  return (
+    <>
+      <GitActionRow
+        label="Create MR"
+        disabled={false}
+        onRun={() => onRun()}
+        onConfigure={() => setConfiguring(true)}
+      >
+        Create MR
+      </GitActionRow>
+      {configuring ? (
+        <GitActionContextDialog
+          label="Create MR"
+          onRun={onRun}
+          onClose={() => setConfiguring(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+it("keeps quick actions separate from context editing and cancellation", async () => {
+  const onRun = vi.fn();
+  await using screen = await render(<ConfigurableAction onRun={onRun} />);
+  await screen.getByRole("button", { name: "Create MR options", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).toBeVisible();
+  expect(onRun).not.toHaveBeenCalled();
+  const context = page.getByRole("textbox", { name: "Additional context (optional)" });
+  await expect.element(context).toHaveFocus();
+  await context.fill("  Explain the migration risk.  ");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(onRun).not.toHaveBeenCalled();
+  await screen.getByRole("button", { name: "Create MR options", exact: true }).click();
+  await expect.element(context).toHaveValue("");
+  await context.fill("  Explain the migration risk.  ");
+  await page.getByRole("dialog").getByRole("button", { name: "Create MR", exact: true }).click();
+  expect(onRun).toHaveBeenCalledExactlyOnceWith("Explain the migration risk.");
+  await screen.getByRole("button", { name: "Create MR", exact: true }).click();
+  expect(onRun).toHaveBeenLastCalledWith();
+  expect(onRun).toHaveBeenCalledTimes(2);
 });

@@ -548,10 +548,6 @@ describe("when: HEAD is detached and there are no local changes", () => {
           assert.isTrue(emptyDefault.find((item) => item.id === id)?.disabled);
         }
         assert.equal(items.find((item) => item.id === "commit")?.disabled, !hasWorkingTreeChanges);
-        assert.equal(
-          items.find((item) => item.id === "commit_dialog")?.disabled,
-          !hasWorkingTreeChanges,
-        );
         for (const id of ["push", "pr"]) {
           assert.deepInclude(
             items.find((item) => item.id === id),
@@ -564,7 +560,7 @@ describe("when: HEAD is detached and there are no local changes", () => {
 });
 
 describe("commit menu actions", () => {
-  it("offers direct commit and the dialog on feature refs, including local-only repositories", () => {
+  it("offers one commit action on feature refs, including local-only repositories", () => {
     for (const hasPrimaryRemote of [true, false]) {
       const items = buildMenuItems(
         status({ hasWorkingTreeChanges: true, hasPrimaryRemote }),
@@ -579,14 +575,7 @@ describe("commit menu actions", () => {
           action: "commit",
         },
       );
-      assert.deepInclude(
-        items.find((item) => item.id === "commit_dialog"),
-        {
-          disabled: false,
-          kind: "open_dialog",
-          dialogAction: "commit",
-        },
-      );
+      assert.equal(items.filter((item) => item.id === "commit").length, 1);
     }
   });
 
@@ -597,11 +586,10 @@ describe("commit menu actions", () => {
         items.find((item) => item.id === "commit"),
         { disabled: false, featureBranch: true },
       );
-      assert.isFalse(items.find((item) => item.id === "commit_dialog")?.disabled);
     }
   });
 
-  it("disables both actions while busy or when the worktree is clean", () => {
+  it("disables commit while busy or when the worktree is clean", () => {
     for (const { hasWorkingTreeChanges, isBusy } of [
       { hasWorkingTreeChanges: true, isBusy: true },
       { hasWorkingTreeChanges: false, isBusy: true },
@@ -609,7 +597,6 @@ describe("commit menu actions", () => {
     ]) {
       const items = buildMenuItems(status({ hasWorkingTreeChanges }), isBusy);
       assert.isTrue(items.find((item) => item.id === "commit")?.disabled);
-      assert.isTrue(items.find((item) => item.id === "commit_dialog")?.disabled);
     }
   });
 });

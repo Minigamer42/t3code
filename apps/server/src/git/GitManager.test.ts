@@ -684,6 +684,7 @@ function runStackedAction(
     action: "create_branch" | "commit" | "push" | "create_pr" | "commit_push" | "commit_push_pr";
     actionId?: string;
     commitMessage?: string;
+    instructions?: string;
     splitCommits?: boolean;
     featureBranch?: boolean;
     forceWithLease?: boolean;
@@ -924,6 +925,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         const result = yield* runStackedAction(manager, {
           cwd: repoDir,
           action: "create_branch",
+          instructions: "Name this after the routing change.",
           featureBranch: true,
         });
 
@@ -935,6 +937,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         expect(result.toast.title).toBe("Created jm/feature/detached-change");
         expect(generatedPatch).toContain("detached change");
         expect(generatedPolicy?.commitInstructions).toContain(instructions);
+        expect(generatedPolicy?.commitInstructions).toContain(
+          "Name this after the routing change.",
+        );
         expect(
           yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
             Effect.map((result) => result.stdout.trim()),
@@ -1081,6 +1086,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         textGeneration: {
           generateCommitMessage: (input) => {
             generatedPatches.push(input.stagedPatch);
+            expect(input.policy?.commitInstructions).toContain("Explain each migration step.");
             return Effect.succeed({
               subject: input.stagedPatch.includes("alpha source")
                 ? "Describe alpha source"
@@ -1116,6 +1122,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const result = yield* manager.rewriteCommitMessages({
         cwd: repoDir,
         expectedHeadSha: candidates.headSha,
+        instructions: "Explain each migration step.",
         commitShas: candidates.commits.map((commit) => commit.sha),
       });
 
@@ -4552,10 +4559,16 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           },
         },
       });
-      yield* runStackedAction(manager, { cwd: repoDir, action: "commit", splitCommits: false });
+      yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        splitCommits: false,
+        instructions: "Mention the migration.",
+      });
 
       expect(generatedPolicy).toMatchObject({
-        commitInstructions: "Use a direct tone.\n\nPrefix commits with the affected package.",
+        commitInstructions:
+          "Use a direct tone.\n\nMention the migration.\n\nPrefix commits with the affected package.",
       });
     }),
   );
@@ -4856,6 +4869,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         textGeneration: {
           generateCommitPlan: (context) => {
             plans++;
+            expect(context.policy?.commitInstructions).toContain("Keep the migration separate.");
             const ids = context.changeUnitSummary.split("\n").map((line) => line.split("\t")[0]!);
             return Effect.succeed({
               commits: ids.slice(0, mode === "failed-plan" ? 1 : undefined).map((id, index) => ({
@@ -4872,6 +4886,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         {
           cwd: repoDir,
           action,
+          instructions: "Keep the migration separate.",
           ...(mode === "single" ? { splitCommits: false } : {}),
           ...(mode === "custom" ? { commitMessage: "Chosen message" } : {}),
         },
@@ -6625,6 +6640,7 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
         const result = yield* manager.generatePullRequestDescription({
           cwd,
           projectId: ProjectId.make("project"),
+          instructions: "Explain the migration risk.",
           ...(reference === undefined ? {} : { reference }),
         });
         expect(result.title).toBe("New title");
@@ -6634,6 +6650,9 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
           title: "Existing title",
           baseBranch: "release",
         });
+        expect(generated?.policy?.changeRequestInstructions).toContain(
+          "Explain the migration risk.",
+        );
         expect(generated?.baseBranch).toBe("release");
         expect(generated?.commitSummary).toContain("Updated feature");
         expect(generated?.diffPatch).toContain("+current branch state");

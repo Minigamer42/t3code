@@ -1,3 +1,4 @@
+import { Textarea } from "~/components/ui/textarea";
 import { useEnvironmentQuery } from "~/state/query";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, GitRewriteableCommit } from "@t3tools/contracts";
@@ -42,6 +43,7 @@ export function RewriteCommitMessagesForm({
   const rewriteMessages = useAtomCommand(gitEnvironment.rewriteCommitMessages, {
     reportFailure: false,
   });
+  const [instructions, setInstructions] = useState("");
   const [selectedShas, setSelectedShas] = useState<ReadonlySet<string>>(new Set());
   const submitted = useRef(false);
 
@@ -79,6 +81,7 @@ export function RewriteCommitMessagesForm({
       input: {
         cwd,
         expectedHeadSha: result.headSha,
+        ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
         commitShas: commits
           .filter((commit) => selectedShas.has(commit.sha))
           .map((commit) => commit.sha),
@@ -208,6 +211,15 @@ export function RewriteCommitMessagesForm({
             </p>
           ) : null}
         </div>
+        <label className="flex flex-col gap-2 text-sm font-medium">
+          Additional context (optional)
+          <Textarea
+            value={instructions}
+            maxLength={10_000}
+            onChange={(event) => setInstructions(event.target.value)}
+            placeholder="Guidance for the regenerated commit messages"
+          />
+        </label>
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>

@@ -140,6 +140,7 @@ interface SourceControlTextGenerationSettings {
   readonly modelSelection: ModelSelection;
   readonly projectId: ProjectId | null;
   readonly style: SourceControlWritingStyleSettings;
+  readonly instructions?: string;
 }
 
 export class GitManager extends Context.Service<
@@ -1052,7 +1053,7 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => []),
       );
 
-  const resolveStylePolicy = Effect.fn("GitManager.resolveStylePolicy")(function* (
+  const resolveBaseStylePolicy = Effect.fn("GitManager.resolveBaseStylePolicy")(function* (
     cwd: string,
     settings: SourceControlTextGenerationSettings,
   ) {
@@ -1101,6 +1102,22 @@ export const make = Effect.gen(function* () {
         };
       }
     }
+  });
+  const resolveStylePolicy = Effect.fn("GitManager.resolveStylePolicy")(function* (
+    cwd: string,
+    settings: SourceControlTextGenerationSettings,
+  ) {
+    const policy = yield* resolveBaseStylePolicy(cwd, settings);
+    if (!settings.instructions) return policy;
+    return {
+      ...policy,
+      commitInstructions: [policy.commitInstructions, settings.instructions]
+        .filter(Boolean)
+        .join("\n\n"),
+      changeRequestInstructions: [policy.changeRequestInstructions, settings.instructions]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
   });
   const randomUUIDv4 = (cwd: string) =>
     random.uuidV4().pipe(
@@ -4343,6 +4360,7 @@ export const make = Effect.gen(function* () {
             ),
             projectId,
             style: settings.sourceControlWritingStyle,
+            ...(input.instructions ? { instructions: input.instructions } : {}),
           })),
         ),
       ),
@@ -4635,6 +4653,7 @@ export const make = Effect.gen(function* () {
           ),
           projectId: input.projectId,
           style: resolved.settings.sourceControlWritingStyle,
+          ...(input.instructions ? { instructions: input.instructions } : {}),
         },
         input.cwd,
         existing.baseRefName,
@@ -4927,6 +4946,10 @@ export const make = Effect.gen(function* () {
                   })),
                 ),
           ),
+          Effect.map((settings) => ({
+            ...settings,
+            ...(input.instructions ? { instructions: input.instructions } : {}),
+          })),
           Effect.mapError(
             (cause) =>
               new GitManagerError({

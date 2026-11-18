@@ -22,6 +22,7 @@ type GitConfirmSheetProps = StaticScreenProps<{
   readonly branchName?: string;
   readonly includesCommit?: string;
   readonly commitMessage?: string;
+  readonly instructions?: string;
   readonly filePaths?: string;
 }>;
 
@@ -67,6 +68,7 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
     await gitActions.onRunSelectedThreadGitAction({
       action: confirmAction,
       ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
+      ...(params.instructions ? { instructions: params.instructions } : {}),
       ...(params.filePaths ? { filePaths: params.filePaths.split(",") } : {}),
     });
   };
@@ -80,6 +82,7 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
         action: confirmAction,
         featureBranch: true,
         ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
+        ...(params.instructions ? { instructions: params.instructions } : {}),
         ...(params.filePaths ? { filePaths: params.filePaths.split(",") } : {}),
       });
       return;

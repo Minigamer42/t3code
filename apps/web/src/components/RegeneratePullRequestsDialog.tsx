@@ -11,6 +11,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "~/components/ui/dialog";
+import { Textarea } from "~/components/ui/textarea";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import type { RegeneratePullRequestCandidate } from "./GitActionsControl.logic";
 
@@ -26,15 +27,19 @@ export function RegeneratePullRequestsDialog({
   readonly canRegenerate: boolean;
   readonly onRegenerate: (
     selected: ReadonlyArray<RegeneratePullRequestCandidate>,
+    instructions?: string,
   ) => Promise<ReadonlyArray<{ readonly url: string; readonly message: string }>>;
   readonly onClose: () => void;
 }) {
-  const [selectedUrls, setSelectedUrls] = useState<ReadonlySet<string>>(new Set());
+  const [instructions, setInstructions] = useState("");
+  const [selectedUrls, setSelectedUrls] = useState<ReadonlySet<string>>(
+    new Set(candidates.length === 1 ? [candidates[0]!.url] : []),
+  );
   const allSelected = selectedUrls.size === candidates.length;
   const submit = () => {
     const selected = candidates.filter((candidate) => selectedUrls.has(candidate.url));
     onClose();
-    void onRegenerate(selected);
+    void onRegenerate(selected, instructions.trim() || undefined);
   };
 
   return (
@@ -74,7 +79,7 @@ export function RegeneratePullRequestsDialog({
                 {selectedUrls.size} of {candidates.length} selected
               </span>
             </div>
-            <ScrollArea className="h-72">
+            <ScrollArea className={candidates.length > 1 ? "h-72" : "max-h-40"}>
               <div className="divide-y divide-input">
                 {candidates.map((candidate) => (
                   <label
@@ -107,6 +112,15 @@ export function RegeneratePullRequestsDialog({
               </div>
             </ScrollArea>
           </div>
+          <label className="flex flex-col gap-2 text-sm font-medium">
+            Additional context (optional)
+            <Textarea
+              value={instructions}
+              maxLength={10_000}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="What should the title and description emphasize?"
+            />
+          </label>
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose}>

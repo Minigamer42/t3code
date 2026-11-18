@@ -143,6 +143,7 @@ export const GitRunStackedActionInput = Schema.Struct({
   action: GitStackedAction,
   forceWithLease: Schema.optional(Schema.Boolean),
   commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   splitCommits: Schema.optional(Schema.Boolean),
   featureBranch: Schema.optional(Schema.Boolean),
   filePaths: Schema.optional(Schema.Array(GitFilePath).check(Schema.isMinLength(1))),
@@ -158,6 +159,7 @@ export const GitListRewriteableCommitsInput = Schema.Struct({
 export type GitListRewriteableCommitsInput = typeof GitListRewriteableCommitsInput.Type;
 
 export const GitRewriteCommitMessagesInput = Schema.Struct({
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   cwd: TrimmedNonEmptyStringSchema,
   expectedHeadSha: GitCommitSha,
   commitShas: Schema.Array(GitCommitSha).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
@@ -165,6 +167,7 @@ export const GitRewriteCommitMessagesInput = Schema.Struct({
 export type GitRewriteCommitMessagesInput = typeof GitRewriteCommitMessagesInput.Type;
 
 export const GitRegeneratePullRequestDescriptionInput = Schema.Struct({
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   reference: Schema.optional(GitPullRequestReference),
   cwd: TrimmedNonEmptyStringSchema,
   projectId: ProjectId,
