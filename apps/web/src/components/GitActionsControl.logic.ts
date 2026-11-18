@@ -104,14 +104,33 @@ export function resolveRegeneratePullRequestCandidates(
     readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
     readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
   } | null,
+  stack: Pick<GitStackStatusResult, "layers"> | null = null,
 ): ReadonlyArray<RegeneratePullRequestCandidate> {
   const candidates = new Map<string, RegeneratePullRequestCandidate>();
+  const stackFallbacks = new Set<string>();
+  for (const layer of stack?.layers ?? []) {
+    const pr = layer.pullRequest;
+    const reference = pr ? sourceControlClients.parseChangeRequestUrl(pr.url)?.link : null;
+    if (pr?.state !== "open" || !reference) continue;
+    const key = threadPullRequestKeyOf(reference);
+    candidates.set(key, {
+      url: pr.url,
+      number: pr.number,
+      title: layer.branch,
+      repository: reference.repository,
+      headBranch: layer.branch,
+      baseBranch: layer.parent,
+    });
+    stackFallbacks.add(key);
+  }
   const branchPr = gitStatus?.pr;
   const branchReference = branchPr
     ? sourceControlClients.parseChangeRequestUrl(branchPr.url)?.link
     : null;
   if (branchPr?.state === "open" && branchReference) {
-    candidates.set(threadPullRequestKeyOf(branchReference), {
+    const key = threadPullRequestKeyOf(branchReference);
+    stackFallbacks.delete(key);
+    candidates.set(key, {
       url: branchPr.url,
       number: branchPr.number,
       title: branchPr.title,
@@ -123,7 +142,12 @@ export function resolveRegeneratePullRequestCandidates(
   for (const link of visibleThreadPullRequests(threadPullRequestsOf(thread ?? {}))) {
     if (link.snapshot !== null && link.snapshot.state !== "open") continue;
     const key = threadPullRequestKeyOf(link);
-    if (candidates.has(key)) continue;
+    const existing = candidates.get(key);
+    if (existing) {
+      if (stackFallbacks.has(key) && link.snapshot?.title)
+        candidates.set(key, { ...existing, title: link.snapshot.title });
+      continue;
+    }
     candidates.set(key, {
       url: link.url,
       number: link.number,
