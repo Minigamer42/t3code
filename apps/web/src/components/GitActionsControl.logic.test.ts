@@ -1,4 +1,4 @@
-import type { GitStackStatusResult, ThreadPullRequestLink } from "@t3tools/contracts";
+import type { ThreadPullRequestLink } from "@t3tools/contracts";
 import { SourceControlProviderKind, type VcsStatusResult } from "@t3tools/contracts";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
@@ -638,52 +638,6 @@ describe("resolveRegeneratePullRequestCandidates", () => {
       [1, 2],
     );
     assert.equal(candidates[0]?.title, "Branch request");
-  });
-
-  it("includes every open local stack review in layer order, even without thread links", () => {
-    const stack: Pick<GitStackStatusResult, "layers"> = {
-      layers: [1, 2, 3, 4].map((number) => ({
-        branch: `layer-${number}`,
-        parent: number === 1 ? "main" : `layer-${number - 1}`,
-        headSha: String(number).repeat(40),
-        needsRestack: false,
-        hasChanges: false,
-        current: number === 3,
-        worktreePath: null,
-        pullRequest: { number, url: link(number).url, state: number === 4 ? "merged" : "open" },
-      })),
-    };
-    const candidates = resolveRegeneratePullRequestCandidates(
-      status({
-        pr: {
-          number: 3,
-          title: "Current review",
-          url: link(3).url,
-          headRef: "layer-3",
-          baseRef: "layer-2",
-          state: "open",
-        },
-      }),
-      { pullRequests: [link(3), link(9)] },
-      stack,
-    );
-    assert.deepEqual(
-      candidates.map(({ number }) => number),
-      [1, 2, 3, 9],
-    );
-    assert.deepEqual(candidates[0], {
-      url: link(1).url,
-      number: 1,
-      title: "layer-1",
-      repository: "group/repo",
-      headBranch: "layer-1",
-      baseBranch: "main",
-    });
-    assert.equal(candidates[2]?.title, "Current review");
-    assert.deepEqual(
-      resolveRegeneratePullRequestCandidates(null, null, stack).map(({ number }) => number),
-      [1, 2, 3],
-    );
   });
 
   it("offers linked requests even when the checkout has no request", () => {

@@ -4,6 +4,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type GitRunStackedActionResult,
+  type GitStackStatusResult,
   type OrchestrationV2ServerCommand as OrchestrationCommand,
   type OrchestrationProjectShell,
   SourceControlProviderKind,
@@ -22,7 +23,11 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { refreshPushedPullRequests } from "./refreshPushedPullRequests.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
-import { createdPullRequestKey, linkCreatedPullRequest } from "./linkCreatedPullRequest.ts";
+import {
+  createdPullRequestKey,
+  linkCreatedPullRequest,
+  linkStackPullRequests,
+} from "./linkCreatedPullRequest.ts";
 
 const PROJECT_ID = ProjectId.make("project-1");
 const THREAD_ID = ThreadId.make("thread-1");
@@ -77,11 +82,17 @@ const layerDependenciesFor = (
   threadShell: PullRequestTestThread | null = thread,
 ) =>
   Layer.mergeAll(
+    Layer.mock(ProjectStore.ProjectStoreV2)({ getShell: () => Effect.succeedSome(project) }),
     Layer.mock(ProjectService.ProjectService)({
       getShell: () => Effect.succeedSome(project),
     }),
     Layer.mock(Orchestrator.OrchestratorV2)({
       getThreadShell: () => Effect.succeed(threadShell ? v2PullRequestThread(threadShell) : null),
+      getPullRequestSnapshot: () =>
+        Effect.succeed({
+          snapshotSequence: 1,
+          threads: threadShell ? [v2PullRequestThread(threadShell)] : [],
+        }),
       dispatch,
     }),
   );
@@ -208,5 +219,74 @@ it.effect(
         [PROJECT_ID, true],
         [PROJECT_ID, true],
       ]);
+    }),
+);
+
+it.effect.each(["normal", "other-worktree", "dismissed", "linked"] as const)(
+  "links open local stack reviews to matching threads without resurrecting hidden links: %s",
+  (mode) =>
+    Effect.gen(function* () {
+      const { commands, dispatch } = yield* recordingDispatch();
+      const url = (number: number) => `https://gitlab.example/acme/app/-/merge_requests/${number}`;
+      const shell: PullRequestTestThread = {
+        ...thread,
+        branch: "upper",
+        worktreePath: mode === "other-worktree" ? "/elsewhere" : null,
+        pullRequests:
+          mode === "dismissed" || mode === "linked"
+            ? [
+                {
+                  host: "gitlab.example",
+                  repository: "acme/app",
+                  number: 1,
+                  url: url(1),
+                  source: mode === "dismissed" ? "stack-dismissed" : "manual",
+                  linkedAt: "2026-01-01T00:00:00.000Z",
+                  snapshot: null,
+                  stack: null,
+                },
+              ]
+            : [],
+      };
+      const stack: GitStackStatusResult = {
+        managed: true,
+        base: "main",
+        baseIsDefault: true,
+        remote: "origin",
+        operation: null,
+        layers: ["lower", "upper", "merged"].map((branch, i) => ({
+          branch,
+          parent: i === 0 ? "main" : "lower",
+          headSha: "a".repeat(40),
+          needsRestack: false,
+          hasChanges: false,
+          current: i === 1,
+          worktreePath: null,
+          pullRequest: { number: i + 1, url: url(i + 1), state: i === 2 ? "merged" : "open" },
+        })),
+      };
+      yield* linkStackPullRequests({ cwd: project.workspaceRoot, stack, commandId }).pipe(
+        Effect.provide(layerDependenciesFor(dispatch, shell)),
+      );
+      if (mode === "dismissed")
+        yield* linkCreatedPullRequest({
+          threadId: THREAD_ID,
+          result: { pr: { status: "opened_existing", number: 1, url: url(1) } },
+          commandId,
+        }).pipe(Effect.provide(layerDependenciesFor(dispatch, shell)));
+      expect(
+        (yield* Ref.get(commands)).flatMap((command) =>
+          command.type === "thread.pull-request.link" ? [[command.number, command.source]] : [],
+        ),
+      ).toEqual(
+        mode === "other-worktree"
+          ? []
+          : mode === "normal"
+            ? [
+                [1, "stack"],
+                [2, "stack"],
+              ]
+            : [[2, "stack"]],
+      );
     }),
 );

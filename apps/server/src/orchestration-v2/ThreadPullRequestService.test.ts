@@ -147,6 +147,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
                 getShell: () => Effect.succeedSome(project),
               }),
               Layer.mock(GitManager.GitManager)({
+                stackStatus: () =>
+                  Effect.succeed({
+                    managed: false,
+                    baseIsDefault: true,
+                    base: "main",
+                    remote: "origin",
+                    layers: [],
+                    operation: null,
+                  }),
                 branchPullRequest: () =>
                   Deferred.succeed(lookupStarted, undefined).pipe(
                     Effect.as({
@@ -199,6 +208,101 @@ describe("ThreadPullRequestServiceV2 reads", () => {
     }),
   );
 
+  it.effect("backfills local stack reviews without forge-native stack information", () =>
+    Effect.gen(function* () {
+      const thread = { ...threadShell("local-stack"), branch: "upper" };
+      const project: OrchestrationProjectShell = {
+        id: thread.projectId,
+        title: "Project",
+        workspaceRoot: "/repo",
+        defaultModelSelection: null,
+        scripts: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        repositoryIdentity: {
+          canonicalKey: "gitlab.example/acme/app",
+          provider: SourceControlProviderKind.make("gitlab"),
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "git@gitlab.example:acme/app.git",
+          },
+          displayName: "acme/app",
+        },
+      };
+      const read = yield* Deferred.make<void>();
+      const commands: OrchestrationV2ServerCommand[] = [];
+      const dependencies = Layer.mergeAll(
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          streamDomainEvents: Stream.never,
+          getPullRequestSnapshot: () => Effect.succeed({ snapshotSequence: 1, threads: [thread] }),
+          getThreadShell: () => Effect.succeed(thread),
+          dispatch: (command) =>
+            Effect.sync(() => {
+              commands.push(command);
+              return { sequence: commands.length, storedEvents: [] };
+            }),
+        }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({
+          listShells: () => Effect.succeed([project]),
+          getShell: () => Effect.succeedSome(project),
+        }),
+        Layer.mock(GitManager.GitManager)({
+          branchPullRequest: () => Effect.succeed(null),
+          stackStatus: () =>
+            Deferred.succeed(read, undefined).pipe(
+              Effect.as({
+                managed: true,
+                baseIsDefault: true,
+                base: "main",
+                remote: "origin",
+                operation: null,
+                layers: ["lower", "upper"].map((branch, index) => ({
+                  branch,
+                  parent: index ? "lower" : "main",
+                  headSha: "a".repeat(40),
+                  needsRestack: false,
+                  hasChanges: false,
+                  current: index === 1,
+                  worktreePath: null,
+                  pullRequest: {
+                    number: index + 1,
+                    url: `https://gitlab.example/acme/app/-/merge_requests/${index + 1}`,
+                    state: "open" as const,
+                  },
+                })),
+              }),
+            ),
+        }),
+        Layer.mock(PullRequestService.PullRequestService)({}),
+        Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+          resolve: () => Effect.succeed(project.repositoryIdentity!),
+        }),
+        Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+          shouldRunOpportunisticWork: Effect.succeed(true),
+        }),
+        Layer.succeed(ServerActivation.ServerActivation, Effect.void),
+        Layer.succeed(
+          SecureRandom.SecureRandom,
+          SecureRandom.make((size) => new Uint8Array(size).fill(1)),
+        ),
+        FileSystem.layerNoop({}),
+        Path.layer,
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* ThreadPullRequestService.make;
+        yield* service.start();
+        yield* Deferred.await(read);
+        yield* service.drain;
+      }).pipe(Effect.provide(dependencies));
+      expect(
+        commands.flatMap((command) =>
+          command.type === "thread.pull-request.link" ? [command.number] : [],
+        ),
+      ).toEqual([1, 2]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("does not sweep branch pull requests while no client is connected", () =>
     Effect.gen(function* () {
       // Polling active branches without a connected client wastes GitHub requests.
@@ -232,6 +336,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
           getShell: () => Effect.succeedSome(project),
         }),
         Layer.mock(GitManager.GitManager)({
+          stackStatus: () =>
+            Effect.succeed({
+              managed: false,
+              baseIsDefault: true,
+              base: "main",
+              remote: "origin",
+              layers: [],
+              operation: null,
+            }),
           branchPullRequest: (_input, options) =>
             Effect.gen(function* () {
               const refresh = options?.refresh ?? false;
@@ -327,7 +440,17 @@ describe("ThreadPullRequestServiceV2 reads", () => {
             }),
         }),
         Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
-        Layer.mock(GitManager.GitManager)({}),
+        Layer.mock(GitManager.GitManager)({
+          stackStatus: () =>
+            Effect.succeed({
+              managed: false,
+              baseIsDefault: true,
+              base: "main",
+              remote: "origin",
+              layers: [],
+              operation: null,
+            }),
+        }),
         Layer.mock(PullRequestService.PullRequestService)({
           notifyLinkedThreadsChanged: Queue.offer(notified, undefined).pipe(Effect.asVoid),
         }),
@@ -435,6 +558,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
           getShell: () => Effect.succeedSome(project),
         }),
         Layer.mock(GitManager.GitManager)({
+          stackStatus: () =>
+            Effect.succeed({
+              managed: false,
+              baseIsDefault: true,
+              base: "main",
+              remote: "origin",
+              layers: [],
+              operation: null,
+            }),
           branchPullRequest: (input, options) =>
             Effect.gen(function* () {
               lookups.push({ branch: input.branch, refresh: options?.refresh ?? false });
@@ -567,6 +699,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
             getShell: () => Effect.succeedSome(project),
           }),
           Layer.mock(GitManager.GitManager)({
+            stackStatus: () =>
+              Effect.succeed({
+                managed: false,
+                baseIsDefault: true,
+                base: "main",
+                remote: "origin",
+                layers: [],
+                operation: null,
+              }),
             branchPullRequest: (input) =>
               Effect.sync(() => {
                 lookupCwds.push(input.cwd);
@@ -674,6 +815,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
           getShell: () => Effect.succeedSome(project),
         }),
         Layer.mock(GitManager.GitManager)({
+          stackStatus: () =>
+            Effect.succeed({
+              managed: false,
+              baseIsDefault: true,
+              base: "main",
+              remote: "origin",
+              layers: [],
+              operation: null,
+            }),
           branchPullRequest: (input, options) =>
             Effect.gen(function* () {
               const refresh = options?.refresh ?? false;
@@ -814,6 +964,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
             getShell: () => Effect.succeedSome(project),
           }),
           Layer.mock(GitManager.GitManager)({
+            stackStatus: () =>
+              Effect.succeed({
+                managed: false,
+                baseIsDefault: true,
+                base: "main",
+                remote: "origin",
+                layers: [],
+                operation: null,
+              }),
             branchPullRequest: () => Effect.succeed(detected),
             checkedOutPullRequest: () => Effect.succeed(checkedOut),
           }),
@@ -954,6 +1113,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
             getShell: () => Effect.succeedSome(project),
           }),
           Layer.mock(GitManager.GitManager)({
+            stackStatus: () =>
+              Effect.succeed({
+                managed: false,
+                baseIsDefault: true,
+                base: "main",
+                remote: "origin",
+                layers: [],
+                operation: null,
+              }),
             branchPullRequest: () => Effect.succeed(null),
           }),
           Layer.mock(PullRequestService.PullRequestService)({
@@ -1072,6 +1240,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
           getShell: () => Effect.succeedSome(project),
         }),
         Layer.mock(GitManager.GitManager)({
+          stackStatus: () =>
+            Effect.succeed({
+              managed: false,
+              baseIsDefault: true,
+              base: "main",
+              remote: "origin",
+              layers: [],
+              operation: null,
+            }),
           branchPullRequest: (_input, options) =>
             Effect.sync(() => {
               lookups.push(options);
@@ -1210,6 +1387,15 @@ describe("ThreadPullRequestServiceV2 reads", () => {
         }),
         // Only the fresh read disagrees with the remembered detection.
         Layer.mock(GitManager.GitManager)({
+          stackStatus: () =>
+            Effect.succeed({
+              managed: false,
+              baseIsDefault: true,
+              base: "main",
+              remote: "origin",
+              layers: [],
+              operation: null,
+            }),
           branchPullRequest: (_input, options) =>
             Effect.succeed(options?.freshGitState === true ? fresh : mergedPullRequest43),
         }),

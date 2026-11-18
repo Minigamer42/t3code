@@ -218,7 +218,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as CommitWorkflowService from "./git/CommitWorkflowService.ts";
 import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
-import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
+import { linkCreatedPullRequest, linkStackPullRequests } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
@@ -3146,6 +3146,18 @@ export const layerWsRpc = (
             gitWorkflow
               .runStackedAction(input, {
                 actionId: input.actionId,
+                onPullRequest: (pr, source) =>
+                  input.threadId === undefined
+                    ? Effect.void
+                    : linkCreatedPullRequest({
+                        threadId: input.threadId,
+                        result: { pr },
+                        source,
+                        commandId: serverCommandId("pr-created-link"),
+                      }).pipe(
+                        Effect.provideService(Orchestrator.OrchestratorV2, orchestrationEngine),
+                        Effect.provideService(ProjectService.ProjectService, projectService),
+                      ),
                 progressReporter: {
                   publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
                 },
@@ -3192,6 +3204,18 @@ export const layerWsRpc = (
         [WS_METHODS.gitStackStatus]: (input) => gitWorkflow.stackStatus(input),
         [WS_METHODS.gitStackManage]: (input) =>
           gitWorkflow.manageStack(input).pipe(
+            Effect.tap((stack) =>
+              input.action === "untrack" || input.action === "abort"
+                ? Effect.void
+                : linkStackPullRequests({
+                    cwd: input.cwd,
+                    stack,
+                    commandId: serverCommandId("pr-stack-link"),
+                  }).pipe(
+                    Effect.provideService(Orchestrator.OrchestratorV2, orchestrationEngine),
+                    Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
+                  ),
+            ),
             Effect.tap(() =>
               input.action === "update" || input.action === "continue"
                 ? refreshPushedPullRequests({ cwd: input.cwd }, { push: { status: "pushed" } })

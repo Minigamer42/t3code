@@ -27,7 +27,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as PullRequests from "../pullRequest/PullRequestService.ts";
 import * as VcsStatus from "../vcs/VcsStatusBroadcaster.ts";
-import { linkCreatedPullRequest } from "../git/linkCreatedPullRequest.ts";
+import { linkCreatedPullRequest, linkStackPullRequests } from "../git/linkCreatedPullRequest.ts";
 import { refreshPushedPullRequests } from "../git/refreshPushedPullRequests.ts";
 import * as Invocation from "./McpInvocationContext.ts";
 import { assertFullAccess, assertLiveCaller, loadCaller } from "./threadAccess.ts";
@@ -211,6 +211,16 @@ export const make = Effect.gen(function* () {
                   (commitAction && (status.isDefaultRef || status.refName === null)),
               },
               {
+                onPullRequest: (pr, source) =>
+                  linkCreatedPullRequest({
+                    threadId: thread.id,
+                    result: { pr },
+                    source,
+                    commandId,
+                  }).pipe(
+                    Effect.provideService(Orchestrator.OrchestratorV2, engine),
+                    Effect.provideService(Projects.ProjectService, projects),
+                  ),
                 progressReporter: {
                   publish: (event) =>
                     event.kind === "phase_started" ? report(event.label) : Effect.void,
@@ -253,7 +263,7 @@ export const make = Effect.gen(function* () {
         thread,
         git.withActionProgress(cwd, "Updating branch stack", () =>
           Effect.gen(function* () {
-            return yield* git.manageStack({
+            const stack = yield* git.manageStack({
               ...input,
               cwd,
               expectedBranch:
@@ -261,6 +271,12 @@ export const make = Effect.gen(function* () {
                   ? yield* git.currentBranch(cwd)
                   : input.expectedBranch,
             });
+            if (input.action !== "untrack" && input.action !== "abort")
+              yield* linkStackPullRequests({ cwd, stack, threadId: thread.id, commandId }).pipe(
+                Effect.provideService(Orchestrator.OrchestratorV2, engine),
+                Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
+              );
+            return stack;
           }),
         ),
       );

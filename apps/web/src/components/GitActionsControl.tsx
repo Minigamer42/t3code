@@ -1072,15 +1072,9 @@ export default function GitActionsControl({
   const isGitActionRunning = vcsActionState.isRunning || workflow?.state === "running";
   const isRegeneratingDescription =
     vcsActionState.isRunning && vcsActionState.operation === "regenerate_change_request";
-  const stackQuery = useEnvironmentQuery(
-    activeEnvironmentId && gitCwd
-      ? gitEnvironment.stackStatus({ environmentId: activeEnvironmentId, input: { cwd: gitCwd } })
-      : null,
-  );
   const availableRegenerateCandidates = resolveRegeneratePullRequestCandidates(
     gitStatusForActions,
     activeServerThread,
-    stackQuery.data,
   );
   const runRegenerateDescriptions = async (
     candidates: ReadonlyArray<RegeneratePullRequestCandidate>,
@@ -1194,6 +1188,11 @@ export default function GitActionsControl({
 
   const isDefaultRef = gitStatusForActions?.isDefaultRef ?? false;
 
+  const stackQuery = useEnvironmentQuery(
+    activeEnvironmentId && gitCwd
+      ? gitEnvironment.stackStatus({ environmentId: activeEnvironmentId, input: { cwd: gitCwd } })
+      : null,
+  );
   const gitActionMenuItems = buildMenuItems(
     gitStatusForActions,
     isGitActionRunning,

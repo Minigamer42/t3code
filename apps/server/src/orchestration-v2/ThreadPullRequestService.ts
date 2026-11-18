@@ -22,6 +22,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
+import { linkStackPullRequests } from "../git/linkCreatedPullRequest.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -208,6 +209,7 @@ export const make = Effect.gen(function* () {
       })),
     );
 
+    const localStacks = new Map<string, ReturnType<typeof git.stackStatus>>();
     yield* Effect.forEach(
       groups,
       ([key, group]) =>
@@ -230,6 +232,36 @@ export const make = Effect.gen(function* () {
               .pipe(Effect.orElseSucceed(() => true)))
               ? first.worktreePath
               : project.workspaceRoot;
+          let localStack = localStacks.get(cwd);
+          if (!localStack) {
+            localStack = yield* Effect.cached(git.stackStatus({ cwd }));
+            localStacks.set(cwd, localStack);
+          }
+          yield* localStack.pipe(
+            Effect.flatMap((stack) =>
+              stack.layers.some((layer) => layer.branch === first.branch)
+                ? Effect.forEach(
+                    group,
+                    (thread) =>
+                      linkStackPullRequests({
+                        cwd,
+                        stack,
+                        threadId: thread.id,
+                        commandId: random
+                          .uuidV4()
+                          .pipe(
+                            Effect.map((uuid) => CommandId.make(`server:local-stack-link:${uuid}`)),
+                          ),
+                      }).pipe(
+                        Effect.provideService(Orchestrator.OrchestratorV2, orchestrator),
+                        Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
+                      ),
+                    { discard: true },
+                  )
+                : Effect.void,
+            ),
+            Effect.ignore({ log: true }),
+          );
           // A detected PR is confirmed against fresh git state before it is saved.
           const detected =
             first.branch === null

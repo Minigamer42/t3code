@@ -7127,15 +7127,26 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
           providerScenario: { kind: "gitlab", prListOtherwise: [] },
         });
         NodeFS.writeFileSync(NodePath.join(cwd, "review-fix.txt"), "fix\n");
-        const result = yield* runStackedAction(manager, {
-          cwd,
-          action,
-          commitMessage: "Review fix",
-        });
+        const linked: string[] = [];
+        const result = yield* runStackedAction(
+          manager,
+          {
+            cwd,
+            action,
+            commitMessage: "Review fix",
+          },
+          {
+            onPullRequest: (pr) =>
+              Effect.sync(() => {
+                if (pr.headBranch) linked.push(pr.headBranch);
+              }),
+          },
+        );
         expect(result.push.status).toBe("pushed");
         const createsReviews = action === "commit_push_pr";
         expect(result.pr.status).toBe(createsReviews ? "created" : "skipped_not_requested");
         const prefix = branches.slice(0, branches.indexOf(layer) + 1);
+        expect(linked).toEqual(createsReviews ? prefix : []);
         const snapshot = (yield* manager
           .subscribeWorkflowProgress({ cwd })
           .pipe(Stream.take(1), Stream.runCollect))[0];
@@ -7224,11 +7235,25 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
           branches: ["stack/first", "stack/second", "stack/feature"],
         });
         NodeFS.writeFileSync(NodePath.join(cwd, "retry.txt"), "retry\n");
-        yield* runStackedAction(manager, {
-          cwd,
-          action: "commit_push_pr",
-          commitMessage: "Update middle",
-        }).pipe(Effect.flip);
+        const linked: string[] = [];
+        yield* manager
+          .runStackedAction(
+            {
+              cwd,
+              actionId: "test-link-partial-stack",
+              action: "commit_push_pr",
+              commitMessage: "Update middle",
+              splitCommits: false,
+            },
+            {
+              onPullRequest: (pr) =>
+                Effect.sync(() => {
+                  linked.push(pr.headBranch!);
+                }),
+            },
+          )
+          .pipe(Effect.flip);
+        expect(linked).toEqual(["stack/first"]);
         expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(
           "stack/second",
         );

@@ -117,6 +117,10 @@ export interface GitActionProgressReporter {
 export interface GitRunStackedActionOptions {
   readonly actionId?: string;
   readonly progressReporter?: GitActionProgressReporter;
+  readonly onPullRequest?: (
+    pr: GitRunStackedActionResult["pr"],
+    source: "created" | "stack",
+  ) => Effect.Effect<void>;
 }
 
 export interface GitLocalStatusOptions {
@@ -5202,6 +5206,7 @@ export const make = Effect.gen(function* () {
                 layer.parent,
                 () => startReviewStep(`Create ${changeRequestTerms?.shortLabel ?? "review"}`),
               );
+              if (options?.onPullRequest) yield* options.onPullRequest(pr, "stack");
               if (
                 (pr.status === "created" || pr.status === "opened_existing") &&
                 pr.baseBranch !== layer.parent &&
@@ -5308,6 +5313,8 @@ export const make = Effect.gen(function* () {
           [Effect.exit(afterPush), Effect.exit(runPr)],
           { concurrency: "unbounded" },
         );
+        if (!maintainStack && Exit.isSuccess(prExit) && options?.onPullRequest)
+          yield* options.onPullRequest(prExit.value, "created");
         if (Exit.isFailure(afterPushExit)) {
           return yield* Effect.failCause(afterPushExit.cause);
         }

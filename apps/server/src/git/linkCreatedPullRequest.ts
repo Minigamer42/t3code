@@ -3,12 +3,15 @@ import {
   type GitRunStackedActionResult,
   type OrchestrationProjectShell,
   type ThreadId,
+  type GitStackStatusResult,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 
@@ -50,12 +53,14 @@ export function createdPullRequestKey(
 export const linkCreatedPullRequest: <E>(input: {
   readonly threadId: ThreadId;
   readonly result: Pick<GitRunStackedActionResult, "pr">;
+  readonly source?: "created" | "stack";
   readonly commandId: Effect.Effect<CommandId, E>;
 }) => Effect.Effect<void, never, Orchestrator.OrchestratorV2 | ProjectService.ProjectService> =
   Effect.fn("linkCreatedPullRequest")(
     function* <E>(input: {
       readonly threadId: ThreadId;
       readonly result: Pick<GitRunStackedActionResult, "pr">;
+      readonly source?: "created" | "stack";
       readonly commandId: Effect.Effect<CommandId, E>;
     }) {
       const engine = yield* Orchestrator.OrchestratorV2;
@@ -67,6 +72,12 @@ export const linkCreatedPullRequest: <E>(input: {
       const project = Option.getOrUndefined(yield* projects.getShell(thread.value.projectId));
       const key = createdPullRequestKey(input.result, project);
       if (key === null) return;
+      if (
+        thread.value.pullRequests?.some(
+          (link) => threadPullRequestKeyOf(link) === threadPullRequestKeyOf(key),
+        )
+      )
+        return;
       const commandId = yield* input.commandId;
       yield* engine
         .dispatch({
@@ -74,7 +85,7 @@ export const linkCreatedPullRequest: <E>(input: {
           commandId,
           threadId: input.threadId,
           ...key,
-          source: "created",
+          source: input.source ?? "created",
         })
         .pipe(Effect.asVoid);
     },
@@ -89,3 +100,55 @@ export const linkCreatedPullRequest: <E>(input: {
         ),
       ),
   );
+
+export const linkStackPullRequests = Effect.fn("linkStackPullRequests")(
+  function* <E>(input: {
+    readonly cwd: string;
+    readonly stack: GitStackStatusResult;
+    readonly threadId?: ThreadId;
+    readonly commandId: Effect.Effect<CommandId, E>;
+  }) {
+    const engine = yield* Orchestrator.OrchestratorV2;
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const snapshot = yield* engine.getPullRequestSnapshot(
+      input.threadId === undefined ? { unsettledOnly: true } : { threadId: input.threadId },
+    );
+    const branches = new Set(input.stack.layers.map((layer) => layer.branch));
+    for (const thread of snapshot.threads) {
+      if (thread.archivedAt !== null || !thread.branch || !branches.has(thread.branch)) continue;
+      const current = yield* engine.getThreadShell(thread.id);
+      if (
+        !current ||
+        current.projectId !== thread.projectId ||
+        current.branch !== thread.branch ||
+        current.worktreePath !== thread.worktreePath
+      )
+        continue;
+      const project = yield* projects.getShell(current.projectId);
+      if (
+        Option.isNone(project) ||
+        (current.worktreePath ?? project.value.workspaceRoot) !== input.cwd
+      )
+        continue;
+      const known = new Set((current.pullRequests ?? []).map(threadPullRequestKeyOf));
+      for (const layer of input.stack.layers) {
+        const pr = layer.pullRequest;
+        if (pr?.state !== "open") continue;
+        const key = sourceControlDefinitions.parseChangeRequestUrl(pr.url)?.link;
+        if (!key) continue;
+        const identity = threadPullRequestKeyOf(key);
+        if (known.has(identity)) continue;
+        yield* engine.dispatch({
+          type: "thread.pull-request.link",
+          threadId: current.id,
+          commandId: yield* input.commandId,
+          ...key,
+          url: pr.url,
+          source: "stack",
+        });
+        known.add(identity);
+      }
+    }
+  },
+  Effect.ignore({ log: true }),
+);
