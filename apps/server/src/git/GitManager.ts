@@ -95,6 +95,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
+import * as StackReviewDependencies from "./StackReviewDependencies.ts";
 import * as BranchStackWorkflow from "./BranchStackWorkflow.ts";
 import { detachStackFrame } from "./detachStackFrame.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -884,6 +885,7 @@ function toPullRequestHeadRemoteInfo(pr: {
 
 export const make = Effect.gen(function* () {
   const branchStacks = yield* BranchStackWorkflow.make;
+  const stackReviewDependencies = yield* StackReviewDependencies.make;
   const workflowProgress = yield* WorkflowProgress.make;
   const gitCore = yield* GitVcsDriver.GitVcsDriver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -4710,11 +4712,35 @@ export const make = Effect.gen(function* () {
     );
     return { ...status, layers };
   });
+  const syncStackReviewDependencies = Effect.fn("GitManager.syncStackReviewDependencies")(
+    function* (
+      cwd: string,
+      stack: GitStackStatusResult,
+      report?: WorkflowProgress.ProgressReporter,
+    ) {
+      const provider = yield* sourceControlProvider(cwd);
+      if (!provider.changeRequestDependencies) return;
+      const baseReview = !stack.baseIsDefault
+        ? yield* branchPullRequest({ cwd, branch: stack.base }, { refresh: true })
+        : null;
+      yield* stackReviewDependencies.sync({
+        cwd,
+        stack,
+        ...(report ? { report } : {}),
+        ...(baseReview ? { baseReview } : {}),
+      });
+    },
+  );
   const manageStack = Effect.fn("GitManager.manageStack")(function* (input: GitStackManageInput) {
     const initialStatus = yield* stackStatus(input, input.action === "update");
     const maintain = Effect.fn("GitManager.maintainStack")(function* (
       report?: WorkflowProgress.ProgressReporter,
     ) {
+      let stackSteps: readonly GitWorkflowStep[] = [];
+      const trackReport: WorkflowProgress.ProgressReporter = (update) => {
+        stackSteps = update.steps;
+        return report ? report(update) : Effect.void;
+      };
       let status = initialStatus;
       if (input.action === "update" && status.needsAdoption) {
         yield* branchStacks.manage({
@@ -4726,7 +4752,7 @@ export const make = Effect.gen(function* () {
         status = yield* stackStatus(input, true);
       }
       const splitSteps = WorkflowProgress.reportSteps(
-        report,
+        trackReport,
         (input.splitPoints ?? []).map((sha, index) => ({
           id: sha,
           group: "Split current layer",
@@ -4796,7 +4822,7 @@ export const make = Effect.gen(function* () {
           .filter((layer) => layer.pullRequest?.state === "merged")
           .map((layer) => layer.branch),
         completePush,
-        report,
+        trackReport,
         (base, tip) =>
           nameLayer(base, tip).pipe(
             Effect.mapError((cause) =>
@@ -4854,9 +4880,20 @@ export const make = Effect.gen(function* () {
         }
       }
       yield* invalidateStatus(input.cwd);
-      return yield* stackStatus(input);
+      const result = yield* stackStatus(input);
+      if (
+        input.action !== "untrack" &&
+        input.action !== "abort" &&
+        (yield* sourceControlProvider(input.cwd)).changeRequestDependencies
+      ) {
+        const steps = stackSteps;
+        yield* syncStackReviewDependencies(input.cwd, result, (update) =>
+          trackReport({ ...update, steps: [...steps, ...update.steps] }),
+        );
+      }
+      return result;
     });
-    if (input.action === "update" || input.action === "continue" || input.splitPoints)
+    if (input.action !== "untrack" && input.action !== "abort")
       return yield* workflowProgress.run(input.cwd, "stack", "Preparing stack...", maintain);
     yield* workflowProgress.clear(input.cwd);
     return yield* maintain();
@@ -5172,6 +5209,25 @@ export const make = Effect.gen(function* () {
             refName: currentBranch!,
             requireClean: true,
           });
+          const knownReviews = new Map<
+            string,
+            GitStackStatusResult["layers"][number]["pullRequest"]
+          >();
+          const syncDependencies = Effect.fn("GitManager.publishStackDependencies")(function* () {
+            if (!(yield* sourceControlProvider(input.cwd)).changeRequestDependencies) return;
+            yield* syncStackReviewDependencies(
+              input.cwd,
+              {
+                ...localStack,
+                layers: localStack.layers.map((layer) => ({
+                  ...layer,
+                  pullRequest: knownReviews.get(layer.branch) ?? null,
+                })),
+              },
+              (update) =>
+                onProgress({ ...update, steps: [...coreSteps, ...reviewSteps, ...update.steps] }),
+            );
+          });
           const reviews = Effect.fn("GitManager.publishStackReviews")(function* () {
             for (const layer of prefix) {
               const startReviewStep = Effect.fn("GitManager.startStackReviewStep")(function* (
@@ -5206,6 +5262,8 @@ export const make = Effect.gen(function* () {
                 layer.parent,
                 () => startReviewStep(`Create ${changeRequestTerms?.shortLabel ?? "review"}`),
               );
+              if (pr.url && pr.number)
+                knownReviews.set(layer.branch, { url: pr.url, number: pr.number, state: "open" });
               if (options?.onPullRequest) yield* options.onPullRequest(pr, "stack");
               if (
                 (pr.status === "created" || pr.status === "opened_existing") &&
@@ -5241,7 +5299,18 @@ export const make = Effect.gen(function* () {
               }
             }
           });
-          if (wantsPr) yield* reviews().pipe(Effect.onError(() => restore.pipe(Effect.ignore)));
+          if (wantsPr) {
+            const outcome = yield* Effect.exit(reviews());
+            const dependencies = yield* Effect.exit(syncDependencies());
+            if (Exit.isFailure(outcome)) {
+              yield* restore.pipe(Effect.ignore);
+              return yield* Effect.failCause(outcome.cause);
+            }
+            if (Exit.isFailure(dependencies)) {
+              yield* restore.pipe(Effect.ignore);
+              return yield* Effect.failCause(dependencies.cause);
+            }
+          }
           yield* restore;
           return {
             status: "pushed" as const,

@@ -7108,6 +7108,69 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
     }),
   );
 
+  it.effect.each(["adopt", "edit", "update"] as const)(
+    "synchronizes GitLab MR dependencies on a clean %s",
+    (action) =>
+      Effect.gen(function* () {
+        const cwd = yield* createStackedBranches();
+        const branches = ["stack/first", "stack/second", "stack/feature"];
+        const reviews = Object.fromEntries(
+          branches.map((branch, index) => [
+            branch,
+            [
+              {
+                number: index + 1,
+                title: branch,
+                url: `https://gitlab.example/acme/app/-/merge_requests/${index + 1}`,
+                headRefName: branch,
+                baseRefName: branches[index - 1] ?? "main",
+                state: "open" as const,
+              },
+            ],
+          ]),
+        );
+        const fake = createFakeSourceControlProvider({
+          kind: "gitlab",
+          prListByHeadSelector: reviews,
+        });
+        const edges = new Map<string, { id: string; url: string | null }[]>();
+        let id = 0;
+        const { manager } = yield* makeManager({
+          sourceControlProvider: {
+            ...fake.service,
+            changeRequestDependencies: {
+              list: ({ reference }) => Effect.succeed(edges.get(reference) ?? []),
+              add: ({ reference, blockingReference }) =>
+                Effect.sync(() => {
+                  const edge = { id: String(++id), url: blockingReference };
+                  edges.set(reference, [...(edges.get(reference) ?? []), edge]);
+                  return edge;
+                }),
+              remove: ({ reference, id }) =>
+                Effect.sync(() => {
+                  edges.set(
+                    reference,
+                    (edges.get(reference) ?? []).filter((edge) => edge.id !== id),
+                  );
+                }),
+            },
+          },
+        });
+        if (action !== "adopt")
+          yield* manager.manageStack({ cwd, action: "adopt", base: "main", branches });
+        edges.clear();
+        yield* manager.manageStack({ cwd, action, base: "main", branches });
+        expect(edges.get(reviews["stack/second"]![0]!.url)?.map((edge) => edge.url)).toEqual([
+          reviews["stack/first"]![0]!.url,
+        ]);
+        expect(edges.get(reviews["stack/feature"]![0]!.url)?.map((edge) => edge.url)).toEqual([
+          reviews["stack/second"]![0]!.url,
+        ]);
+        expect((yield* runGit(cwd, ["status", "--porcelain"])).stdout.trim()).toBe("");
+        expect(created(fake.calls)).toEqual([]);
+      }),
+  );
+
   it.effect.each(
     (["stack/first", "stack/second", "stack/feature"] as const).flatMap((layer) =>
       (["commit_push", "commit_push_pr"] as const).map((action) => ({ layer, action })),
@@ -7318,6 +7381,10 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
       const git = yield* GitVcsDriver.GitVcsDriver;
       const calls: SourceControlHost.SourceControlProcessInput[] = [];
       let created = false;
+      const blockers = new Map<
+        number,
+        { id: number; blocking_merge_request: { web_url: string } }[]
+      >();
       const provider = yield* gitLabDriver.make.pipe(
         Effect.map((instance) => instance.sourceControl),
         Effect.provide(
@@ -7328,6 +7395,30 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
                 run: (input) =>
                   Effect.sync(() => {
                     calls.push(input);
+                    const dependency = input.args
+                      .find((arg) => arg.includes("/merge_requests/"))
+                      ?.match(/\/merge_requests\/(\d+)(\/blocks(?:\?per_page=100)?)?$/);
+                    if (dependency) {
+                      const iid = Number(dependency[1]);
+                      if (!dependency[2]) {
+                        return TestSourceControlHost.processOutput(JSON.stringify({ id: iid }));
+                      }
+                      const edges = blockers.get(iid) ?? [];
+                      if (input.args.includes("POST")) {
+                        const parent = input.args
+                          .find((arg) => arg.startsWith("blocking_merge_request_id="))!
+                          .split("=")[1];
+                        const edge = {
+                          id: iid,
+                          blocking_merge_request: {
+                            web_url: `https://gitlab.example/group/repo/-/merge_requests/${parent}`,
+                          },
+                        };
+                        blockers.set(iid, [...edges, edge]);
+                        return TestSourceControlHost.processOutput(JSON.stringify(edge));
+                      }
+                      return TestSourceControlHost.processOutput(JSON.stringify(edges));
+                    }
                     if (input.args.includes("POST")) {
                       created = true;
                       return TestSourceControlHost.processOutput("{}");
@@ -7411,9 +7502,12 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
       expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
       expect(generated?.diffPatch).toContain("+feature");
       expect(generated?.diffPatch).not.toContain("second.txt");
-      expect(calls.find((call) => call.args.includes("POST"))?.args).toContain(
-        "target_branch=stack/second",
-      );
+      expect(
+        calls.find(
+          (call) =>
+            call.args.includes("POST") && call.args.includes("projects/:fullpath/merge_requests"),
+        )?.args,
+      ).toContain("target_branch=stack/second");
 
       const regenerated = yield* manager.generatePullRequestDescription({
         cwd,
@@ -7424,7 +7518,12 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
       expect(generated?.baseBranch).toBe("stack/second");
       expect(generated?.commitSummary.trim().split("\n")).toHaveLength(2);
       expect(generated?.diffPatch).not.toContain("second.txt");
-      expect(calls.filter((call) => call.args.includes("POST"))).toHaveLength(1);
+      expect(
+        calls.filter(
+          (call) =>
+            call.args.includes("POST") && call.args.includes("projects/:fullpath/merge_requests"),
+        ),
+      ).toHaveLength(1);
     }),
   );
 

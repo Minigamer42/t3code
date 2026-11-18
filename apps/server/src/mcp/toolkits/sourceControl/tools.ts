@@ -93,7 +93,7 @@ const regenerate = Tool.make("t3_git_regenerate_change_request", {
 const stack = Tool.make("t3_git_stack", {
   ...common,
   description:
-    "Maintain this thread's branch stack: adopt/edit ordered layers (`splitPoints` creates lower layers at commit boundaries, with `expectedHeadSha`; names follow repository policy), update locally, continue/abort a paused operation, or untrack. `includeLatestBase:true` includes the remote main ref; otherwise only restack layers. Update does not publish. After conflicts are resolved externally, use continue. Inspect t3_git_status first. Full-access/default only.",
+    "Maintain this thread's branch stack: adopt/edit ordered layers (`splitPoints` creates lower layers at commit boundaries, with `expectedHeadSha`; names follow repository policy), update branches locally, continue/abort a paused operation, or untrack. `includeLatestBase:true` includes the remote main ref; otherwise only restack layers. Save/update also sync existing GitLab MR dependencies, preserving manual blockers. Update never pushes or creates reviews. After conflicts are resolved externally, use continue. Inspect t3_git_status first. Full-access/default only.",
   parameters: GitStackInput,
   success: GitStackStatusResult,
 })

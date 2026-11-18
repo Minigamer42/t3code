@@ -227,6 +227,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Git MCP actions"
       expect(
         (yield* h.service.action({ ...scope, capabilities }, { action }).pipe(Effect.flip)).code,
       ).toBe("capability_denied");
+      expect(
+        (yield* h.service
+          .stack({ ...scope, capabilities: new Set(["worktree"]) }, { action: "update" })
+          .pipe(Effect.flip)).code,
+      ).toBe("capability_denied");
       expect(h.run).not.toHaveBeenCalled();
     }),
   );

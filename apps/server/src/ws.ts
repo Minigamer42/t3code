@@ -3217,7 +3217,7 @@ export const layerWsRpc = (
                   ),
             ),
             Effect.tap(() =>
-              input.action === "update" || input.action === "continue"
+              input.action !== "untrack" && input.action !== "abort"
                 ? refreshPushedPullRequests({ cwd: input.cwd }, { push: { status: "pushed" } })
                 : Effect.void,
             ),

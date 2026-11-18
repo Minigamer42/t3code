@@ -514,12 +514,17 @@ messages or regrouping commits is restricted to the current layer. Its parent is
 selecting a range cannot include commits from lower layers.
 
 **Update stack** incorporates remote branch updates and removes merged layers from tracking before
-restacking the remaining branches locally. It does not push, run post-push hooks, or change reviews.
+restacking the remaining branches locally. It does not push, run post-push hooks, or create reviews.
 Use the publishing actions when you are ready to update remote branches and reviews. Enable
 **Include latest base** to also bring in new changes from the base branch. A conflict pauses the operation in the checkout shown in the sidebar;
 resolve and stage its files, then choose **Continue**, or **Abort** to restore local branches.
 **Untrack** stops T3 maintenance without deleting branches
 and disables automatic tracking for those branches. Choose **Update stack** or save the hierarchy in **Edit layers** to enable it again.
+
+On GitLab, saving layers, updating the stack, and creating its MRs also synchronize merge request
+dependencies, including on a clean checkout. Each MR depends on its preceding layer's MR once both
+exist. Other manual blockers remain unless the new chain still enforces them; T3 preserves those
+requirements across later stack edits. Dependency synchronization requires GitLab Premium or Ultimate.
 
 Updating requires a clean working tree. Branches checked out in another worktree must be released
 before restacking; T3 does not change another checkout. Divergent remote changes stop the operation

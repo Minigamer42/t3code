@@ -8,6 +8,7 @@ import {
   unknownRemoteProvider as unknownHostProvider,
 } from "@t3tools/source-control-core/shared/definition";
 
+import * as GitLabDependencies from "./gitLabMergeRequestDependencies.ts";
 import * as GitLabCli from "./GitLabCli.ts";
 import * as GitLabChangeRequestTemplate from "./gitLabChangeRequestTemplate.ts";
 import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
@@ -168,6 +169,7 @@ export const discovery = {
 
 export const make = Effect.gen(function* () {
   const gitlab = yield* GitLabCli.GitLabCli;
+  const dependencies = yield* GitLabDependencies.make;
   const { git } = yield* SourceControlHost.SourceControlHost;
 
   const readLinkSubject = Effect.fn("GitLabSourceControlProvider.readLinkSubject")(function* (
@@ -289,6 +291,7 @@ export const make = Effect.gen(function* () {
         ),
       );
     }),
+    changeRequestDependencies: dependencies,
     retargetChangeRequest: Effect.fn("GitLabSourceControlProvider.retargetChangeRequest")(
       function (input) {
         return gitlab

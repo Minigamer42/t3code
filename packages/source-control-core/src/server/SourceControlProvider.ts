@@ -184,6 +184,28 @@ export class SourceControlProvider extends Context.Service<
       readonly context?: SourceControlProviderContext;
       readonly reference: string;
     }) => Effect.Effect<ChangeRequest, SourceControlProviderError>;
+    readonly changeRequestDependencies?: {
+      readonly list: (input: {
+        readonly cwd: string;
+        readonly reference: string;
+      }) => Effect.Effect<
+        ReadonlyArray<{ readonly id: string; readonly url: string | null }>,
+        SourceControlProviderError
+      >;
+      readonly add: (input: {
+        readonly cwd: string;
+        readonly reference: string;
+        readonly blockingReference: string;
+      }) => Effect.Effect<
+        { readonly id: string; readonly url: string | null },
+        SourceControlProviderError
+      >;
+      readonly remove: (input: {
+        readonly cwd: string;
+        readonly reference: string;
+        readonly id: string;
+      }) => Effect.Effect<void, SourceControlProviderError>;
+    };
     readonly retargetChangeRequest?: (input: {
       readonly cwd: string;
       readonly reference: string;

@@ -432,3 +432,96 @@ it.effect(
       ]);
     }),
 );
+
+it.effect("reads and updates MR blockers on the MR's host and target project", () =>
+  Effect.gen(function* () {
+    const commands: ReadonlyArray<string>[] = [];
+    const provider = yield* makeProvider({
+      execute: (input) => {
+        commands.push(input.args);
+        if (input.args.includes("projects/other%2Fparent/merge_requests/3"))
+          return Effect.succeed(processOutput(JSON.stringify({ id: 145 })));
+        const method = input.args[input.args.indexOf("--method") + 1];
+        return Effect.succeed(
+          processOutput(
+            method === "GET"
+              ? JSON.stringify([
+                  {
+                    id: 7,
+                    blocking_merge_request: {
+                      web_url: "https://git.example:8443/other/parent/-/merge_requests/3",
+                    },
+                  },
+                  { id: 8 },
+                ])
+              : method === "POST"
+                ? JSON.stringify({
+                    id: 9,
+                    blocking_merge_request: {
+                      web_url: "https://git.example:8443/other/parent/-/merge_requests/3",
+                    },
+                  })
+                : "",
+          ),
+        );
+      },
+    });
+    const api = provider.changeRequestDependencies!;
+    const reference = "https://git.example:8443/group/sub/target/-/merge_requests/42";
+    assert.deepStrictEqual(yield* api.list({ cwd: "/fork-checkout", reference }), [
+      { id: "7", url: "https://git.example:8443/other/parent/-/merge_requests/3" },
+      { id: "8", url: null },
+    ]);
+    const edge = yield* api.add({
+      cwd: "/fork-checkout",
+      reference,
+      blockingReference: "https://git.example:8443/other/parent/-/merge_requests/3",
+    });
+    yield* api.remove({ cwd: "/fork-checkout", reference, id: edge.id });
+    assert.deepStrictEqual(commands, [
+      [
+        "api",
+        "--hostname",
+        "git.example:8443",
+        "--method",
+        "GET",
+        "projects/group%2Fsub%2Ftarget/merge_requests/42/blocks?per_page=100",
+      ],
+      [
+        "api",
+        "--hostname",
+        "git.example:8443",
+        "--method",
+        "GET",
+        "projects/other%2Fparent/merge_requests/3",
+      ],
+      [
+        "api",
+        "--hostname",
+        "git.example:8443",
+        "--method",
+        "POST",
+        "projects/group%2Fsub%2Ftarget/merge_requests/42/blocks",
+        "--field",
+        "blocking_merge_request_id=145",
+      ],
+      [
+        "api",
+        "--hostname",
+        "git.example:8443",
+        "--method",
+        "DELETE",
+        "projects/group%2Fsub%2Ftarget/merge_requests/42/blocks/9",
+      ],
+    ]);
+    const failed = yield* api
+      .add({
+        cwd: "/fork-checkout",
+        reference,
+        blockingReference: "https://another.example/other/parent/-/merge_requests/3",
+      })
+      .pipe(Effect.flip);
+    assert.include(failed.message, "same GitLab host");
+    assert.equal(commands.length, 4);
+  }),
+);

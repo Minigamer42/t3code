@@ -257,7 +257,11 @@ export const make = Effect.gen(function* () {
       );
     }),
     stack: Effect.fn("SourceControlMcpService.stack")(function* (scope, input) {
-      const { thread, cwd } = yield* workspace(scope, true);
+      const { thread, cwd } = yield* workspace(
+        scope,
+        true,
+        input.action !== "abort" && input.action !== "untrack",
+      );
       return yield* after(
         cwd,
         thread,
@@ -276,6 +280,8 @@ export const make = Effect.gen(function* () {
                 Effect.provideService(Orchestrator.OrchestratorV2, engine),
                 Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
               );
+            if (input.action !== "untrack" && input.action !== "abort")
+              yield* pullRequests.refreshAfterTurn(thread.projectId, { pushed: true });
             return stack;
           }),
         ),
