@@ -9,6 +9,7 @@ import {
   type GitStackStatusResult,
   type GitStackManageInput,
 } from "@t3tools/contracts";
+import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
 const LayerState = Schema.Struct({
@@ -178,6 +179,7 @@ export const make = Effect.gen(function* () {
     if (!(yield* fs.exists(filename))) return null;
     return yield* fs.readFileString(filename).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(schema))),
+      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
       Effect.mapError((cause) =>
         failure(cwd, "Stack metadata could not be read. It has been left unchanged.", cause),
       ),
@@ -198,11 +200,90 @@ export const make = Effect.gen(function* () {
   });
   const paths = Effect.fn("BranchStack.paths")(function* (cwd: string) {
     const dir = yield* common(cwd);
+    const worktreeDir = yield* text(cwd, ["rev-parse", "--absolute-git-dir"]);
+    const operations = path.join(dir, "t3-stack-operations");
+    const key = worktreeDir === dir ? "root" : `worktree-${path.basename(worktreeDir)}`;
     return {
       state: path.join(dir, "t3-branch-stacks.json"),
-      journal: path.join(dir, "t3-stack-operation.json"),
+      journal: path.join(operations, `${key}.json`),
+      legacyJournal: path.join(dir, "t3-stack-operation.json"),
+      operations,
       dir,
     };
+  });
+  const readOperations = Effect.fn("BranchStack.readOperations")(function* (cwd: string) {
+    const files = yield* paths(cwd);
+    const names = (yield* fs.exists(files.operations))
+      ? yield* fs.readDirectory(files.operations)
+      : [];
+    const records = yield* Effect.forEach(
+      [
+        files.legacyJournal,
+        ...names
+          .filter((name) => name.endsWith(".json"))
+          .map((name) => path.join(files.operations, name)),
+      ],
+      (filename) => read(cwd, filename, Journal),
+      { concurrency: 4 },
+    );
+    return records.filter((record) => record !== null);
+  });
+  const readOperation = Effect.fn("BranchStack.readOperation")(function* (cwd: string) {
+    const files = yield* paths(cwd);
+    const own = yield* read(cwd, files.journal, Journal);
+    if (own) return own;
+    const legacy = yield* read(cwd, files.legacyJournal, Journal);
+    const root = yield* text(cwd, ["rev-parse", "--show-toplevel"]);
+    return legacy?.cwd === root ? legacy : null;
+  });
+  const writeOperation = Effect.fn("BranchStack.writeOperation")(function* (
+    cwd: string,
+    operation: Operation,
+  ) {
+    const files = yield* paths(cwd);
+    yield* withWorkspaceLease(
+      files.state,
+      Effect.gen(function* () {
+        yield* fs.makeDirectory(files.operations, { recursive: true });
+        yield* write(cwd, files.journal, operation);
+        const legacy = yield* read(cwd, files.legacyJournal, Journal);
+        if (legacy?.cwd === operation.cwd) yield* fs.remove(files.legacyJournal);
+      }),
+    );
+  });
+  const removeOperation = Effect.fn("BranchStack.removeOperation")(function* (cwd: string) {
+    const files = yield* paths(cwd);
+    const root = yield* text(cwd, ["rev-parse", "--show-toplevel"]);
+    yield* withWorkspaceLease(
+      files.state,
+      Effect.gen(function* () {
+        if (yield* fs.exists(files.journal)) yield* fs.remove(files.journal);
+        const legacy = yield* read(cwd, files.legacyJournal, Journal);
+        if (legacy?.cwd === root) yield* fs.remove(files.legacyJournal);
+      }),
+    );
+  });
+  const assertUnclaimed = Effect.fn("BranchStack.assertUnclaimed")(function* (
+    cwd: string,
+    branches: readonly string[],
+    base?: string,
+  ) {
+    const root = yield* text(cwd, ["rev-parse", "--show-toplevel"]);
+    for (const operation of yield* readOperations(cwd)) {
+      if (operation.cwd === root) continue;
+      const reserved = new Set([
+        ...Object.keys(operation.originalHeads),
+        ...operation.stack.layers.map((layer) => layer.branch),
+      ]);
+      if (
+        branches.some((branch) => reserved.has(branch) || branch === operation.stack.base) ||
+        (base && reserved.has(base))
+      )
+        return yield* failure(
+          cwd,
+          `These branches are reserved by a stack operation in ${operation.cwd}. Continue or abort it there first.`,
+        );
+    }
   });
   const head = (cwd: string, branch: string) =>
     text(cwd, ["rev-parse", "--verify", `refs/heads/${branch}^{commit}`]);
@@ -416,7 +497,14 @@ export const make = Effect.gen(function* () {
       const branchResult = yield* git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], true);
       const branch = branchResult.stdout.trim();
       const saved = (yield* read(cwd, files.state, SavedState)) ?? [];
-      const journal = yield* read(cwd, files.journal, Journal);
+      const ownJournal = yield* readOperation(cwd);
+      const journal =
+        ownJournal ??
+        (yield* readOperations(cwd)).find(
+          (operation) =>
+            operation.stack.layers.some((layer) => layer.branch === branch) ||
+            Object.hasOwn(operation.originalHeads, branch),
+        );
       const active =
         journal?.stack ??
         saved.find((stack) => stack.layers.some((layer) => layer.branch === branch));
@@ -561,11 +649,23 @@ export const make = Effect.gen(function* () {
     oldBranches: readonly string[],
   ) {
     const files = yield* paths(cwd);
-    const saved = (yield* read(cwd, files.state, SavedState)) ?? [];
-    yield* write(cwd, files.state, [
-      ...saved.filter((item) => !item.layers.some((layer) => oldBranches.includes(layer.branch))),
-      stack,
-    ]);
+    yield* withWorkspaceLease(
+      files.state,
+      Effect.gen(function* () {
+        yield* assertUnclaimed(
+          cwd,
+          [...oldBranches, ...stack.layers.map((layer) => layer.branch)],
+          stack.base,
+        );
+        const saved = (yield* read(cwd, files.state, SavedState)) ?? [];
+        yield* write(cwd, files.state, [
+          ...saved.filter(
+            (item) => !item.layers.some((layer) => oldBranches.includes(layer.branch)),
+          ),
+          stack,
+        ]);
+      }),
+    );
   });
   const remoteHeads = Effect.fn("BranchStack.remoteHeads")(function* (
     cwd: string,
@@ -648,13 +748,18 @@ export const make = Effect.gen(function* () {
     );
   });
   const assertIdle = Effect.fn("BranchStack.assertIdle")(
-    function* (cwd: string, checkGitOperation = true) {
-      const files = yield* paths(cwd);
-      if (yield* fs.exists(files.journal))
+    function* (cwd: string, checkGitOperation = true, branches?: readonly string[], base?: string) {
+      if (yield* readOperation(cwd))
         return yield* failure(
           cwd,
           "A stack operation is paused. Continue or abort it from the sidebar first.",
         );
+      const current = (yield* git(
+        cwd,
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        true,
+      )).stdout.trim();
+      yield* assertUnclaimed(cwd, branches ?? (current ? [current] : []), base);
       for (const marker of checkGitOperation
         ? ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD"]
         : []) {
@@ -668,7 +773,13 @@ export const make = Effect.gen(function* () {
           return yield* failure(cwd, "Finish the current Git operation before updating the stack.");
       }
     },
-    (effect, cwd: string, _checkGitOperation?: boolean) =>
+    (
+      effect,
+      cwd: string,
+      _checkGitOperation?: boolean,
+      _branches?: readonly string[],
+      _base?: string,
+    ) =>
       effect.pipe(
         Effect.mapError((cause) =>
           isManagerError(cause)
@@ -684,7 +795,6 @@ export const make = Effect.gen(function* () {
     afterPush?: AfterPush,
     onProgress?: ProgressReporter,
   ) {
-    const files = yield* paths(cwd);
     let journal = operation;
     const oldBranches = Object.keys(journal.originalHeads);
     const progress = reportSteps(onProgress, stackProgress(journal));
@@ -705,7 +815,7 @@ export const make = Effect.gen(function* () {
           cwd,
           `Branch ${layer.branch} changed during the stack operation. Recovery metadata has been kept.`,
         );
-      yield* write(cwd, files.journal, journal);
+      yield* writeOperation(cwd, journal);
       const remoteHead = journal.expectedRemoteHeads[layer.branch];
       if (remoteHead && remoteHead !== current && (yield* isAncestor(cwd, current, remoteHead))) {
         yield* git(cwd, ["checkout", "--quiet", layer.branch]);
@@ -713,7 +823,7 @@ export const make = Effect.gen(function* () {
         journal = Object.assign({}, journal, {
           installedHeads: Object.assign({}, journal.installedHeads, { [layer.branch]: remoteHead }),
         });
-        yield* write(cwd, files.journal, journal);
+        yield* writeOperation(cwd, journal);
       }
       const parentHead =
         layer.parentHead === parent
@@ -755,7 +865,7 @@ export const make = Effect.gen(function* () {
           ),
         },
       });
-      yield* write(cwd, files.journal, journal);
+      yield* writeOperation(cwd, journal);
       yield* step(
         `${layer.branch}:rebase`,
         parentHead !== parent ? "completed" : "skipped",
@@ -775,7 +885,7 @@ export const make = Effect.gen(function* () {
         },
         oldBranches,
       );
-      yield* fs.remove(files.journal);
+      yield* removeOperation(cwd);
       return yield* inspect(cwd);
     }
     if (journal.phase !== "hooks") {
@@ -789,7 +899,7 @@ export const make = Effect.gen(function* () {
           ),
         hookIndex: journal.hookIndex ?? 0,
       });
-      yield* write(cwd, files.journal, journal);
+      yield* writeOperation(cwd, journal);
       yield* git(cwd, ["checkout", "--quiet", journal.originalBranch]);
       if (report) yield* report("Pushing stack...");
       yield* progress("Pushing stack...", (steps) =>
@@ -836,7 +946,7 @@ export const make = Effect.gen(function* () {
         ),
       );
       journal = Object.assign({}, journal, { phase: "hooks" as const });
-      yield* write(cwd, files.journal, journal);
+      yield* writeOperation(cwd, journal);
     }
     const hooks = Effect.gen(function* () {
       const branches = journal.pushedBranches ?? [];
@@ -853,7 +963,7 @@ export const make = Effect.gen(function* () {
         if (afterPush) yield* afterPush(journal.hookCwd ?? cwd, branch);
         journal = Object.assign({}, journal, { hookIndex: index + 1 });
         yield* step(`${branch}:hooks`, "completed", `Finished ${branch}`);
-        yield* write(cwd, files.journal, journal);
+        yield* writeOperation(cwd, journal);
       }
       yield* assertClean(cwd);
       yield* git(cwd, ["checkout", "--quiet", journal.originalBranch]);
@@ -877,17 +987,11 @@ export const make = Effect.gen(function* () {
       })),
     };
     yield* saveStack(cwd, stack, oldBranches);
-    yield* fs
-      .remove(files.journal)
-      .pipe(
-        Effect.mapError((cause) =>
-          failure(
-            cwd,
-            "The stack was pushed, but its recovery journal could not be removed.",
-            cause,
-          ),
-        ),
-      );
+    yield* removeOperation(cwd).pipe(
+      Effect.mapError((cause) =>
+        failure(cwd, "The stack was pushed, but its recovery journal could not be removed.", cause),
+      ),
+    );
     return yield* inspect(cwd);
   });
   const update = Effect.fn("BranchStack.update")(
@@ -1043,9 +1147,20 @@ export const make = Effect.gen(function* () {
       };
       const stamp = yield* text(cwd, ["rev-parse", "HEAD"]);
       for (const [index, sha] of Object.values(originalHeads).entries())
-        yield* git(cwd, ["update-ref", `refs/t3/stack-backup/${stamp}/${index}`, sha]);
+        yield* git(cwd, [
+          "update-ref",
+          `refs/t3/stack-backup/${stamp}/${path.basename(files.journal, ".json")}/${index}`,
+          sha,
+        ]);
       const encoded = yield* encodeJson(journal);
-      yield* fs.writeFileString(files.journal, encoded, { flag: "wx", mode: 0o600 });
+      yield* withWorkspaceLease(
+        files.state,
+        Effect.gen(function* () {
+          yield* assertIdle(cwd, true, Object.keys(originalHeads), saved.base);
+          yield* fs.makeDirectory(files.operations, { recursive: true });
+          yield* fs.writeFileString(files.journal, encoded, { flag: "wx", mode: 0o600 });
+        }),
+      );
       return yield* run(cwd, journal, options.report, options.afterPush, options.onProgress);
     },
     (effect, cwd: string, _options?: UpdateOptions) =>
@@ -1076,9 +1191,12 @@ export const make = Effect.gen(function* () {
         if (current !== input.expectedBranch)
           return yield* failure(cwd, "The checkout changed. Refresh the stack before retrying.");
       }
-      const pending = yield* read(cwd, files.journal, Journal);
+      const pending = yield* readOperation(cwd);
       if (input.action === "continue" || input.action === "abort") {
-        if (!pending) return yield* failure(cwd, "There is no paused stack operation.");
+        if (!pending) {
+          yield* assertIdle(cwd, false);
+          return yield* failure(cwd, "There is no paused stack operation.");
+        }
         if (pending.cwd !== (yield* text(cwd, ["rev-parse", "--show-toplevel"])))
           return yield* failure(cwd, `Resume this stack operation from ${pending.cwd}.`);
         if (input.action === "abort") {
@@ -1104,7 +1222,7 @@ export const make = Effect.gen(function* () {
             else yield* git(cwd, ["update-ref", `refs/heads/${branch}`, sha, actual]);
           }
           yield* git(cwd, ["checkout", "--quiet", pending.originalBranch]);
-          yield* fs.remove(files.journal);
+          yield* removeOperation(cwd);
           return yield* inspect(cwd);
         }
         let resumed = pending;
@@ -1174,7 +1292,7 @@ export const make = Effect.gen(function* () {
                 ),
               },
             };
-            yield* write(cwd, files.journal, resumed);
+            yield* writeOperation(cwd, resumed);
           }
         }
         return yield* run(cwd, resumed, undefined, afterPush, onProgress);
@@ -1189,18 +1307,33 @@ export const make = Effect.gen(function* () {
         });
       const status = yield* inspect(cwd);
       if (input.action === "untrack") {
+        yield* assertUnclaimed(
+          cwd,
+          status.layers.map((layer) => layer.branch),
+          status.base,
+        );
         for (const layer of status.layers)
           yield* git(cwd, ["config", `branch.${layer.branch}.t3-stack-disabled`, "true"]);
-        const all = (yield* read(cwd, files.state, SavedState)) ?? [];
-        yield* write(
-          cwd,
+        yield* withWorkspaceLease(
           files.state,
-          all.filter(
-            (stack) =>
-              !stack.layers.some((layer) =>
-                status.layers.some((item) => item.branch === layer.branch),
+          Effect.gen(function* () {
+            yield* assertUnclaimed(
+              cwd,
+              status.layers.map((layer) => layer.branch),
+              status.base,
+            );
+            const all = (yield* read(cwd, files.state, SavedState)) ?? [];
+            yield* write(
+              cwd,
+              files.state,
+              all.filter(
+                (stack) =>
+                  !stack.layers.some((layer) =>
+                    status.layers.some((item) => item.branch === layer.branch),
+                  ),
               ),
-          ),
+            );
+          }),
         );
         return yield* inspect(cwd);
       }
@@ -1221,6 +1354,11 @@ export const make = Effect.gen(function* () {
           cwd,
           "Choose distinct stack branches in order, excluding the base branch.",
         );
+      yield* assertUnclaimed(
+        cwd,
+        [...status.layers.map((layer) => layer.branch), ...branches],
+        base,
+      );
       for (const branch of [base, ...branches]) {
         if ((yield* git(cwd, ["check-ref-format", "--branch", branch], true)).exitCode !== 0)
           return yield* failure(cwd, "A stack branch name is invalid.");

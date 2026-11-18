@@ -234,6 +234,9 @@ export function BranchStackControl({
           <>
             <p className="break-words text-xs text-warning">
               Stack update paused at {status.operation.branch} ({status.operation.phase}).
+              {status.operation.cwd !== cwd
+                ? ` Continue or abort it from ${status.operation.cwd}.`
+                : null}
               {status.operation.phase === "rebase"
                 ? ` Resolve and stage conflicts in ${status.operation.cwd} before continuing.`
                 : status.operation.phase === "hooks"
@@ -241,13 +244,17 @@ export function BranchStackControl({
                   : " Continue retries publishing. Abort restores local branches; completed remote pushes remain."}
             </p>
             <div className="flex gap-2">
-              <Button size="xs" disabled={!permitted || busy} onClick={() => run("continue")}>
+              <Button
+                size="xs"
+                disabled={!permitted || busy || status.operation.cwd !== cwd}
+                onClick={() => run("continue")}
+              >
                 Continue
               </Button>
               <Button
                 size="xs"
                 variant="outline"
-                disabled={!permitted || busy}
+                disabled={!permitted || busy || status.operation.cwd !== cwd}
                 onClick={() => run("abort")}
               >
                 Abort

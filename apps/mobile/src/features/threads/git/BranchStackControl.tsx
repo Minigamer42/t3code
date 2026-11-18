@@ -153,6 +153,9 @@ export function BranchStackControl({
             <>
               <Text className="text-warning-foreground">
                 Stack update paused at {status.operation.branch} ({status.operation.phase}).
+                {status.operation.cwd !== cwd
+                  ? ` Continue or abort it from ${status.operation.cwd}.`
+                  : null}
                 {status.operation.phase === "rebase"
                   ? ` Resolve and stage conflicts in ${status.operation.cwd}, then continue.`
                   : status.operation.phase === "hooks"
@@ -163,13 +166,13 @@ export function BranchStackControl({
                 <Button
                   size="compact"
                   label="Continue"
-                  disabled={busy || !permitted}
+                  disabled={busy || !permitted || status.operation.cwd !== cwd}
                   onPress={() => run("continue")}
                 />
                 <Button
                   size="compact"
                   label="Abort"
-                  disabled={busy || !permitted}
+                  disabled={busy || !permitted || status.operation.cwd !== cwd}
                   onPress={() => run("abort")}
                 />
               </View>

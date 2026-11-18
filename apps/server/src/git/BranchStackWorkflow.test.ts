@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -211,6 +213,142 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
       expect(yield* f.git(["branch", "--list", "split-layer"])).toBe("");
     }).pipe(Effect.scoped),
   );
+  it.effect.each(["new", "legacy", "legacy-linked", "abort"] as const)(
+    "keeps independent worktree recovery journals separate: %s",
+    (mode) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const process = yield* VcsProcess.VcsProcess;
+        const other = f.path.join(f.root, "independent");
+        yield* f.git(["worktree", "add", "-b", "independent", other, "main"]);
+        const otherGit = (args: readonly string[]) =>
+          process.run({ command: "git", operation: "test.stack", cwd: other, args });
+        yield* f.fs.writeFileString(f.path.join(other, "independent.txt"), "independent\n");
+        yield* otherGit(["add", "."]);
+        yield* otherGit(["commit", "-m", "Independent change"]);
+        yield* f.adopt;
+        yield* f.commit("first-update.txt", "first update\n");
+        const stop = () =>
+          Effect.fail(
+            new GitManagerError({ cwd: f.cwd, operation: "test", detail: "Hooks stopped" }),
+          );
+        yield* f.stacks.update(f.cwd, { publishThrough: "b", afterPush: stop }).pipe(Effect.flip);
+        expect((yield* f.stacks.inspect(other)).operation).toBeNull();
+        expect((yield* f.stacks.inspect(other)).layers.map((layer) => layer.branch)).toEqual([
+          "independent",
+        ]);
+        if (mode === "legacy")
+          yield* f.fs.rename(
+            f.path.join(f.cwd, ".git/t3-stack-operations/root.json"),
+            f.path.join(f.cwd, ".git/t3-stack-operation.json"),
+          );
+        const resumed = yield* make;
+        yield* resumed.manage({
+          cwd: other,
+          action: "adopt",
+          base: "main",
+          branches: ["independent"],
+        });
+        yield* resumed
+          .update(other, { publishThrough: "independent", afterPush: stop })
+          .pipe(Effect.flip);
+        if (mode === "legacy-linked") {
+          const admin = (yield* otherGit(["rev-parse", "--absolute-git-dir"])).stdout.trim();
+          yield* f.fs.rename(
+            f.path.join(f.cwd, `.git/t3-stack-operations/worktree-${f.path.basename(admin)}.json`),
+            f.path.join(f.cwd, ".git/t3-stack-operation.json"),
+          );
+        }
+        expect((yield* resumed.inspect(f.cwd)).operation?.branch).toBe("b");
+        expect((yield* resumed.inspect(other)).operation?.branch).toBe("independent");
+        yield* resumed.manage(
+          { cwd: f.cwd, action: mode === "abort" ? "abort" : "continue" },
+          [],
+          () => Effect.void,
+        );
+        expect((yield* resumed.inspect(f.cwd)).operation).toBeNull();
+        expect((yield* resumed.inspect(other)).operation?.branch).toBe("independent");
+        if (mode === "legacy-linked")
+          expect(yield* f.fs.exists(f.path.join(f.cwd, ".git/t3-stack-operation.json"))).toBe(true);
+        yield* resumed.manage({ cwd: other, action: "continue" }, [], () => Effect.void);
+        expect((yield* resumed.inspect(other)).operation).toBeNull();
+        expect((yield* resumed.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual([
+          "a",
+          "b",
+          "c",
+        ]);
+        expect(yield* f.fs.exists(f.path.join(f.cwd, ".git/t3-stack-operation.json"))).toBe(false);
+      }).pipe(Effect.scoped),
+  );
+  it.effect("protects overlapping branches while a different worktree owns recovery", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const other = f.path.join(f.root, "lower");
+      yield* f.git(["worktree", "add", other, "a"]);
+      yield* f.adopt;
+      yield* f.commit("overlap.txt", "overlap\n");
+      yield* f.stacks
+        .update(f.cwd, {
+          publishThrough: "b",
+          afterPush: () =>
+            Effect.fail(new GitManagerError({ cwd: f.cwd, operation: "test", detail: "Stopped" })),
+        })
+        .pipe(Effect.flip);
+      const before = yield* f.git(["show-ref"]);
+      const failure = yield* f.stacks.update(other).pipe(Effect.flip);
+      expect(failure.message).toContain(f.cwd);
+      expect(yield* f.git(["show-ref"])).toBe(before);
+      expect((yield* f.stacks.inspect(other)).operation?.cwd).toBe(f.cwd);
+      yield* f.stacks.manage({ cwd: f.cwd, action: "abort" });
+      expect((yield* f.stacks.inspect(other)).operation).toBeNull();
+    }).pipe(Effect.scoped),
+  );
+  it.effect(
+    "allows independent operations to run concurrently without losing shared stack metadata",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const process = yield* VcsProcess.VcsProcess;
+        const other = f.path.join(f.root, "parallel");
+        yield* f.git(["worktree", "add", "-b", "parallel", other, "main"]);
+        const otherGit = (args: readonly string[]) =>
+          process.run({ command: "git", operation: "test.stack", cwd: other, args });
+        yield* f.fs.writeFileString(f.path.join(other, "parallel.txt"), "parallel\n");
+        yield* otherGit(["add", "."]);
+        yield* otherGit(["commit", "-m", "Parallel change"]);
+        yield* f.adopt;
+        yield* f.stacks.manage({
+          cwd: other,
+          action: "adopt",
+          base: "main",
+          branches: ["parallel"],
+        });
+        yield* f.commit("concurrent.txt", "concurrent\n");
+        const started = yield* Deferred.make<void>();
+        const finish = yield* Deferred.make<void>();
+        const first = yield* f.stacks
+          .update(f.cwd, {
+            publishThrough: "b",
+            afterPush: () =>
+              Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(finish))),
+          })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(started).pipe(Effect.raceFirst(Fiber.join(first)));
+        yield* f.stacks.update(other);
+        yield* Deferred.succeed(finish, undefined);
+        yield* Fiber.join(first);
+        expect((yield* f.stacks.inspect(f.cwd)).layers.map((layer) => layer.branch)).toEqual([
+          "a",
+          "b",
+          "c",
+        ]);
+        expect((yield* f.stacks.inspect(other)).layers.map((layer) => layer.branch)).toEqual([
+          "parallel",
+        ]);
+        expect((yield* f.stacks.inspect(other)).managed).toBe(true);
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("updates the stack locally without publishing or running post-push hooks", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
@@ -640,7 +778,7 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         }
       }
       const currentC = yield* f.git(["rev-parse", "c"]);
-      const journalPath = f.path.join(f.cwd, ".git", "t3-stack-operation.json");
+      const journalPath = f.path.join(f.cwd, ".git", "t3-stack-operations", "root.json");
       const beforeJournal = yield* f.fs.readFileString(journalPath);
       const operation = resumed.manage({
         cwd: f.cwd,
