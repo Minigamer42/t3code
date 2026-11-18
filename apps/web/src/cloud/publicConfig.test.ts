@@ -21,6 +21,9 @@ describe("hasCloudPublicConfig", () => {
       vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", `pk_live_${btoa("clerk.example.com$")}`);
       vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "t3-relay");
       vi.stubEnv("VITE_T3CODE_RELAY_URL", "https://relay.example.test");
+      vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "latest");
+      vi.stubEnv("VITE_HTTP_URL", "");
+      vi.stubEnv("VITE_WS_URL", "");
     });
 
     it.each(["https://example.com", "https://nightly.app.example.com:443"])(
@@ -32,26 +35,31 @@ describe("hasCloudPublicConfig", () => {
       },
     );
 
-    it.each(["http://localhost:3773", "https://machine.example.ts.net"])(
-      "disables production auth on private browser origins: %s",
-      (origin) => {
-        vi.stubGlobal("window", { location: new URL(origin) });
+    it.each([
+      "http://localhost:3773",
+      "http://192.168.1.50:3773",
+      "https://machine.example.ts.net",
+      "https://my-server.example.net",
+    ])("enables native production auth in a locally served app: %s", (origin) => {
+      vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "");
+      vi.stubGlobal("window", { location: new URL(origin) });
 
-        expect(hasCloudPublicConfig()).toBe(false);
-      },
-    );
+      expect(hasCloudPublicConfig()).toBe(true);
+    });
 
-    it.each(["http://app.example.com:443", "https://app.example.com:3773"])(
-      "rejects unsupported schemes and ports even on the configured domain: %s",
-      (origin) => {
-        vi.stubGlobal("window", { location: new URL(origin) });
+    it.each([
+      "http://localhost:3773",
+      "https://machine.example.ts.net",
+      "http://app.example.com:443",
+      "https://app.example.com:3773",
+    ])("rejects unsupported origins in the hosted browser app: %s", (origin) => {
+      vi.stubGlobal("window", { location: new URL(origin) });
 
-        expect(hasCloudPublicConfig()).toBe(false);
-      },
-    );
+      expect(hasCloudPublicConfig()).toBe(false);
+    });
 
     it.each(["https://notexample.com", "https://example.com.evil.test"])(
-      "rejects domain lookalikes: %s",
+      "rejects domain lookalikes in the hosted browser app: %s",
       (origin) => {
         vi.stubGlobal("window", { location: new URL(origin) });
 

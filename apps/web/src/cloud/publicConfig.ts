@@ -5,6 +5,8 @@ import {
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Schema from "effect/Schema";
 
+import { isHostedStaticApp } from "../hostedPairing";
+
 export class CloudPublicConfigMissingError extends Schema.TaggedError<CloudPublicConfigMissingError>()(
   "CloudPublicConfigMissingError",
   {
@@ -92,12 +94,17 @@ export function hasCloudPublicConfig(): boolean {
   }
 
   try {
+    const { hostname, protocol, port } = window.location;
+    // Locally served apps authenticate through the server's native Clerk proxy.
+    if (!isHostedStaticApp() && (protocol === "http:" || protocol === "https:")) {
+      return true;
+    }
+
     // Custom Frontend API hosts use clerk.<production domain>.
     const domain = clerkFrontendApiHostnameFromPublishableKey(config.clerkPublishableKey).replace(
       /^clerk\./u,
       "",
     );
-    const { hostname, protocol, port } = window.location;
     return (
       protocol === "https:" &&
       port === "" &&
