@@ -53,7 +53,8 @@ export function BranchStackControl({
   }, [workflowState, workflowStartedAt, refreshStack]);
   const status = query.data;
   const run = (action: GitStackManageInput["action"]) => {
-    if (action !== "edit" && action !== "adopt") onStart();
+    setAdopting(false);
+    onStart();
     void manage({
       environmentId,
       input: {
@@ -72,10 +73,7 @@ export function BranchStackControl({
         ...(action === "update" ? { includeLatestBase } : {}),
       },
     }).then((result) => {
-      if (result._tag === "Success") {
-        setAdopting(false);
-        query.refresh();
-      }
+      if (result._tag === "Success") query.refresh();
     });
   };
   if (
