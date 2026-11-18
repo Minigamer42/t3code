@@ -450,6 +450,7 @@ it.effect("reads and updates MR blockers on the MR's host and target project", (
                     id: 7,
                     blocking_merge_request: {
                       web_url: "https://git.example:8443/other/parent/-/merge_requests/3",
+                      state: "merged",
                     },
                   },
                   { id: 8 },
@@ -469,7 +470,7 @@ it.effect("reads and updates MR blockers on the MR's host and target project", (
     const api = provider.changeRequestDependencies!;
     const reference = "https://git.example:8443/group/sub/target/-/merge_requests/42";
     assert.deepStrictEqual(yield* api.list({ cwd: "/fork-checkout", reference }), [
-      { id: "7", url: "https://git.example:8443/other/parent/-/merge_requests/3" },
+      { id: "7", url: "https://git.example:8443/other/parent/-/merge_requests/3", state: "merged" },
       { id: "8", url: null },
     ]);
     const edge = yield* api.add({

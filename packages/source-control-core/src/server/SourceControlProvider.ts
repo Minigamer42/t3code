@@ -189,7 +189,11 @@ export class SourceControlProvider extends Context.Service<
         readonly cwd: string;
         readonly reference: string;
       }) => Effect.Effect<
-        ReadonlyArray<{ readonly id: string; readonly url: string | null }>,
+        ReadonlyArray<{
+          readonly id: string;
+          readonly url: string | null;
+          readonly state?: ChangeRequestState;
+        }>,
         SourceControlProviderError
       >;
       readonly add: (input: {
@@ -197,7 +201,7 @@ export class SourceControlProvider extends Context.Service<
         readonly reference: string;
         readonly blockingReference: string;
       }) => Effect.Effect<
-        { readonly id: string; readonly url: string | null },
+        { readonly id: string; readonly url: string | null; readonly state?: ChangeRequestState },
         SourceControlProviderError
       >;
       readonly remove: (input: {

@@ -19,7 +19,7 @@ const url = (id: string) => `https://gitlab.example/acme/app/-/merge_requests/${
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-mr-dependencies-" });
-  const edges = new Map<string, { id: string; url: string | null }[]>();
+  const edges = new Map<string, { id: string; url: string | null; state?: "open" | "merged" }[]>();
   const changes: string[] = [];
   let sequence = 100;
   let failAdd = false;
@@ -109,6 +109,34 @@ const fixture = Effect.gen(function* () {
   };
 });
 it.layer(NodeServices.layer)("stack MR dependencies", (it) => {
+  it.effect("retains merged dependencies when their layers are kept, removed, or redundant", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      yield* service.sync({ cwd: f.cwd, stack: f.stack(["a", "b", "c"]) });
+      const merged = { ...f.edges.get(url("c"))![0]!, state: "merged" as const };
+      f.edges.set(url("c"), [merged]);
+      const stack = f.stack(["a", "b", "c"]);
+      yield* service.sync({
+        cwd: f.cwd,
+        stack: {
+          ...stack,
+          layers: stack.layers.map((layer) =>
+            layer.branch === "b"
+              ? { ...layer, pullRequest: { ...layer.pullRequest!, state: "merged" as const } }
+              : layer,
+          ),
+        },
+      });
+      expect(f.edges.get(url("c"))).toContainEqual(merged);
+      yield* service.sync({ cwd: f.cwd, stack: f.stack(["a", "c"]) });
+      expect(f.edges.get(url("c"))).toContainEqual(merged);
+      const manual = { id: "merged-manual", url: url("a"), state: "merged" as const };
+      f.edges.set(url("c"), [manual]);
+      yield* service.sync({ cwd: f.cwd, stack: f.stack(["a", "b", "c"]) });
+      expect(f.edges.get(url("c"))).toContainEqual(manual);
+    }).pipe(Effect.scoped),
+  );
   it.effect(
     "inserts an intermediate layer while preserving unrelated and hidden manual blockers",
     () =>

@@ -103,16 +103,20 @@ export const make = Effect.gen(function* () {
           });
           const byBranch = new Map(stack.layers.map((layer) => [layer.branch, layer.pullRequest]));
           if (input.baseReview) byBranch.set(stack.base, input.baseReview);
+          const merged = new Set(
+            [...byBranch.values()].flatMap((review) =>
+              review?.state === "merged" ? [keyOf(review.url)] : [],
+            ),
+          );
+          const isMerged = (edge: Edge) =>
+            edge.state === "merged" || (edge.url !== null && merged.has(keyOf(edge.url)));
           const desired = new Map<string, string | null>();
           for (const layer of stack.layers) {
             if (layer.pullRequest?.state !== "open") continue;
             const parent = byBranch.get(layer.parent);
             if (byBranch.has(layer.parent) && !parent) continue;
             if (!byBranch.has(layer.parent) && !stack.baseIsDefault) continue;
-            desired.set(
-              layer.pullRequest.url,
-              parent && parent.state !== "merged" ? parent.url : null,
-            );
+            desired.set(layer.pullRequest.url, parent?.url ?? null);
           }
           if (
             ![...desired.values()].some(Boolean) &&
@@ -201,7 +205,8 @@ export const make = Effect.gen(function* () {
           for (const [child, parent] of desired) {
             const key = keyOf(child);
             for (const edge of records.get(key)!.edges) {
-              if (!edge.url || (parent && keyOf(edge.url) === keyOf(parent))) continue;
+              if (!edge.url || isMerged(edge) || (parent && keyOf(edge.url) === keyOf(parent)))
+                continue;
               if (
                 ownership.some(
                   (item) =>
@@ -233,6 +238,7 @@ export const make = Effect.gen(function* () {
             child: string,
             edge: Edge,
           ) {
+            if (isMerged(edge)) return;
             yield* api.remove({ cwd, reference: child, id: edge.id });
             const record = records.get(keyOf(child))!;
             records.set(keyOf(child), {
@@ -316,6 +322,7 @@ export const make = Effect.gen(function* () {
               if (
                 parent &&
                 edge.url &&
+                !isMerged(edge) &&
                 keyOf(edge.url) !== keyOf(parent) &&
                 reachable(graph(), keyOf(parent), keyOf(edge.url))
               ) {

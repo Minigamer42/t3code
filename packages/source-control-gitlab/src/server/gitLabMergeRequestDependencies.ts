@@ -11,7 +11,14 @@ import { definition } from "../shared/definition.ts";
 
 const Block = Schema.Struct({
   id: Schema.Number,
-  blocking_merge_request: Schema.optional(Schema.NullOr(Schema.Struct({ web_url: Schema.String }))),
+  blocking_merge_request: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        web_url: Schema.String,
+        state: Schema.optional(Schema.Literals(["opened", "closed", "merged"])),
+      }),
+    ),
+  ),
 });
 const decodeMergeRequestId = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ id: PositiveInt })),
@@ -21,6 +28,14 @@ const decodeBlocks = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Arr
 const normalize = (block: typeof Block.Type) => ({
   id: String(block.id),
   url: block.blocking_merge_request?.web_url ?? null,
+  ...(block.blocking_merge_request?.state
+    ? {
+        state:
+          block.blocking_merge_request.state === "opened"
+            ? ("open" as const)
+            : block.blocking_merge_request.state,
+      }
+    : {}),
 });
 
 export const make = Effect.gen(function* () {
