@@ -279,6 +279,15 @@ from the current checkout, even when regenerating a description for another bran
 command must be available on the environment; this example requires Node.js on PATH. An external
 script is also possible, for example `["python3", ".t3code/mr-context.py"]`.
 
+### Run Git actions from an agent
+
+Agents in a full-access thread outside plan mode can use the same workflows as the sidebar.
+`t3_git_status` inspects the calling thread’s checkout and stack. `t3_git_action` can commit,
+push, create a feature branch, or publish a PR/MR; its optional `instructions` add context.
+Push does not create missing reviews. Use `commit_push_pr` to commit, push, and create them.
+Agents can also regenerate review text, maintain stacks, and rewrite the current layer’s commits.
+Actions show their running state in the sidebar, including logical commit and stack progress.
+
 ### Run a command after pushing
 
 Add `hooks.afterPush` commands to `.t3code/vcs.json` to run project-specific commands after a

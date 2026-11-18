@@ -1,3 +1,4 @@
+import * as SourceControlMcpService from "./mcp/SourceControlMcpService.ts";
 import * as GenerationSpeedHistory from "./usage/GenerationSpeedHistory.ts";
 import * as BrowserAuth from "./cloud/BrowserAuth.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -866,6 +867,7 @@ const layerMakeRoutes = Layer.mergeAll(
     speechStreamRouteLayer,
   ),
   McpHttpServer.layer.pipe(
+    Layer.provide(SourceControlMcpService.layer),
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),

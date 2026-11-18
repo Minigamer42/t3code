@@ -1,3 +1,5 @@
+import { SourceControlToolkit } from "./toolkits/sourceControl/tools.ts";
+import * as SourceControlHandlers from "./toolkits/sourceControl/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -1288,6 +1290,11 @@ export const layerAttachmentToolkit = toolkitRegistration(
   AttachmentHandlers.layer,
 );
 
+export const layerSourceControlToolkit = toolkitRegistration(
+  SourceControlToolkit,
+  SourceControlHandlers.layer,
+);
+
 export const layerPullRequestsToolkit = toolkitRegistration(
   PullRequestsToolkit,
   PullRequestsHandlers.layer,
@@ -1350,6 +1357,7 @@ export const layerTools = Layer.mergeAll(
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,
+  layerSourceControlToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
   layerMessageToolkit,
