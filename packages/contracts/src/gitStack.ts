@@ -12,6 +12,15 @@ export const GitStackManageInput = Schema.Struct({
     Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1), Schema.isMaxLength(50)),
   ),
   base: Schema.optional(TrimmedNonEmptyString),
+  expectedHeadSha: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isPattern(/^[0-9a-f]{40,64}$/)),
+  ),
+  splitPoints: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString.check(Schema.isPattern(/^[0-9a-f]{40,64}$/))).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(49),
+    ),
+  ),
 });
 export type GitStackManageInput = typeof GitStackManageInput.Type;
 export const GitStackStatusResult = Schema.Struct({

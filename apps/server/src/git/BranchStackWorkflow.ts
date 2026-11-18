@@ -43,6 +43,7 @@ const isManagerError = Schema.is(GitManagerError);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 type Stack = typeof StackState.Type;
 type Operation = typeof Journal.Type;
+type NameLayer = (base: string, tip: string) => Effect.Effect<string, GitManagerError>;
 type AfterPush = (cwd: string, branch: string) => Effect.Effect<void, GitManagerError>;
 interface UpdateOptions {
   readonly publishThrough?: string;
@@ -1062,8 +1063,11 @@ export const make = Effect.gen(function* () {
       mergedBranches: readonly string[] = [],
       afterPush?: AfterPush,
       onProgress?: ProgressReporter,
+      nameLayer?: NameLayer,
     ) {
       const { cwd } = input;
+      if (input.splitPoints && input.action !== "adopt" && input.action !== "edit")
+        return yield* failure(cwd, "Split points can only be saved when editing layers.");
       const files = yield* paths(cwd);
       if (input.expectedBranch !== undefined) {
         const current =
@@ -1203,7 +1207,7 @@ export const make = Effect.gen(function* () {
       yield* assertIdle(cwd);
       if (input.action === "edit" && !status.managed)
         return yield* failure(cwd, "Adopt this branch stack before editing its layers.");
-      const branches = input.branches ?? status.layers.map((layer) => layer.branch);
+      const branches = [...(input.branches ?? status.layers.map((layer) => layer.branch))];
       const base = input.base ?? status.base;
       const currentBranch = yield* text(cwd, ["symbolic-ref", "--short", "HEAD"]);
       if (!branches.includes(currentBranch))
@@ -1270,17 +1274,110 @@ export const make = Effect.gen(function* () {
           remoteHead: previous ? previous.remoteHead : (heads[branch] ?? null),
         });
       }
-      yield* saveStack(
+      const created: { branch: string; sha: string }[] = [];
+      const originalHeads = input.splitPoints
+        ? yield* Effect.forEach(layers, (layer) =>
+            head(cwd, layer.branch).pipe(Effect.map((sha) => ({ branch: layer.branch, sha }))),
+          )
+        : [];
+      if (input.splitPoints) {
+        const index = layers.findIndex((layer) => layer.branch === currentBranch);
+        const layer = layers[index]!;
+        const currentHead = originalHeads[index]!.sha;
+        if (!input.expectedHeadSha || currentHead !== input.expectedHeadSha)
+          return yield* failure(cwd, "The branch changed. Reopen Edit layers before splitting it.");
+        const commits = (yield* text(cwd, [
+          "rev-list",
+          "--first-parent",
+          "--reverse",
+          `${layer.parentHead}..${currentHead}`,
+        ]))
+          .split("\n")
+          .filter(Boolean);
+        let previousIndex = -1;
+        for (const point of input.splitPoints) {
+          const position = commits.indexOf(point);
+          if (position <= previousIndex || position === commits.length - 1)
+            return yield* failure(
+              cwd,
+              "Choose ordered commit boundaries within the current layer, before its tip.",
+            );
+          previousIndex = position;
+        }
+        if (layers.length + input.splitPoints.length > 50)
+          return yield* failure(cwd, "A stack can contain at most 50 layers.");
+        if (!nameLayer) return yield* failure(cwd, "Branch naming is unavailable.");
+        let parentHead = layer.parentHead;
+        const lowerLayers: Stack["layers"][number][] = [];
+        for (const point of input.splitPoints) {
+          const branch = yield* nameLayer(parentHead, point);
+          if (
+            branches.includes(branch) ||
+            branch === base ||
+            (yield* git(cwd, ["check-ref-format", "--branch", branch], true)).exitCode !== 0
+          )
+            return yield* failure(
+              cwd,
+              "The generated branch name is invalid or already used in this stack.",
+            );
+          created.push({ branch, sha: point });
+          branches.splice(index + lowerLayers.length, 0, branch);
+          lowerLayers.push({ branch, parentHead, remoteHead: null });
+          parentHead = point;
+        }
+        layers.splice(index, 1, ...lowerLayers, { ...layer, parentHead });
+      }
+      const configure = Effect.gen(function* () {
+        for (const layer of existing?.layers ?? []) {
+          if (!branches.includes(layer.branch))
+            yield* git(cwd, ["config", `branch.${layer.branch}.t3-stack-disabled`, "true"]);
+        }
+        for (const layer of layers)
+          yield* git(cwd, ["config", `branch.${layer.branch}.t3-stack-disabled`, "false"]);
+      });
+      const save = saveStack(
         cwd,
         { base, baseRef, remote, layers },
         existing?.layers.map((layer) => layer.branch) ?? [],
       );
-      for (const layer of existing?.layers ?? []) {
-        if (!branches.includes(layer.branch))
-          yield* git(cwd, ["config", `branch.${layer.branch}.t3-stack-disabled`, "true"]);
+      if (created.length > 0) {
+        if ((yield* text(cwd, ["symbolic-ref", "--short", "HEAD"])) !== currentBranch)
+          return yield* failure(
+            cwd,
+            "The checkout changed. Reopen Edit layers before splitting it.",
+          );
+        yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            yield* process.run({
+              operation: "BranchStack.splitLayers",
+              command: "git",
+              cwd,
+              args: ["update-ref", "--create-reflog", "--stdin"],
+              stdin: [
+                "start",
+                ...originalHeads.map(({ branch, sha }) => `verify refs/heads/${branch} ${sha}`),
+                ...created.map(({ branch, sha }) => `create refs/heads/${branch} ${sha}`),
+                "prepare",
+                "commit",
+                "",
+              ].join("\n"),
+            });
+            yield* configure.pipe(
+              Effect.andThen(save),
+              Effect.onError(() =>
+                Effect.forEach(created, ({ branch, sha }) =>
+                  git(cwd, ["update-ref", "-d", `refs/heads/${branch}`, sha], true).pipe(
+                    Effect.orDie,
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      } else {
+        yield* save;
+        yield* configure;
       }
-      for (const layer of layers)
-        yield* git(cwd, ["config", `branch.${layer.branch}.t3-stack-disabled`, "false"]);
       return yield* inspect(cwd);
     },
     (
@@ -1289,6 +1386,7 @@ export const make = Effect.gen(function* () {
       _mergedBranches?: readonly string[],
       _afterPush?: AfterPush,
       _onProgress?: ProgressReporter,
+      _nameLayer?: NameLayer,
     ) =>
       effect.pipe(
         Effect.mapError((cause) =>

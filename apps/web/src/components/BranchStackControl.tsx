@@ -30,6 +30,7 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
+import { StackLayerSplitPicker } from "./StackLayerSplitPicker";
 import { StackBranchPicker } from "./StackBranchPicker";
 
 export function BranchStackControl({
@@ -97,6 +98,8 @@ export function BranchStackControl({
   const [adopting, setAdopting] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [base, setBase] = useState("");
+  const [splitting, setSplitting] = useState(false);
+  const [split, setSplit] = useState<{ points: string[]; headSha: string } | null>(null);
   const [includeLatestBase, setIncludeLatestBase] = useState(false);
   const workflow = useEnvironmentQuery(
     gitEnvironment.workflowProgress({ environmentId, input: { cwd } }),
@@ -123,6 +126,9 @@ export function BranchStackControl({
           ? {
               base: base.trim(),
               branches,
+              ...(split?.points.length
+                ? { splitPoints: split.points, expectedHeadSha: split.headSha }
+                : {}),
             }
           : {}),
         ...(action === "update" ? { includeLatestBase } : {}),
@@ -276,6 +282,8 @@ export function BranchStackControl({
                 onClick={() => {
                   setBranches(status.layers.map((layer) => layer.branch));
                   setBase(status.base);
+                  setSplitting(false);
+                  setSplit(null);
                   setAdopting(true);
                 }}
               >
@@ -371,6 +379,28 @@ export function BranchStackControl({
                           Remove
                         </Button>
                       </div>
+                      {status.layers.some((layer) => layer.current && layer.branch === branch) ? (
+                        <div className="space-y-3">
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={() => {
+                              setSplitting(!splitting);
+                              setSplit(null);
+                            }}
+                          >
+                            {splitting ? "Cancel split" : "Split at commit boundaries"}
+                          </Button>
+                          {splitting ? (
+                            <StackLayerSplitPicker
+                              environmentId={environmentId}
+                              cwd={cwd}
+                              points={split?.points ?? []}
+                              onChange={(points, headSha) => setSplit({ points, headSha })}
+                            />
+                          ) : null}
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ol>

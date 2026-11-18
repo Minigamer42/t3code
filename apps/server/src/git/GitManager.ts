@@ -260,6 +260,7 @@ const BRANCH_PR_LOOKUP_CONCURRENCY = 4;
 const PR_THREAD_CONTEXT_BYTES = 16_000;
 const PR_THREAD_COMMAND_OUTPUT_CHARS = 2_000;
 const isSourceControlProviderError = Schema.is(SourceControlProviderError);
+const isGitManagerError = Schema.is(GitManagerError);
 
 /**
  * Throttled lookups fail fast, so a flat failure TTL would retry faster than a healthy
@@ -4720,6 +4721,71 @@ export const make = Effect.gen(function* () {
         });
         status = yield* stackStatus(input, true);
       }
+      const splitSteps = WorkflowProgress.reportSteps(
+        report,
+        (input.splitPoints ?? []).map((sha, index) => ({
+          id: sha,
+          group: "Split current layer",
+          label: `Name layer ${index + 1}`,
+          state: "pending" as const,
+        })),
+      );
+      const reservedNames = new Set(input.branches ?? status.layers.map((layer) => layer.branch));
+      const nameLayer = Effect.fn("GitManager.nameSplitLayer")(function* (
+        base: string,
+        tip: string,
+      ) {
+        yield* splitSteps("Generating layer branch name...", (steps) =>
+          steps.map((step) => (step.id === tip ? { ...step, state: "running" } : step)),
+        );
+        const { settings, projectId } = yield* projectSettingsFor(input).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitManagerError({
+                operation: "manageStack",
+                cwd: input.cwd,
+                detail: "Failed to get server settings.",
+                cause,
+              }),
+          ),
+        );
+        const providers = yield* providerRegistry.getProviders;
+        const context = yield* gitCore.readRangeContext(input.cwd, base, tip);
+        const suggestion = yield* resolveCommitAndBranchSuggestion({
+          cwd: input.cwd,
+          branch:
+            input.expectedBranch ?? status.layers.find((layer) => layer.current)?.branch ?? null,
+          context: { stagedSummary: context.diffSummary, stagedPatch: context.diffPatch },
+          includeBranch: true,
+          settings: {
+            projectId,
+            style: settings.sourceControlWritingStyle,
+            modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
+              settings,
+              providers,
+              projectId,
+            ),
+          },
+        });
+        if (!suggestion)
+          return yield* new GitManagerError({
+            operation: "manageStack",
+            cwd: input.cwd,
+            detail: "Could not generate a name for this layer.",
+          });
+        const naming = yield* vcsProjectConfig.resolveBranchNaming({ cwd: input.cwd });
+        const localNames = yield* gitCore.listLocalBranchNames(input.cwd);
+        const preferred = removeBuiltInFeaturePrefix(
+          suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject),
+          naming,
+        );
+        const name = resolveAutoBranchName([...localNames, ...reservedNames], preferred, naming);
+        reservedNames.add(name);
+        yield* splitSteps(`Prepared ${name}`, (steps) =>
+          steps.map((step) => (step.id === tip ? { ...step, state: "completed" } : step)),
+        );
+        return name;
+      });
       yield* branchStacks.manage(
         input,
         status.layers
@@ -4727,6 +4793,19 @@ export const make = Effect.gen(function* () {
           .map((layer) => layer.branch),
         completePush,
         report,
+        (base, tip) =>
+          nameLayer(base, tip).pipe(
+            Effect.mapError((cause) =>
+              isGitManagerError(cause)
+                ? cause
+                : new GitManagerError({
+                    cwd: input.cwd,
+                    operation: "manageStack",
+                    detail: "Could not generate a branch name for this layer.",
+                    cause,
+                  }),
+            ),
+          ),
       );
       const updated = yield* branchStacks.inspect(input.cwd);
       if (updated.managed) {
@@ -4773,7 +4852,7 @@ export const make = Effect.gen(function* () {
       yield* invalidateStatus(input.cwd);
       return yield* stackStatus(input);
     });
-    if (input.action === "update" || input.action === "continue")
+    if (input.action === "update" || input.action === "continue" || input.splitPoints)
       return yield* workflowProgress.run(input.cwd, "stack", "Preparing stack...", maintain);
     yield* workflowProgress.clear(input.cwd);
     return yield* maintain();

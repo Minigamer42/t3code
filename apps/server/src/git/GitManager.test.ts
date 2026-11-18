@@ -1930,6 +1930,85 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect(
+    "names split layers on save from each committed diff and repository naming policy",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir("t3code-git-layer-split-");
+        yield* initRepo(cwd);
+        const remote = yield* createBareRemote();
+        yield* runGit(cwd, ["remote", "add", "origin", remote]);
+        yield* runGit(cwd, ["push", "-u", "origin", "main"]);
+        yield* runGit(cwd, ["checkout", "-b", "feature/current"]);
+        const points: string[] = [];
+        for (const file of ["first.txt", "second.txt", "third.txt"]) {
+          NodeFS.writeFileSync(NodePath.join(cwd, file), `Change ${file}\n`);
+          yield* runGit(cwd, ["add", file]);
+          yield* runGit(cwd, ["commit", "-m", `Add ${file}`]);
+          points.push((yield* runGit(cwd, ["rev-parse", "HEAD"])).stdout.trim());
+        }
+        const configDir = NodePath.join(cwd, ".t3code");
+        NodeFS.mkdirSync(configDir);
+        NodeFS.writeFileSync(
+          NodePath.join(configDir, "vcs.json"),
+          JSON.stringify({ branchNaming: { defaultPrefix: null, preserveNamespaces: true } }),
+        );
+        const policy = "Name branches as jm/feature/ with a description of the layer changes.";
+        NodeFS.writeFileSync(NodePath.join(configDir, "commit-message.md"), policy);
+        NodeFS.writeFileSync(
+          NodePath.join(cwd, "uncommitted.txt"),
+          "Keep this out of naming context\n",
+        );
+        const generated: TextGeneration.CommitMessageGenerationInput[] = [];
+        const { manager } = yield* makeManager({
+          textGeneration: {
+            generateCommitMessage: (input) =>
+              Effect.sync(() => {
+                generated.push(input);
+                return { subject: "A layer", body: "", branch: "feature/jm/feature/slice" };
+              }),
+          },
+        });
+        const result = yield* manager.manageStack({
+          cwd,
+          action: "adopt",
+          base: "main",
+          branches: ["feature/current"],
+          expectedBranch: "feature/current",
+          expectedHeadSha: points[2]!,
+          splitPoints: points.slice(0, 2),
+        });
+        expect(generated).toHaveLength(2);
+        for (const [index, input] of generated.entries()) {
+          expect(input.includeBranch).toBe(true);
+          expect(input.policy?.commitInstructions).toContain(policy);
+          expect(input.stagedPatch).toContain(
+            `diff --git a/${index === 0 ? "first" : "second"}.txt`,
+          );
+          expect(input.stagedPatch).not.toContain("third.txt");
+          expect(input.stagedPatch).not.toContain("uncommitted.txt");
+        }
+        expect(result.layers.map((layer) => layer.branch)).toEqual([
+          "jm/feature/slice",
+          "jm/feature/slice-2",
+          "feature/current",
+        ]);
+        expect((yield* runGit(cwd, ["rev-parse", "jm/feature/slice"])).stdout.trim()).toBe(
+          points[0],
+        );
+        expect((yield* runGit(cwd, ["rev-parse", "jm/feature/slice-2"])).stdout.trim()).toBe(
+          points[1],
+        );
+        expect((yield* runGit(cwd, ["rev-parse", "HEAD"])).stdout.trim()).toBe(points[2]);
+        expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(
+          "feature/current",
+        );
+        expect(NodeFS.readFileSync(NodePath.join(cwd, "uncommitted.txt"), "utf8")).toContain(
+          "Keep this out",
+        );
+      }),
+  );
+
   it.effect.each(["commit", "prepare", "create_branch", "commit-detached"] as const)(
     "featureBranch honors project branch naming config: %s",
     (mode) =>

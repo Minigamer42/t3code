@@ -92,6 +92,125 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
         expect(yield* f.stacks.canAutoTrack(f.cwd, ["b"])).toBe(false);
       }).pipe(Effect.scoped),
   );
+  it.effect("splits the current layer at commit boundaries without moving any existing refs", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const first = yield* f.git(["rev-parse", "b"]);
+      const second = yield* f.commit("second.txt", "second\n");
+      const tip = yield* f.commit("third.txt", "third\n");
+      yield* f.git(["rebase", "--onto", "b", first, "c"]);
+      yield* f.git(["checkout", "b"]);
+      yield* f.adopt;
+      const oldRefs = yield* f.git(["show-ref"]);
+      const upperHead = yield* f.git(["rev-parse", "c"]);
+      yield* f.fs.writeFileString(f.path.join(f.cwd, "dirty.txt"), "uncommitted\n");
+      const contexts: string[][] = [];
+      const result = yield* f.stacks.manage(
+        {
+          cwd: f.cwd,
+          action: "edit",
+          branches: ["a", "b", "c"],
+          base: "main",
+          expectedBranch: "b",
+          expectedHeadSha: tip,
+          splitPoints: [first, second],
+        },
+        [],
+        undefined,
+        undefined,
+        (base, end) =>
+          Effect.sync(() => {
+            contexts.push([base, end]);
+            return `part-${contexts.length}`;
+          }),
+      );
+      expect(contexts).toEqual([
+        [yield* f.git(["rev-parse", "a"]), first],
+        [first, second],
+      ]);
+      expect(result.layers.map((layer) => [layer.branch, layer.parent])).toEqual([
+        ["a", "main"],
+        ["part-1", "a"],
+        ["part-2", "part-1"],
+        ["b", "part-2"],
+        ["c", "b"],
+      ]);
+      expect(yield* f.git(["rev-parse", "part-1"])).toBe(first);
+      expect(yield* f.git(["rev-parse", "part-2"])).toBe(second);
+      expect(yield* f.git(["rev-parse", "b"])).toBe(tip);
+      expect(yield* f.git(["rev-parse", "c"])).toBe(upperHead);
+      expect(yield* f.git(["branch", "--show-current"])).toBe("b");
+      expect(
+        (yield* f.git(["show-ref"]))
+          .split("\n")
+          .filter((line) => !line.includes("refs/heads/part-"))
+          .join("\n"),
+      ).toBe(oldRefs);
+      expect(yield* f.fs.readFileString(f.path.join(f.cwd, "dirty.txt"))).toBe("uncommitted\n");
+    }).pipe(Effect.scoped),
+  );
+  it.effect.each([
+    "parent",
+    "tip",
+    "duplicate",
+    "stale",
+    "generation-failed",
+    "save-failed",
+    "moved-during-generation",
+  ] as const)("rejects unsafe layer splits without creating refs: %s", (mode) =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.git(["checkout", "c"]);
+      const first = yield* f.git(["rev-parse", "HEAD"]);
+      const tip = yield* f.commit("next.txt", "next\n");
+      yield* f.adopt;
+      const refs = yield* f.git(["show-ref"]);
+      const saved = yield* f.fs.readFileString(f.path.join(f.cwd, ".git/t3-branch-stacks.json"));
+      if (mode === "save-failed")
+        yield* f.fs.makeDirectory(f.path.join(f.cwd, ".git/t3-branch-stacks.json.tmp"));
+      const result = yield* f.stacks
+        .manage(
+          {
+            cwd: f.cwd,
+            action: "edit",
+            expectedBranch: "c",
+            expectedHeadSha: mode === "stale" ? first : tip,
+            splitPoints:
+              mode === "parent"
+                ? [yield* f.git(["rev-parse", "b"])]
+                : mode === "tip"
+                  ? [tip]
+                  : mode === "duplicate"
+                    ? [first, first]
+                    : [first],
+          },
+          [],
+          undefined,
+          undefined,
+          () =>
+            Effect.gen(function* () {
+              if (mode === "generation-failed")
+                return yield* new GitManagerError({
+                  cwd: f.cwd,
+                  operation: "test",
+                  detail: "Generation failed",
+                });
+              if (mode === "moved-during-generation")
+                yield* f
+                  .git(["commit", "--allow-empty", "-m", "External change"])
+                  .pipe(Effect.orDie);
+              return "split-layer";
+            }),
+        )
+        .pipe(Effect.flip);
+      expect(result).toBeInstanceOf(GitManagerError);
+      expect(yield* f.fs.readFileString(f.path.join(f.cwd, ".git/t3-branch-stacks.json"))).toBe(
+        saved,
+      );
+      if (mode !== "moved-during-generation") expect(yield* f.git(["show-ref"])).toBe(refs);
+      expect(yield* f.git(["branch", "--list", "split-layer"])).toBe("");
+    }).pipe(Effect.scoped),
+  );
   it.effect("updates the stack locally without publishing or running post-push hooks", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

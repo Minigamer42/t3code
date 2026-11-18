@@ -8,6 +8,7 @@ import { useEnvironmentQuery } from "../../../state/query";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { Button } from "../../../components/ui/Button";
+import { StackLayerSplitPicker } from "./StackLayerSplitPicker";
 import { StackBranchPicker } from "./StackBranchPicker";
 import { ThemedSwitch } from "../../../components/ui/ThemedSwitch";
 
@@ -36,6 +37,8 @@ export function BranchStackControl({
   const [adopting, setAdopting] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [base, setBase] = useState("");
+  const [splitting, setSplitting] = useState(false);
+  const [split, setSplit] = useState<{ points: string[]; headSha: string } | null>(null);
   const [includeLatestBase, setIncludeLatestBase] = useState(false);
   const workflow = useEnvironmentQuery(
     gitEnvironment.workflowProgress({ environmentId, input: { cwd } }),
@@ -61,6 +64,9 @@ export function BranchStackControl({
           ? {
               base: base.trim(),
               branches,
+              ...(split?.points.length
+                ? { splitPoints: split.points, expectedHeadSha: split.headSha }
+                : {}),
             }
           : {}),
         ...(action === "update" ? { includeLatestBase } : {}),
@@ -196,6 +202,8 @@ export function BranchStackControl({
                   onPress={() => {
                     setBranches(status.layers.map((layer) => layer.branch));
                     setBase(status.base);
+                    setSplitting(false);
+                    setSplit(null);
                     setAdopting(true);
                   }}
                 />
@@ -271,6 +279,27 @@ export function BranchStackControl({
                     onPress={() => setBranches(branches.filter((_, i) => i !== index))}
                   />
                 </View>
+                {status.layers.some((layer) => layer.current && layer.branch === branch) ? (
+                  <View className="gap-3">
+                    <Button
+                      size="compact"
+                      tone="text"
+                      label={splitting ? "Cancel split" : "Split at commit boundaries"}
+                      onPress={() => {
+                        setSplitting(!splitting);
+                        setSplit(null);
+                      }}
+                    />
+                    {splitting ? (
+                      <StackLayerSplitPicker
+                        environmentId={environmentId}
+                        cwd={cwd}
+                        points={split?.points ?? []}
+                        onChange={(points, headSha) => setSplit({ points, headSha })}
+                      />
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
             ))}
           </View>

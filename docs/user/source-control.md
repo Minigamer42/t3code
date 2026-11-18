@@ -499,7 +499,7 @@ branch ancestry, recorded parent relationships, or `glab` stack metadata. Adopti
 use T3 rather than another stack manager to maintain that stack.
 
 **Edit layers** changes the tracked hierarchy of existing branches without rewriting commits.
-Branches must already follow the selected ancestry; edits do not create branches or restack them.
+Branches must already follow the selected ancestry. To divide the current branch into smaller layers, choose **Split at commit boundaries** in **Edit layers** and mark where each lower layer ends. Saving creates branches at those commits, with names generated from each layer’s committed changes and your repository naming policy. The current branch keeps the upper portion; existing commits and branch tips stay unchanged. Nothing is pushed.
 Click a branch in the stack to switch the checkout and thread to it. Switching requires a clean
 checkout and a target branch that is not checked out in another worktree.
 
