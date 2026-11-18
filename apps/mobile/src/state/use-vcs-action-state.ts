@@ -112,10 +112,18 @@ export function useGitActionProgress(target: VcsActionTarget): GitActionProgress
   if (running) {
     const description =
       actionState.lastOutputLine ??
-      formatElapsedSeconds(actionState.hookStartedAtMs ?? actionState.phaseStartedAtMs, nowMs);
+      formatElapsedSeconds(
+        workflow?.activity?.startedAtMs ??
+          actionState.hookStartedAtMs ??
+          actionState.phaseStartedAtMs,
+        nowMs,
+      );
     return {
       phase: "running",
-      label: workflow?.state === "running" ? workflow.label : actionState.currentLabel,
+      label:
+        workflow?.state === "running"
+          ? (workflow.activity?.label ?? workflow.label)
+          : actionState.currentLabel,
       description,
       ...(actionState.operation === "split_commits" &&
       actionState.actionId &&

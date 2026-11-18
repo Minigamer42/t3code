@@ -31,13 +31,22 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
     progress.state === "running"
       ? progress.kind === "stack"
         ? "Stack progress"
-        : "Logical commits"
+        : progress.kind === "logical_commits"
+          ? "Logical commits"
+          : progress.label
       : progress.label;
+  if (progress.kind === "git_action" && progress.activity) return null;
   return (
     <div
       className="min-w-0 space-y-2 px-2.5 py-2"
       role="region"
-      aria-label={progress.kind === "stack" ? "Stack progress" : "Logical commit progress"}
+      aria-label={
+        progress.kind === "stack"
+          ? "Stack progress"
+          : progress.kind === "logical_commits"
+            ? "Logical commit progress"
+            : "Git action progress"
+      }
     >
       <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
         <Tooltip>

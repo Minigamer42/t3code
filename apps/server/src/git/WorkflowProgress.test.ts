@@ -59,4 +59,52 @@ it.layer(NodeServices.layer)("workflow progress", (it) => {
         ).toEqual([final]);
       }).pipe(Effect.scoped),
   );
+  it.effect("keeps an agent action running across nested workflow completion and clearing", () =>
+    Effect.gen(function* () {
+      const progress = yield* make;
+      const nestedFinished = yield* Deferred.make<void>();
+      const createdLabel = yield* Deferred.make<string | undefined>();
+      const done = yield* Deferred.make<void>();
+      const job = yield* progress
+        .withActivity("/repo", "Publishing", (report) =>
+          Effect.gen(function* () {
+            yield* progress.clear("/repo");
+            yield* progress.run("/repo", "logical_commits", "Planning", (steps) =>
+              Effect.gen(function* () {
+                yield* steps({
+                  label: "Commit created",
+                  steps: [{ id: "commit", label: "Commit", group: "Commits", state: "completed" }],
+                });
+                const snapshot = (yield* progress
+                  .subscribe("/repo")
+                  .pipe(Stream.take(1), Stream.runCollect))[0];
+                yield* Deferred.succeed(createdLabel, snapshot?.activity?.label);
+              }),
+            );
+            yield* report("Pushing");
+            yield* Deferred.succeed(nestedFinished, undefined);
+            yield* Deferred.await(done);
+          }),
+        )
+        .pipe(Effect.forkScoped);
+      yield* Effect.raceFirst(Deferred.await(nestedFinished), Fiber.join(job));
+      expect(yield* Deferred.await(createdLabel)).toBe("Commit created");
+      const current = (yield* progress
+        .subscribe("/repo")
+        .pipe(Stream.take(1), Stream.runCollect))[0];
+      expect(current).toMatchObject({
+        kind: "logical_commits",
+        state: "running",
+        activity: { label: "Pushing" },
+        steps: [{ state: "completed" }],
+      });
+      yield* Deferred.succeed(done, undefined);
+      yield* Fiber.join(job);
+      const completed = (yield* progress
+        .subscribe("/repo")
+        .pipe(Stream.take(1), Stream.runCollect))[0];
+      expect(completed?.state).toBe("completed");
+      expect(completed?.activity).toBeUndefined();
+    }).pipe(Effect.scoped),
+  );
 });

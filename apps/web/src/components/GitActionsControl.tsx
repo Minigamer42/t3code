@@ -1211,8 +1211,8 @@ export default function GitActionsControl({
       ? {
           ...vcsActionState,
           isRunning: true,
-          currentLabel: workflow.label,
-          phaseStartedAtMs: workflow.startedAtMs,
+          currentLabel: workflow.activity?.label ?? workflow.label,
+          phaseStartedAtMs: workflow.activity?.startedAtMs ?? workflow.startedAtMs,
           hookStartedAtMs: null,
         }
       : vcsActionState,

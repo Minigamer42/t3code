@@ -90,6 +90,7 @@ export class GitWorkflowService extends Context.Service<
       input: GitRunStackedActionInput,
       options?: GitManager.GitRunStackedActionOptions,
     ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+    readonly withActionProgress: GitManager.GitManager["Service"]["withActionProgress"];
     readonly subscribeWorkflowProgress: (input: {
       readonly cwd: string;
     }) => Stream.Stream<GitWorkflowProgress | null, GitManagerServiceError>;
@@ -475,6 +476,7 @@ export const make = Effect.gen(function* () {
         ),
       );
     }),
+    withActionProgress: gitManager.withActionProgress,
     subscribeWorkflowProgress: (input) =>
       Stream.unwrap(
         ensureGit("GitWorkflowService.subscribeWorkflowProgress", input.cwd).pipe(

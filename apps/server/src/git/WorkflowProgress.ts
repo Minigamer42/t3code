@@ -1,3 +1,4 @@
+import { GitManagerError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import type {
   GitWorkflowProgress,
@@ -34,13 +35,19 @@ export const make = Effect.gen(function* () {
       ref: SubscriptionRef.SubscriptionRef<GitWorkflowProgress | null>;
       readers: number;
       active: boolean;
+      activity?: NonNullable<GitWorkflowProgress["activity"]>;
     }
   >();
   const entry = Effect.fn("WorkflowProgress.entry")(function* (cwd: string) {
     const key = yield* fs.realPath(cwd).pipe(Effect.orElseSucceed(() => cwd));
     const previous = entries.get(key);
     if (previous) return previous;
-    const created = {
+    const created: {
+      ref: SubscriptionRef.SubscriptionRef<GitWorkflowProgress | null>;
+      readers: number;
+      active: boolean;
+      activity?: NonNullable<GitWorkflowProgress["activity"]>;
+    } = {
       ref: yield* SubscriptionRef.make<GitWorkflowProgress | null>(null),
       readers: 0,
       active: false,
@@ -49,7 +56,8 @@ export const make = Effect.gen(function* () {
     entries.set(key, current);
     for (const [name, value] of entries) {
       if (entries.size <= 256) break;
-      if (name !== key && value.readers === 0 && !value.active) entries.delete(name);
+      if (name !== key && value.readers === 0 && !value.active && !value.activity)
+        entries.delete(name);
     }
     return current;
   });
@@ -64,15 +72,24 @@ export const make = Effect.gen(function* () {
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const startedAtMs = yield* Clock.currentTimeMillis;
+        if (owner.activity) owner.activity = { ...owner.activity, label };
         yield* SubscriptionRef.set(owner.ref, {
           kind,
+          ...(owner.activity ? { activity: owner.activity } : {}),
           state: "running",
           startedAtMs,
           label,
           steps: [],
         });
         const report: ProgressReporter = (update) => {
-          const snapshot: GitWorkflowProgress = { ...update, kind, state: "running", startedAtMs };
+          if (owner.activity) owner.activity = { ...owner.activity, label: update.label };
+          const snapshot: GitWorkflowProgress = {
+            ...update,
+            kind,
+            state: "running",
+            startedAtMs,
+            ...(owner.activity ? { activity: owner.activity } : {}),
+          };
           return SubscriptionRef.set(owner.ref, snapshot);
         };
         const finish = (state: GitWorkflowProgress["state"]) =>
@@ -80,7 +97,7 @@ export const make = Effect.gen(function* () {
             current
               ? {
                   ...current,
-                  state,
+                  state: owner.activity ? "running" : state,
                   label:
                     state === "completed"
                       ? kind === "stack"
@@ -119,10 +136,86 @@ export const make = Effect.gen(function* () {
       }),
     );
   });
+  const withActivity = Effect.fn("WorkflowProgress.withActivity")(function* <A, E, R>(
+    cwd: string,
+    label: string,
+    action: (report: (label: string) => Effect.Effect<void>) => Effect.Effect<A, E, R>,
+  ) {
+    const owner = yield* entry(cwd);
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        if (owner.activity || owner.active)
+          return yield* new GitManagerError({
+            operation: "action",
+            cwd,
+            detail: "A Git workflow is already running for this checkout.",
+          });
+        owner.activity = { label, startedAtMs: 0 };
+        const startedAtMs = yield* Clock.currentTimeMillis;
+        owner.activity = { label, startedAtMs };
+        yield* SubscriptionRef.set(owner.ref, {
+          kind: "git_action",
+          state: "running",
+          label,
+          startedAtMs,
+          activity: owner.activity,
+          steps: [],
+        });
+        const report = (nextLabel: string) =>
+          Effect.suspend(() => {
+            const activity = { label: nextLabel, startedAtMs };
+            owner.activity = activity;
+            return SubscriptionRef.update(owner.ref, (current) =>
+              current ? { ...current, activity } : current,
+            );
+          });
+        const finish = (state: GitWorkflowProgress["state"]) =>
+          Effect.suspend(() => {
+            delete owner.activity;
+            return SubscriptionRef.update(owner.ref, (current) => {
+              if (!current) return null;
+              const { activity: _activity, ...rest } = current;
+              return {
+                ...rest,
+                state,
+                label:
+                  state === "completed"
+                    ? rest.kind === "git_action"
+                      ? `${label}: completed`
+                      : rest.label
+                    : state === "cancelled"
+                      ? "Git action cancelled"
+                      : "Git action failed",
+              };
+            });
+          });
+        return yield* restore(Effect.suspend(() => action(report))).pipe(
+          Effect.tap(() => finish("completed")),
+          Effect.onError((cause) =>
+            finish(Cause.hasInterruptsOnly(cause) ? "cancelled" : "failed"),
+          ),
+        );
+      }),
+    );
+  });
   return {
     run,
+    withActivity,
     clear: Effect.fn("WorkflowProgress.clear")(function* (cwd: string) {
-      yield* SubscriptionRef.set((yield* entry(cwd)).ref, null);
+      const owner = yield* entry(cwd);
+      yield* SubscriptionRef.set(
+        owner.ref,
+        owner.activity
+          ? {
+              kind: "git_action",
+              state: "running",
+              startedAtMs: owner.activity.startedAtMs,
+              label: owner.activity.label,
+              activity: owner.activity,
+              steps: [],
+            }
+          : null,
+      );
     }),
     subscribe: (cwd: string) =>
       Stream.unwrap(

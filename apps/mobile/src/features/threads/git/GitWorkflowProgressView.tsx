@@ -32,15 +32,20 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
     <View className="gap-3 rounded-xl bg-card p-4">
       <View className="flex-row items-center gap-2">
         <Text numberOfLines={2} className="min-w-0 flex-1 text-sm text-foreground">
-          {progress.state === "running"
-            ? progress.kind === "stack"
-              ? "Stack progress"
-              : "Logical commits"
-            : progress.label}
+          {progress.activity?.label ??
+            (progress.state === "running"
+              ? progress.kind === "stack"
+                ? "Stack progress"
+                : progress.kind === "logical_commits"
+                  ? "Logical commits"
+                  : progress.label
+              : progress.label)}
         </Text>
-        <Text className="text-xs text-foreground-secondary">
-          {finished}/{stages.length} {progress.kind === "logical_commits" ? "stages" : "steps"}
-        </Text>
+        {stages.length > 0 ? (
+          <Text className="text-xs text-foreground-secondary">
+            {finished}/{stages.length} {progress.kind === "logical_commits" ? "stages" : "steps"}
+          </Text>
+        ) : null}
       </View>
       {[...groups].map(([group, steps]) => {
         const multipleCommits =

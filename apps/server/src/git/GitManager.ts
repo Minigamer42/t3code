@@ -209,6 +209,11 @@ export class GitManager extends Context.Service<
       never,
       Scope.Scope
     >;
+    readonly withActionProgress: <A, E, R>(
+      cwd: string,
+      label: string,
+      action: (report: (label: string) => Effect.Effect<void>) => Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | GitManagerError, R>;
     readonly subscribeWorkflowProgress: (input: {
       readonly cwd: string;
     }) => Stream.Stream<GitWorkflowProgress | null>;
@@ -5285,6 +5290,7 @@ export const make = Effect.gen(function* () {
     invalidateStatus,
     resolvePullRequest,
     preparePullRequestThread,
+    withActionProgress: workflowProgress.withActivity,
     subscribeWorkflowProgress: ({ cwd }) => workflowProgress.subscribe(cwd),
     stackStatus,
     manageStack,

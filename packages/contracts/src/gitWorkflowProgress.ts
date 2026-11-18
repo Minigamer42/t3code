@@ -16,7 +16,8 @@ export const GitWorkflowProgressUpdate = Schema.Struct({
 export type GitWorkflowProgressUpdate = typeof GitWorkflowProgressUpdate.Type;
 export const GitWorkflowProgress = Schema.Struct({
   ...GitWorkflowProgressUpdate.fields,
-  kind: Schema.Literals(["stack", "logical_commits"]),
+  kind: Schema.Literals(["stack", "logical_commits", "git_action"]),
+  activity: Schema.optional(Schema.Struct({ label: Schema.String, startedAtMs: Schema.Number })),
   state: Schema.Literals(["running", "completed", "failed", "cancelled"]),
   startedAtMs: Schema.Number,
 });
