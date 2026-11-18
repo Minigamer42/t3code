@@ -18,12 +18,12 @@ export function GitActionRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 items-center">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center">
       <ThreadDetailsControl
         variant="ghost"
         part="row"
         panel
-        className="min-w-0 flex-1"
+        className="min-w-0"
         disabled={disabled}
         onClick={onRun}
       >

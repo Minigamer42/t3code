@@ -1668,7 +1668,9 @@ export default function GitActionsControl({
           >
             <GitActionRow label={item.label} disabled onRun={() => {}} onConfigure={configure}>
               <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-              <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>{item.label}</span>
+              <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 truncate")}>
+                {item.label}
+              </span>
             </GitActionRow>
           </PopoverTrigger>
           <PopoverPopup tooltipStyle side="left" align="center">
@@ -1691,7 +1693,9 @@ export default function GitActionsControl({
         onConfigure={configure}
       >
         <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-        <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>{item.label}</span>
+        <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 truncate")}>
+          {item.label}
+        </span>
       </GitActionRow>
     );
   };
@@ -1766,7 +1770,7 @@ export default function GitActionsControl({
         }}
       >
         <SourceControlIcon />
-        <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>
+        <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 truncate")}>
           {isRegeneratingDescription
             ? `Regenerating ${changeRequestTerminology.shortLabel} title and description...`
             : `Regenerate ${changeRequestTerminology.shortLabel} title and description${availableRegenerateCandidates.length > 1 ? "..." : ""}`}
