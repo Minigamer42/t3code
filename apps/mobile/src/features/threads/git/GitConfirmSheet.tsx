@@ -46,6 +46,7 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
     | undefined;
   const branchName = params.branchName ?? "";
   const includesCommit = params.includesCommit === "true";
+  const pushOnly = !includesCommit && (confirmAction === "push" || confirmAction === "commit_push");
   const environmentId = params.environmentId ?? "";
   const threadId = params.threadId ?? "";
 
@@ -127,13 +128,13 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
       <View className="gap-3">
         <SheetActionButton
           icon="arrow.right.circle"
-          label={copy?.continueLabel ?? "Continue"}
+          label={pushOnly ? "Push on current branch" : (copy?.continueLabel ?? "Continue")}
           disabled={!canWriteSourceControl}
           onPress={() => void continuePendingAction()}
         />
         <SheetActionButton
           icon="arrow.branch"
-          label="Feature branch & continue"
+          label={pushOnly ? "Push on new branch" : "Feature branch & continue"}
           disabled={!canChangeThreadBranch}
           tone="primary"
           onPress={() => void movePendingActionToFeatureBranch()}

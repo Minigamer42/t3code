@@ -267,6 +267,18 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       void onPressMenuItem(item);
       return;
     }
+    if (item.id === "push" && isDefaultRef && !gitStatus.data?.hasWorkingTreeChanges) {
+      presentRoute(() =>
+        navigation.navigate("GitConfirm", {
+          environmentId: String(environmentId),
+          threadId: String(threadId),
+          confirmAction: "push",
+          branchName: gitStatus.data?.refName ?? "",
+          includesCommit: "false",
+        }),
+      );
+      return;
+    }
     Dialog.prompt({
       title: item.label,
       message: "Add context for this action alongside your repository instructions.",

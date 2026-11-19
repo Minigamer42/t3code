@@ -143,8 +143,11 @@ export function buildMenuItems(
   const missingReviews = getStackHasMissingReviews(gitStatus, stack);
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
-  const hasFeatureChanges =
-    hasChanges || (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0 || !hasBranch;
+  const hasDefaultBranchDelta =
+    (gitStatus.isDefaultRef
+      ? gitStatus.aheadCount
+      : (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount)) > 0;
+  const hasFeatureChanges = hasChanges || hasDefaultBranchDelta || !hasBranch;
   const canPushWithoutUpstream = hasOriginRemote && !gitStatus.hasUpstream;
   const canCommit = !isBusy && hasChanges;
   const canPush =
@@ -160,10 +163,7 @@ export function buildMenuItems(
   const canCreatePr =
     !isBusy &&
     (!hasOpenPr || missingReviews) &&
-    (missingReviews ||
-      (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0 ||
-      hasChanges ||
-      !hasBranch) &&
+    (missingReviews || hasDefaultBranchDelta || hasChanges || !hasBranch) &&
     (needsFeatureBranch || !isBehind) &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canOpenPr = !isBusy && hasOpenPr;

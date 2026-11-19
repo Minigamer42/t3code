@@ -194,9 +194,11 @@ export function buildMenuItems(
   const missingReviews = getStackHasMissingReviews(gitStatus, stack);
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
-  const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
-  const hasFeatureChanges =
-    hasChanges || (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0 || !hasBranch;
+  const hasDefaultBranchDelta =
+    (gitStatus.isDefaultRef
+      ? gitStatus.aheadCount
+      : (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount)) > 0;
+  const hasFeatureChanges = hasChanges || hasDefaultBranchDelta || !hasBranch;
   const canPushWithoutUpstream = hasPrimaryRemote && !gitStatus.hasUpstream;
   const canCommit = !isBusy && hasChanges;
   const canPush =
@@ -566,12 +568,14 @@ export function resolveDefaultBranchActionDialogCopy(input: {
   };
 }
 
-/** The server names a feature branch from the commit it makes, so the action must commit changes. */
+/** Feature branch naming can use working-tree changes or an existing committed diff. */
 export function resolveFeatureBranchUnavailableReason(input: {
   action: DefaultBranchConfirmableAction;
   branchName: string;
   hasWorkingTreeChanges: boolean;
+  hasOutgoingCommits?: boolean;
 }): string | null {
+  if (input.hasOutgoingCommits) return null;
   if (!input.hasWorkingTreeChanges) {
     return `There are no changes to commit, so a feature branch can't be named. Create a branch yourself or continue on ${input.branchName}.`;
   }

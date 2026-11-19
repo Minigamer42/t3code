@@ -1234,12 +1234,18 @@ export default function GitActionsControl({
         terminology: changeRequestTerminology,
       })
     : null;
+  const isPushOnlyDialog =
+    pendingDefaultBranchAction !== null &&
+    !pendingDefaultBranchAction.includesCommit &&
+    (pendingDefaultBranchAction.action === "push" ||
+      pendingDefaultBranchAction.action === "commit_push");
   // Keep enabled until live status loads; the server rejects stale requests.
   const featureBranchUnavailableReason = pendingDefaultBranchAction
     ? resolveFeatureBranchUnavailableReason({
         action: pendingDefaultBranchAction.action,
         branchName: pendingDefaultBranchAction.branchName,
         hasWorkingTreeChanges: gitStatus?.hasWorkingTreeChanges ?? true,
+        hasOutgoingCommits: (gitStatus?.aheadCount ?? 0) > 0,
       })
     : null;
 
@@ -1363,7 +1369,13 @@ export default function GitActionsControl({
       pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
     void runGitActionWithToast({
-      action,
+      action: featureBranch
+        ? action === "push"
+          ? "commit_push"
+          : action === "create_pr"
+            ? "commit_push_pr"
+            : action
+        : action,
       ...(commitMessage ? { commitMessage } : {}),
       ...(instructions ? { instructions } : {}),
       ...(onConfirmed ? { onConfirmed } : {}),
@@ -1639,19 +1651,26 @@ export default function GitActionsControl({
   };
   const renderGitMenuItem = (item: GitActionMenuItem) => {
     const configure =
-      item.id === "commit"
-        ? () => {
-            setExcludedFiles(new Set());
-            setIsEditingFiles(false);
-            setCommitMode("logical");
-            setIsCommitDialogOpen(true);
-          }
-        : item.id === "branch" ||
-            item.id === "pr" ||
-            (item.id === "push" &&
-              (gitStatusForActions?.hasWorkingTreeChanges || item.featureBranch))
-          ? () => setContextAction(item)
-          : undefined;
+      item.id === "push" && isDefaultRef && !gitStatusForActions?.hasWorkingTreeChanges
+        ? () =>
+            setPendingDefaultBranchAction({
+              action: "push",
+              branchName: gitStatusForActions?.refName ?? "",
+              includesCommit: false,
+            })
+        : item.id === "commit"
+          ? () => {
+              setExcludedFiles(new Set());
+              setIsEditingFiles(false);
+              setCommitMode("logical");
+              setIsCommitDialogOpen(true);
+            }
+          : item.id === "branch" ||
+              item.id === "pr" ||
+              (item.id === "push" &&
+                (gitStatusForActions?.hasWorkingTreeChanges || item.featureBranch))
+            ? () => setContextAction(item)
+            : undefined;
     const disabledReason = getMenuActionDisabledReason({
       item,
       gitStatus: gitStatusForActions,
@@ -2156,13 +2175,28 @@ export default function GitActionsControl({
         <DialogPopup className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {pendingDefaultBranchActionCopy?.title ?? "Run action on default branch?"}
+              {isPushOnlyDialog
+                ? "Push commits"
+                : (pendingDefaultBranchActionCopy?.title ?? "Run action on default branch?")}
             </DialogTitle>
-            <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
+            <DialogDescription>
+              {isPushOnlyDialog
+                ? "Push existing commits on a new branch or the current branch."
+                : pendingDefaultBranchActionCopy?.description}
+            </DialogDescription>
             {featureBranchUnavailableReason && (
               <p className="text-xs text-muted-foreground">{featureBranchUnavailableReason}</p>
             )}
           </DialogHeader>
+          {isPushOnlyDialog ? (
+            <DialogPanel>
+              <p className="text-sm">Branch: {pendingDefaultBranchAction?.branchName}</p>
+              <p className="text-sm text-muted-foreground">
+                {gitStatusForActions?.aheadCount ?? 0} outgoing{" "}
+                {(gitStatusForActions?.aheadCount ?? 0) === 1 ? "commit" : "commits"}
+              </p>
+            </DialogPanel>
+          ) : null}
           <DialogFooter variant="bare" className="sm:flex-wrap sm:items-center">
             <Button
               className="w-full sm:mr-auto sm:w-auto"
@@ -2179,7 +2213,9 @@ export default function GitActionsControl({
               onClick={() => continuePendingDefaultBranchAction(false)}
               disabled={!canWriteSourceControl}
             >
-              {pendingDefaultBranchActionCopy?.continueLabel ?? "Continue"}
+              {isPushOnlyDialog
+                ? "Push on current branch"
+                : (pendingDefaultBranchActionCopy?.continueLabel ?? "Continue")}
             </Button>
             <Button
               className="w-full max-w-full sm:w-auto"
@@ -2187,7 +2223,7 @@ export default function GitActionsControl({
               onClick={() => continuePendingDefaultBranchAction(true)}
               disabled={!canChangeThreadBranch || featureBranchUnavailableReason !== null}
             >
-              Check out feature branch & continue
+              {isPushOnlyDialog ? "Push on new branch" : "Check out feature branch & continue"}
             </Button>
           </DialogFooter>
         </DialogPopup>

@@ -167,12 +167,20 @@ describe("when: on default ref without open PR", () => {
     });
   });
 
-  it("offers a feature branch only to actions that commit the changes", () => {
+  it("offers a feature branch for working-tree changes or outgoing commits", () => {
     const reason = (action: DefaultBranchConfirmableAction, hasWorkingTreeChanges: boolean) =>
       resolveFeatureBranchUnavailableReason({ action, branchName: "main", hasWorkingTreeChanges });
     assert.isNull(reason("commit_push", true));
     assert.isNull(reason("commit_push_pr", true));
     assert.isNotNull(reason("commit_push", false));
+    assert.isNull(
+      resolveFeatureBranchUnavailableReason({
+        action: "commit_push",
+        branchName: "main",
+        hasWorkingTreeChanges: false,
+        hasOutgoingCommits: true,
+      }),
+    );
     assert.isNotNull(reason("push", true));
     assert.isNotNull(reason("create_pr", true));
   });
@@ -529,7 +537,8 @@ describe("when: HEAD is detached and there are no local changes", () => {
             refName,
             isDefaultRef: refName === "main",
             hasWorkingTreeChanges,
-            aheadOfDefaultCount: refName === null ? 0 : 2,
+            aheadCount: refName === null ? 0 : 4,
+            aheadOfDefaultCount: 0,
           }),
           false,
         );
@@ -548,10 +557,11 @@ describe("when: HEAD is detached and there are no local changes", () => {
           assert.isTrue(emptyDefault.find((item) => item.id === id)?.disabled);
         }
         assert.equal(items.find((item) => item.id === "commit")?.disabled, !hasWorkingTreeChanges);
+        assert.equal(items.find((item) => item.id === "push")?.featureBranch === true, true);
         for (const id of ["push", "pr"]) {
           assert.deepInclude(
             items.find((item) => item.id === id),
-            { disabled: false, featureBranch: true },
+            { disabled: false },
           );
         }
       }

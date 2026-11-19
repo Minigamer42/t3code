@@ -109,6 +109,15 @@ describe("git action copy", () => {
     for (const id of ["branch", "push", "pr"]) {
       expect(emptyDefault.find((item) => item.id === id)?.disabled).toBe(true);
     }
+    const outgoingDefault = buildMenuItems(
+      status({ refName: "main", isDefaultRef: true, aheadCount: 4, aheadOfDefaultCount: 0 }),
+      false,
+    );
+    for (const id of ["branch", "push", "pr"]) {
+      expect(outgoingDefault.find((item) => item.id === id)?.disabled).toBe(false);
+    }
+    expect(outgoingDefault.find((item) => item.id === "commit")?.disabled).toBe(true);
+    expect(outgoingDefault.find((item) => item.id === "push")?.featureBranch).toBe(true);
     for (const refName of [null, "main"]) {
       const items = buildMenuItems(
         status({
