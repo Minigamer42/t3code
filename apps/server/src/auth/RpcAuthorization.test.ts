@@ -37,6 +37,9 @@ describe("RPC authorization scopes", () => {
   });
 
   it("requires source-control write access to start a commit workflow", () => {
+    expect(RPC_REQUIRED_SCOPES[WS_METHODS.gitRefreshCiActivities]).toBe(
+      AuthSourceControlWriteScope,
+    );
     expect(RPC_REQUIRED_SCOPES[WS_METHODS.gitDismissCiActivity]).toBe(
       AuthOrchestrationOperateScope,
     );

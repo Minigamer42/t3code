@@ -339,6 +339,9 @@ the pushed branch, the activity links to it; ambiguous pushes are tracked withou
 repair. External pushes start CI tracking and recovery; local `afterPush` hooks still run only for T3
 push actions. Pushes made before the server starts are not discovered retrospectively.
 
+Use **Refresh CI** to recheck visible pipelines after retrying jobs in GitLab. Failed or cancelled
+entries resume tracking if the pipeline is running again; recovery allowances are preserved.
+
 Successful activities disappear automatically. Failed, cancelled, and skipped activities remain until
 you dismiss them; dismissal applies across connected clients and persists across restarts. Running
 activities cannot be dismissed. A newer push supersedes unfinished tracking for the previous revision.

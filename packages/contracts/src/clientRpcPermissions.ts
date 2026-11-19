@@ -59,6 +59,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gitRunStackedAction]: AuthSourceControlWriteScope,
   [WS_METHODS.gitStartCommitWorkflow]: AuthSourceControlWriteScope,
   [WS_METHODS.gitCancelCommitWorkflow]: AuthSourceControlWriteScope,
+  [WS_METHODS.gitRefreshCiActivities]: AuthSourceControlWriteScope,
   [WS_METHODS.gitDismissCiActivity]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitStackManage]: AuthSourceControlWriteScope,
   [WS_METHODS.gitRewriteCommitMessages]: AuthSourceControlWriteScope,

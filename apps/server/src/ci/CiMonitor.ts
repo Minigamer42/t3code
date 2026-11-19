@@ -54,6 +54,11 @@ const encodeMatchContext = Schema.encodeEffect(
 );
 
 type Record = typeof Record.Type;
+function visibleRecords(items: readonly Record[]) {
+  return items
+    .filter((item) => !item.dismissed && item.activity.state !== "passed")
+    .filter((item, index) => !isCiActivityFinished(item.activity) || index < 10);
+}
 const samePipeline = (a: CiActivity["pipeline"], b: CiActivity["pipeline"]) =>
   a === b ||
   (a !== null &&
@@ -108,6 +113,7 @@ export class CiMonitor extends Context.Service<
     readonly dismiss: (activityId: string) => Effect.Effect<void, GitManagerError>;
     readonly subscribe: Stream.Stream<readonly CiActivity[]>;
     readonly sweep: Effect.Effect<void, GitManagerError>;
+    readonly refresh: Effect.Effect<void, GitManagerError>;
     readonly start: (
       wake: (
         activity: CiActivity,
@@ -326,16 +332,21 @@ export const make = Effect.gen(function* () {
     });
   });
   const sweep = Effect.fn("CiMonitor.sweep")(
-    function* () {
+    function* (refreshFinished: boolean) {
       yield* sweeper.withPermit(
         Effect.gen(function* () {
           const all = yield* SubscriptionRef.get(records);
           yield* Effect.forEach(
-            all,
+            refreshFinished ? visibleRecords(all) : all,
             (record) =>
               Effect.gen(function* () {
-                if (record.dismissed || publications.has(record.activity.cwd)) return;
-                if (!isCiActivityFinished(record.activity))
+                if (
+                  record.dismissed ||
+                  publications.has(record.activity.cwd) ||
+                  record.activity.state === "superseded"
+                )
+                  return;
+                if (refreshFinished || !isCiActivityFinished(record.activity))
                   record = yield* check(record).pipe(
                     Effect.catch((cause) =>
                       Effect.gen(function* () {
@@ -697,21 +708,17 @@ export const make = Effect.gen(function* () {
         ),
     ),
     subscribe: SubscriptionRef.changes(records).pipe(
-      Stream.map((items) =>
-        items
-          .filter((item) => !item.dismissed && item.activity.state !== "passed")
-          .filter((item, index) => !isCiActivityFinished(item.activity) || index < 10)
-          .map((item) => item.activity),
-      ),
+      Stream.map((items) => visibleRecords(items).map((item) => item.activity)),
     ),
-    sweep: sweep(),
+    refresh: sweep(true),
+    sweep: sweep(false),
     start: Effect.fn("CiMonitor.start")(function* (onFailure, discover) {
       if (started) return;
       started = true;
       wake = onFailure;
       yield* forkParked(
         (discover ?? Effect.void).pipe(
-          Effect.andThen(sweep()),
+          Effect.andThen(sweep(false)),
           Effect.ignore({ log: true }),
           Effect.repeat(Schedule.spaced("20 seconds")),
         ),

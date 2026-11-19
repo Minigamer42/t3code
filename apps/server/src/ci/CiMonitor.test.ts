@@ -250,6 +250,50 @@ it.layer(NodeServices.layer)("background CI", (it) => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect(
+    "refreshes external retries without resetting allowances or restoring dismissed entries",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const service = yield* f.make;
+        yield* service.register(f.input);
+        yield* service.sweep;
+        yield* service.sweep;
+        expect((yield* f.snapshots(service))[0]?.state).toBe("failed");
+        expect(f.posts()).toBe(1);
+        f.setMatch(1);
+        yield* service.register({ ...f.input, branch: "dismissed" });
+        yield* service.sweep;
+        yield* service.dismiss(
+          (yield* f.snapshots(service)).find((item) => item.branch === "dismissed")!.id,
+        );
+        f.setPipeline({
+          ...f.pipeline()!,
+          status: "running",
+          jobs: [{ ...f.pipeline()!.jobs[0]!, status: "running" }],
+        });
+        const before = f.reads();
+        yield* service.refresh;
+        expect(f.reads() - before).toBe(1);
+        expect((yield* f.snapshots(service))[0]).toMatchObject({
+          state: "running",
+          attempts: { repair: 1 },
+        });
+        expect(f.posts()).toBe(1);
+        const restarted = yield* f.make;
+        f.setPipeline({
+          ...f.pipeline()!,
+          status: "success",
+          jobs: [{ ...f.pipeline()!.jobs[0]!, status: "success" }],
+        });
+        yield* restarted.refresh;
+        expect(yield* f.snapshots(restarted)).toEqual([]);
+        const finished = f.reads();
+        yield* restarted.refresh;
+        expect(f.reads()).toBe(finished);
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("tracks the push destination instead of the comparison upstream", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
@@ -298,6 +342,18 @@ it.layer(NodeServices.layer)("background CI", (it) => {
         const restarted = yield* f.make;
         yield* restarted.start(wake);
         yield* restarted.sweep;
+        f.setPipeline({
+          ...f.pipeline()!,
+          status: "running",
+          jobs: [{ ...f.pipeline()!.jobs[0]!, status: "running" }],
+        });
+        yield* restarted.refresh;
+        f.setPipeline({
+          ...f.pipeline()!,
+          status: "failed",
+          jobs: [{ ...f.pipeline()!.jobs[0]!, status: "failed" }],
+        });
+        yield* restarted.refresh;
         expect(deliveries).toEqual([f.input.threadId]);
       }).pipe(Effect.scoped),
   );

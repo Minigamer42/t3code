@@ -56,6 +56,10 @@ export function createGitEnvironmentAtoms<R, E>(
       invalidateCachedVcsRefs(registry, { environmentId, cwd: input.cwd }),
   });
   return {
+    refreshCiActivities: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:refresh-ci-activities",
+      tag: WS_METHODS.gitRefreshCiActivities,
+    }),
     dismissCiActivity: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:git:dismiss-ci-activity",
       tag: WS_METHODS.gitDismissCiActivity,
