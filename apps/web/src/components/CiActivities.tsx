@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { XIcon } from "lucide-react";
+import { useState } from "react";
+import { RefreshCwIcon, XIcon } from "lucide-react";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -14,6 +15,9 @@ import { cn } from "~/lib/utils";
 export function CiActivities({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const query = useEnvironmentQuery(gitEnvironment.ciActivities({ environmentId, input: {} }));
   const navigate = useNavigate();
+  const refresh = useAtomCommand(gitEnvironment.refreshCiActivities, { reportFailure: true });
+  const canRefresh = useAtomValue(gitEnvironment.refreshCiActivities.permissionAtom(environmentId));
+  const [refreshing, setRefreshing] = useState(false);
   const dismiss = useAtomCommand(gitEnvironment.dismissCiActivity, { reportFailure: true });
   const permitted = useAtomValue(gitEnvironment.dismissCiActivity.permissionAtom(environmentId));
   const activities = (query.data ?? []).filter((activity) => activity.state !== "superseded");
@@ -23,7 +27,29 @@ export function CiActivities({ environmentId }: { readonly environmentId: Enviro
       className="max-h-48 min-w-0 overflow-y-auto border-t border-border px-2 py-3"
       aria-label="Background CI activities"
     >
-      <p className="px-2 pb-1 text-xs text-muted-foreground">CI</p>
+      <div className="flex items-center gap-1 px-2 pb-1">
+        <p className="text-xs text-muted-foreground">CI</p>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label="Refresh CI"
+                aria-busy={refreshing}
+                disabled={!canRefresh || refreshing}
+                onClick={() => {
+                  setRefreshing(true);
+                  void refresh({ environmentId, input: {} }).finally(() => setRefreshing(false));
+                }}
+              >
+                <RefreshCwIcon className={refreshing ? "opacity-50" : undefined} />
+              </Button>
+            }
+          />
+          <TooltipPopup>{refreshing ? "Refreshing CI…" : "Refresh CI"}</TooltipPopup>
+        </Tooltip>
+      </div>
       {activities.map((activity) => {
         const jobs = ciProgressJobs(activity.pipeline?.jobs ?? []);
         const changeRequest = activity.pipeline?.changeRequest;
