@@ -1083,8 +1083,7 @@ export const make = Effect.gen(function* () {
       }
       const baseHead = yield* text(cwd, ["rev-parse", "--verify", `${saved.baseRef}^{commit}`]);
       const originalHeads: Record<string, string> = {};
-      for (const layer of saved.layers)
-        originalHeads[layer.branch] = yield* head(cwd, layer.branch);
+      for (const layer of layers) originalHeads[layer.branch] = yield* head(cwd, layer.branch);
       layers = yield* Effect.forEach(layers, (layer, index) =>
         refreshParentHead(
           cwd,
@@ -1372,7 +1371,20 @@ export const make = Effect.gen(function* () {
       const existing =
         input.action === "edit"
           ? all.find((stack) => stack.layers.some((layer) => layer.branch === currentBranch))
-          : extension && extendsStack(extension, base, branches)
+          : extension &&
+              extendsStack(
+                {
+                  ...extension,
+                  layers: extension.layers.filter(
+                    (layer) =>
+                      !status.layers.some(
+                        (item) => item.branch === layer.branch && item.headSha === null,
+                      ),
+                  ),
+                },
+                base,
+                branches,
+              )
             ? extension
             : undefined;
       if (
@@ -1401,11 +1413,21 @@ export const make = Effect.gen(function* () {
             cwd,
             `Branch ${branch} is not based on ${branches[index - 1]}. Restack it with its current manager before adopting it.`,
           );
+        const previousIndex = existing?.layers.findIndex((layer) => layer.branch === branch) ?? -1;
+        const previous = existing?.layers[previousIndex];
+        const previousParent = existing?.layers[previousIndex - 1]?.branch;
         const parentHead =
-          index === 0
-            ? yield* text(cwd, ["merge-base", parent, `refs/heads/${branch}`])
-            : parentTip;
-        const previous = existing?.layers.find((layer) => layer.branch === branch);
+          index === 0 && previous && previousParent && mergedBranches.includes(previousParent)
+            ? yield* refreshParentHead(
+                cwd,
+                branch,
+                previous.parentHead,
+                parentTip,
+                yield* head(cwd, branch),
+              )
+            : index === 0
+              ? yield* text(cwd, ["merge-base", parent, `refs/heads/${branch}`])
+              : parentTip;
         layers.push({
           branch,
           parentHead,

@@ -15,10 +15,13 @@ const decodeSavedStacks = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Array(
       Schema.Struct({
+        base: Schema.String,
+        baseRef: Schema.String,
         remote: Schema.String,
         layers: Schema.Array(
           Schema.Struct({
             branch: Schema.String,
+            parentHead: Schema.String,
             remoteHead: Schema.NullOr(Schema.String),
           }),
         ),
@@ -945,6 +948,96 @@ it.layer(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))("branch 
       expect(yield* f.git(["show", "c:suggestion.txt"])).toBe("reviewer suggestion");
     }).pipe(Effect.scoped),
   );
+  it.effect.each([
+    ["merge", "update"],
+    ["merge", "edit"],
+    ["merge", "adopt"],
+    ["merge", "untrack"],
+    ["squash", "update"],
+    ["squash", "edit"],
+    ["squash", "adopt"],
+    ["squash", "untrack"],
+  ] as const)(
+    "recovers a %s-merged deleted parent through %s without touching another stack",
+    ([merge, action]) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* f.stacks.manage({ cwd: f.cwd, action: "adopt", base: "main", branches: ["a", "b"] });
+        yield* f.git(["checkout", "c"]);
+        yield* f.stacks.manage({ cwd: f.cwd, action: "adopt", base: "main", branches: ["c"] });
+        const statePath = f.path.join(f.cwd, ".git/t3-branch-stacks.json");
+        const before = yield* f.fs.readFileString(statePath);
+        const unrelated = decodeSavedStacks(before).find(
+          (stack) => stack.layers[0]?.branch === "c",
+        );
+        const child = yield* f.git(["rev-parse", "b"]);
+        const tree = yield* f.git(["rev-parse", "b^{tree}"]);
+        const parent = yield* f.git(["rev-parse", "a"]);
+        const featurePatch = yield* f.git(["diff", "--binary", parent, child]);
+        const other = yield* f.git(["rev-parse", "c"]);
+        yield* f.git(["checkout", "main"]);
+        if (merge === "merge") yield* f.git(["merge", "--no-ff", "a", "-m", "Merge parent"]);
+        else {
+          yield* f.git(["merge", "--squash", "a"]);
+          yield* f.git(["commit", "-m", "Squash parent"]);
+        }
+        yield* f.git(["push", "origin", "main", ":a"]);
+        yield* f.git(["push", "fork", ":a"]);
+        yield* f.git(["checkout", "b"]);
+        yield* f.git(["branch", "-D", "a"]);
+        const status = yield* f.stacks.inspect(f.cwd);
+        expect(status.layers.map((layer) => layer.branch)).toEqual(["a", "b"]);
+        expect(status.layers[0]?.headSha).toBeNull();
+        expect(status.layers[1]?.parentHead).toBe(parent);
+        expect(yield* f.fs.readFileString(statePath)).toBe(before);
+        const result = yield* f.stacks.manage(
+          { cwd: f.cwd, action, base: "main", branches: ["b"], includeLatestBase: true },
+          ["a"],
+        );
+        if (action === "untrack") expect(result.managed).toBe(false);
+        else {
+          expect(result.layers.map((layer) => layer.branch)).toEqual(["b"]);
+          if (action !== "update") {
+            expect(yield* f.git(["rev-parse", "b"])).toBe(child);
+            expect(result.layers[0]?.parentHead).toBe(parent);
+            yield* f.stacks.update(f.cwd, { includeLatestBase: true });
+          }
+          expect(yield* f.git(["rev-list", "--count", "origin/main..b"])).toBe("1");
+          expect(yield* f.git(["merge-base", "b", "origin/main"])).toBe(
+            yield* f.git(["rev-parse", "origin/main"]),
+          );
+        }
+        expect(yield* f.git(["rev-parse", "b^{tree}"])).toBe(tree);
+        expect(yield* f.git(["diff", "--binary", "origin/main", "b"])).toBe(featurePatch);
+        for (const remote of ["origin", "fork"])
+          expect(yield* f.remoteHead(remote, "b")).toBe(child);
+        expect(yield* f.git(["rev-parse", "c"])).toBe(other);
+        expect(
+          decodeSavedStacks(yield* f.fs.readFileString(statePath)).find(
+            (stack) => stack.layers[0]?.branch === "c",
+          ),
+        ).toEqual(unrelated);
+        expect(
+          (yield* f.git(["show-ref", "--verify", "--quiet", "refs/heads/a"]).pipe(Effect.exit))
+            ._tag,
+        ).toBe("Failure");
+        for (const remote of ["origin", "fork"])
+          expect(yield* f.git(["ls-remote", "--heads", remote, "refs/heads/a"])).toBe("");
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("reports the failing stack Git command and its diagnostic", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const error = yield* f.stacks
+        .manage({ cwd: f.cwd, action: "adopt", base: "main", branches: ["absent", "b"] })
+        .pipe(Effect.flip);
+      expect(error.message).toContain("git rev-parse --verify refs/heads/absent^{commit}");
+      expect(error.message).toContain("fatal:");
+      expect(error.cause).toBeDefined();
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("handles a squash-merged layer whose remote branch was deleted", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
