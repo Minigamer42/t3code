@@ -164,6 +164,37 @@ it.layer(NodeServices.layer)("background CI", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect(
+    "dismisses finished activities persistently without removing running work or retry budgets",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const service = yield* f.make;
+        yield* service.register(f.input);
+        const id = (yield* f.snapshots(service))[0]!.id;
+        const error = yield* service.dismiss(id).pipe(Effect.flip);
+        expect(error.detail).toBe("Running CI activities cannot be dismissed.");
+        yield* service.sweep;
+        expect(f.posts()).toBe(1);
+        f.setMatch(1);
+        yield* service.sweep;
+        expect((yield* f.snapshots(service))[0]?.state).toBe("failed");
+        yield* service.register({ ...f.input, branch: "still-running" });
+        yield* service.dismiss(id);
+        yield* service.dismiss(id);
+        expect((yield* f.snapshots(service)).map((item) => item.branch)).toEqual(["still-running"]);
+        const restarted = yield* f.make;
+        yield* restarted.register(f.input);
+        expect((yield* f.snapshots(restarted)).map((item) => item.branch)).toEqual([
+          "still-running",
+        ]);
+        const stored = JSON.parse(
+          yield* f.fs.readFileString(`${f.cwd}/userdata/ci-activities.json`),
+        ) as Array<{ activity: CiActivity }>;
+        expect(stored.find((item) => item.activity.id === id)?.activity.attempts.repair).toBe(1);
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("tracks the push destination instead of the comparison upstream", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
@@ -275,7 +306,13 @@ it.layer(NodeServices.layer)("background CI", (it) => {
         jobs: [{ ...f.pipeline()!.jobs[0]!, status: "success" }],
       });
       yield* restarted.sweep;
-      expect((yield* f.snapshots(restarted))[0]?.state).toBe("passed");
+      expect((yield* f.snapshots(restarted)).some((item) => item.sha === nextInput.sha)).toBe(
+        false,
+      );
+      const afterSuccess = yield* f.make;
+      expect((yield* f.snapshots(afterSuccess)).some((item) => item.sha === nextInput.sha)).toBe(
+        false,
+      );
     }).pipe(Effect.scoped),
   );
 

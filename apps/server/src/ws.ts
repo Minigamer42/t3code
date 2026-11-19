@@ -3204,6 +3204,7 @@ export const layerWsRpc = (
         [WS_METHODS.gitSubscribeWorkflowProgress]: (input) =>
           gitWorkflow.subscribeWorkflowProgress(input),
         [WS_METHODS.gitSubscribeCiActivities]: () => ciMonitor.subscribe,
+        [WS_METHODS.gitDismissCiActivity]: (input) => ciMonitor.dismiss(input.activityId),
         [WS_METHODS.gitStackStatus]: (input) => gitWorkflow.stackStatus(input),
         [WS_METHODS.gitStackManage]: (input) =>
           gitWorkflow.manageStack(input).pipe(

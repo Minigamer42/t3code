@@ -490,6 +490,7 @@ export const WS_METHODS = {
   gitCancelCommitWorkflow: "git.cancelCommitWorkflow",
   gitSubscribeWorkflowProgress: "git.subscribeWorkflowProgress",
   gitSubscribeCiActivities: "git.subscribeCiActivities",
+  gitDismissCiActivity: "git.dismissCiActivity",
   gitStackStatus: "git.stackStatus",
   gitStackManage: "git.stackManage",
   gitListRewriteableCommits: "git.listRewriteableCommits",
@@ -1611,6 +1612,11 @@ const WsGitCiActivitiesRpc = Rpc.make(WS_METHODS.gitSubscribeCiActivities, {
   error: EnvironmentAuthorizationError,
   stream: true,
 });
+const WsGitDismissCiActivityRpc = Rpc.make(WS_METHODS.gitDismissCiActivity, {
+  payload: Schema.Struct({ activityId: Schema.String }),
+  success: Schema.Void,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
 const WsGitStackStatusRpc = Rpc.make(WS_METHODS.gitStackStatus, {
   payload: GitStackStatusInput,
   success: GitStackStatusResult,
@@ -2358,6 +2364,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitWorkflowProgressRpc,
   WsGitCiActivitiesRpc,
+  WsGitDismissCiActivityRpc,
   WsGitStackStatusRpc,
   WsGitStackManageRpc,
   WsGitListRewriteableCommitsRpc,

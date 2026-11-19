@@ -228,6 +228,7 @@ describe("command permissions", () => {
   );
 
   it.effect.each([
+    WS_METHODS.gitDismissCiActivity,
     WS_METHODS.scheduledTasksDelete,
     ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
     ORCHESTRATION_V2_WS_METHODS.stopTool,

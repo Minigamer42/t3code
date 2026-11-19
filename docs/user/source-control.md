@@ -333,7 +333,9 @@ Create `.t3code/ci.json` to track CI after pushes made through T3, including MCP
 publication. GitLab is currently supported. Tracking runs on the connected server, persists across
 restarts, and leaves checkout actions available. The CI entry shows the pushed revision, job status
 and recovery outcome; selecting it returns to the originating thread without switching branches.
-A newer push supersedes unfinished tracking for the previous revision.
+Successful activities disappear automatically. Failed, cancelled, and skipped activities remain until
+you dismiss them; dismissal applies across connected clients and persists across restarts. Running
+activities cannot be dismissed. A newer push supersedes unfinished tracking for the previous revision.
 
 An empty `{}` enables tracking only. Add project-owned recovery predicates for known transient
 failures:

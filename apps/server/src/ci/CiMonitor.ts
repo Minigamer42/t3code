@@ -1,5 +1,6 @@
 import {
   CiActivity,
+  isCiActivityFinished,
   CiPipeline,
   CiJob,
   CommandId,
@@ -33,6 +34,7 @@ const Record = Schema.Struct({
   directory: Schema.String,
   notified: Schema.Boolean,
   readFailures: Schema.Number,
+  dismissed: Schema.optionalKey(Schema.Boolean),
 });
 const Records = Schema.Array(Record);
 const decodeRecords = Schema.decodeUnknownEffect(Schema.fromJsonString(Records));
@@ -52,8 +54,6 @@ const encodeMatchContext = Schema.encodeEffect(
 );
 
 type Record = typeof Record.Type;
-const terminal = (state: CiActivity["state"]) =>
-  ["passed", "failed", "superseded", "cancelled", "skipped"].includes(state);
 const samePipeline = (a: CiActivity["pipeline"], b: CiActivity["pipeline"]) =>
   a === b ||
   (a !== null &&
@@ -95,6 +95,7 @@ export class CiMonitor extends Context.Service<
       localBranch?: string;
       threadId: ThreadId | null;
     }) => Effect.Effect<void, GitManagerError>;
+    readonly dismiss: (activityId: string) => Effect.Effect<void, GitManagerError>;
     readonly subscribe: Stream.Stream<readonly CiActivity[]>;
     readonly sweep: Effect.Effect<void, GitManagerError>;
     readonly start: (
@@ -136,13 +137,14 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const all = yield* SubscriptionRef.get(records);
         const old = all.find((item) => item.activity.id === record.activity.id);
+        if (old?.dismissed && !record.dismissed) return;
         if (old?.activity.state === "superseded" && record.activity.state !== "superseded") return;
         const next = [
           record,
           ...all.filter((item) => item.activity.id !== record.activity.id),
         ].sort((a, b) => b.activity.startedAt - a.activity.startedAt);
         const retained = next.filter(
-          (item, index) => !terminal(item.activity.state) || index < 200,
+          (item, index) => !isCiActivityFinished(item.activity) || index < 200,
         );
         yield* fs.makeDirectory(stateDir, { recursive: true });
         yield* fs.writeFileString(`${filename}.tmp`, yield* encodeRecords(retained), {
@@ -185,7 +187,7 @@ export const make = Effect.gen(function* () {
     if (!read.current)
       return yield* update(record, {
         state: "superseded",
-        label: "A newer revision superseded this push.",
+        label: "Remote branch removed or updated since this push.",
       });
     record = { ...record, readFailures: 0 };
     const pipeline = read.pipeline;
@@ -319,8 +321,8 @@ export const make = Effect.gen(function* () {
             all,
             (record) =>
               Effect.gen(function* () {
-                if (publications.has(record.activity.cwd)) return;
-                if (!terminal(record.activity.state))
+                if (record.dismissed || publications.has(record.activity.cwd)) return;
+                if (!isCiActivityFinished(record.activity))
                   record = yield* check(record).pipe(
                     Effect.catch((cause) =>
                       Effect.gen(function* () {
@@ -403,7 +405,7 @@ export const make = Effect.gen(function* () {
           old.activity.host === input.host &&
           old.activity.repository === input.repository &&
           old.activity.branch === input.branch &&
-          !terminal(old.activity.state)
+          !isCiActivityFinished(old.activity)
         )
           yield* update(old, {
             state: "superseded",
@@ -516,10 +518,39 @@ export const make = Effect.gen(function* () {
           ),
         ),
     ),
+    dismiss: Effect.fn("CiMonitor.dismiss")(
+      function* (activityId: string) {
+        const record = (yield* SubscriptionRef.get(records)).find(
+          (item) => item.activity.id === activityId,
+        );
+        if (!record || record.dismissed) return;
+        if (!isCiActivityFinished(record.activity))
+          return yield* new GitManagerError({
+            cwd: record.activity.cwd,
+            operation: "ci",
+            detail: "Running CI activities cannot be dismissed.",
+          });
+        yield* save({ ...record, dismissed: true });
+      },
+      (effect) =>
+        effect.pipe(
+          Effect.mapError((cause) =>
+            isManagerError(cause)
+              ? cause
+              : new GitManagerError({
+                  cwd: stateDir,
+                  operation: "ci",
+                  detail: "CI activity could not be dismissed.",
+                  cause,
+                }),
+          ),
+        ),
+    ),
     subscribe: SubscriptionRef.changes(records).pipe(
       Stream.map((items) =>
         items
-          .filter((item, index) => !terminal(item.activity.state) || index < 10)
+          .filter((item) => !item.dismissed && item.activity.state !== "passed")
+          .filter((item, index) => !isCiActivityFinished(item.activity) || index < 10)
           .map((item) => item.activity),
       ),
     ),
