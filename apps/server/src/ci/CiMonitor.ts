@@ -62,6 +62,8 @@ const samePipeline = (a: CiActivity["pipeline"], b: CiActivity["pipeline"]) =>
     a.sha === b.sha &&
     a.status === b.status &&
     a.url === b.url &&
+    a.changeRequest?.number === b.changeRequest?.number &&
+    a.changeRequest?.url === b.changeRequest?.url &&
     a.jobs.length === b.jobs.length &&
     a.jobs.every((job, index) => {
       const other = b.jobs[index]!;

@@ -21,6 +21,36 @@ const Job = Schema.Struct({
   web_url: Schema.NullOr(Schema.String),
   allow_failure: Schema.Boolean,
 });
+const PipelineGraphPage = Schema.Struct({
+  data: Schema.Struct({
+    project: Schema.Struct({
+      pipeline: Schema.Struct({
+        stages: Schema.Struct({
+          nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
+          pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+        }),
+        jobs: Schema.Struct({
+          nodes: Schema.Array(
+            Schema.Struct({
+              name: Schema.String,
+              stage: Schema.Struct({ name: Schema.String }),
+              needs: Schema.Struct({
+                nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
+                pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+              }),
+            }),
+          ),
+          pageInfo: Schema.Struct({
+            hasNextPage: Schema.Boolean,
+            endCursor: Schema.NullOr(Schema.String),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+const encodeGraphLiteral = Schema.encodeEffect(Schema.fromJsonString(Schema.NullOr(Schema.String)));
+const decodeGraphPage = Schema.decodeUnknownEffect(PipelineGraphPage);
 const decodePipeline = Schema.decodeUnknownEffect(Pipeline);
 const decodeJobs = Schema.decodeUnknownEffect(Schema.Array(Job));
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
@@ -39,6 +69,7 @@ export const make = Effect.gen(function* () {
     input: { cwd: string; host: string; repository: string },
     endpoint: string,
     method = "GET",
+    query?: string,
   ) {
     return yield* cli
       .execute({
@@ -49,7 +80,9 @@ export const make = Effect.gen(function* () {
           input.host,
           "--method",
           method,
-          `projects/${encodeURIComponent(input.repository)}/${endpoint}`,
+          ...(query
+            ? ["graphql", "--raw-field", `query=${query}`]
+            : [`projects/${encodeURIComponent(input.repository)}/${endpoint}`]),
         ],
         maxOutputBytes: 4_000_000,
       })
@@ -79,8 +112,9 @@ export const make = Effect.gen(function* () {
   const json = Effect.fn("GitLabCi.json")(function* (
     input: { cwd: string; host: string; repository: string },
     endpoint: string,
+    query?: string,
   ) {
-    const reply = yield* request(input, endpoint);
+    const reply = yield* request(input, endpoint, query ? "POST" : "GET", query);
     return yield* decodeJson(reply.stdout).pipe(
       Effect.mapError(
         (cause) =>
@@ -137,13 +171,17 @@ export const make = Effect.gen(function* () {
           });
         const mr = candidates[0];
         let raw: unknown;
+        let changeRequest: { number: number; url: string } | undefined;
         if (mr) {
           const detail = yield* json(input, `merge_requests/${mr.iid}`).pipe(
             Effect.flatMap(
-              Schema.decodeUnknownEffect(Schema.Struct({ head_pipeline: Schema.NullOr(Pipeline) })),
+              Schema.decodeUnknownEffect(
+                Schema.Struct({ head_pipeline: Schema.NullOr(Pipeline), web_url: Schema.String }),
+              ),
             ),
           );
           raw = detail.head_pipeline;
+          changeRequest = { number: mr.iid, url: detail.web_url };
         } else {
           const pipelines = yield* json(
             input,
@@ -172,6 +210,65 @@ export const make = Effect.gen(function* () {
           jobs.push(...batch);
           if (batch.length < 100) break;
         }
+        const metadata: (typeof PipelineGraphPage.Type.data.project.pipeline.jobs.nodes)[number][] =
+          [];
+        let stageNames: string[] = [];
+        let cursor: string | null = null;
+        const repositoryLiteral = yield* encodeGraphLiteral(input.repository);
+        while (true) {
+          const afterLiteral: string = yield* encodeGraphLiteral(cursor);
+          const query: string = `query { project(fullPath: ${repositoryLiteral}) { pipeline(id: "gid://gitlab/Ci::Pipeline/${pipeline.id}") { stages(first: 100) { nodes { name } pageInfo { hasNextPage } } jobs(first: 100, after: ${afterLiteral}) { nodes { name stage { name } needs(first: 100) { nodes { name } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } } } } }`;
+          const graph: typeof PipelineGraphPage.Type.data.project.pipeline = (yield* json(
+            input,
+            "graphql",
+            query,
+          ).pipe(Effect.flatMap(decodeGraphPage))).data.project.pipeline;
+          if (
+            graph.stages.pageInfo.hasNextPage ||
+            graph.jobs.nodes.some((job) => job.needs.pageInfo.hasNextPage)
+          )
+            return yield* new SourceControlProviderError({
+              provider: SourceControlProviderKind.make("gitlab"),
+              cwd: input.cwd,
+              operation: "ci",
+              detail: "GitLab pipeline dependency data exceeded the page limit.",
+            });
+          stageNames = graph.stages.nodes.map((stage) => stage.name);
+          metadata.push(...graph.jobs.nodes);
+          if (!graph.jobs.pageInfo.hasNextPage) break;
+          const next: string | null = graph.jobs.pageInfo.endCursor;
+          if (!next || next === cursor)
+            return yield* new SourceControlProviderError({
+              provider: SourceControlProviderKind.make("gitlab"),
+              cwd: input.cwd,
+              operation: "ci",
+              detail: "GitLab pipeline dependency pagination did not advance.",
+            });
+          cursor = next;
+        }
+        const byName = new Map(metadata.map((job) => [job.name, job]));
+        const stageOrder = new Map(stageNames.map((name, index) => [name, index]));
+        const remaining = jobs.toSorted(
+          (a, b) =>
+            (stageOrder.get(byName.get(a.name)?.stage.name ?? "") ?? stageNames.length) -
+              (stageOrder.get(byName.get(b.name)?.stage.name ?? "") ?? stageNames.length) ||
+            a.name.localeCompare(b.name),
+        );
+        const ordered: typeof jobs = [];
+        while (remaining.length) {
+          const pendingNames = new Set(remaining.map((job) => job.name));
+          const index = remaining.findIndex((job) =>
+            (byName.get(job.name)?.needs.nodes ?? []).every((need) => !pendingNames.has(need.name)),
+          );
+          if (index === -1)
+            return yield* new SourceControlProviderError({
+              provider: SourceControlProviderKind.make("gitlab"),
+              cwd: input.cwd,
+              operation: "ci",
+              detail: "GitLab returned cyclic pipeline dependencies.",
+            });
+          ordered.push(...remaining.splice(index, 1));
+        }
         return {
           current: true,
           pipeline: {
@@ -179,7 +276,8 @@ export const make = Effect.gen(function* () {
             sha: pipeline.sha,
             status: pipeline.status,
             url: pipeline.web_url,
-            jobs: jobs.map((job) => ({
+            ...(changeRequest ? { changeRequest } : {}),
+            jobs: ordered.map((job) => ({
               id: String(job.id),
               name: job.name,
               status: job.status,

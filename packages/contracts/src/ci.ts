@@ -15,6 +15,7 @@ export const CiPipeline = Schema.Struct({
   status: Schema.String,
   url: Schema.String,
   jobs: Schema.Array(CiJob),
+  changeRequest: Schema.optionalKey(Schema.Struct({ number: Schema.Number, url: Schema.String })),
 });
 export type CiPipeline = typeof CiPipeline.Type;
 export const CiActivity = Schema.Struct({

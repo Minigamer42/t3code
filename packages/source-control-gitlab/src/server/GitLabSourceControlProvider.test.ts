@@ -540,7 +540,38 @@ it.effect("tracks the pushed revision across merged-result and branch pipelines"
           executeCalls.push([...input.args]);
           const endpoint = input.args[5]!;
           let value: unknown;
-          if (input.args.includes("POST")) value = {};
+          if (input.args.includes("graphql")) {
+            const nextPage = input.args.some((arg) => arg.includes('after: "next"'));
+            value = {
+              data: {
+                project: {
+                  pipeline: {
+                    stages: {
+                      nodes: [{ name: "deploy" }, { name: "test" }],
+                      pageInfo: { hasNextPage: false },
+                    },
+                    jobs: {
+                      nodes: (nextPage
+                        ? [{ name: "test", stage: "test", needs: ["deploy"] }]
+                        : [
+                            { name: "deploy", stage: "deploy", needs: ["prepare"] },
+                            { name: "prepare", stage: "deploy", needs: [] },
+                          ]
+                      ).map((job) => ({
+                        name: job.name,
+                        stage: { name: job.stage },
+                        needs: {
+                          nodes: job.needs.map((name) => ({ name })),
+                          pageInfo: { hasNextPage: false },
+                        },
+                      })),
+                      pageInfo: { hasNextPage: !nextPage, endCursor: nextPage ? null : "next" },
+                    },
+                  },
+                },
+              },
+            };
+          } else if (input.args.includes("POST")) value = {};
           else if (endpoint.endsWith("/trace")) return processOutput("failed job trace");
           else if (endpoint.includes("repository/branches/"))
             value = { commit: { id: newer ? "new-head" : sha } };
@@ -548,6 +579,7 @@ it.effect("tracks the pushed revision across merged-result and branch pipelines"
             value = mr ? [{ iid: 4, sha, source_project_id: 1, target_project_id: 1 }] : [];
           else if (endpoint.endsWith("merge_requests/4"))
             value = {
+              web_url: "https://git.example/mr/4",
               head_pipeline: {
                 id: 8,
                 sha: "synthetic-merge",
@@ -561,6 +593,8 @@ it.effect("tracks the pushed revision across merged-result and branch pipelines"
           else if (endpoint.includes("/jobs?"))
             value = [
               { id: 10, name: "test", status: "failed", web_url: null, allow_failure: false },
+              { id: 500, name: "deploy", status: "success", web_url: null, allow_failure: false },
+              { id: 1, name: "prepare", status: "success", web_url: null, allow_failure: false },
             ];
           else throw new Error(`Unexpected endpoint: ${endpoint}`);
           return processOutput(JSON.stringify(value));
@@ -576,7 +610,14 @@ it.effect("tracks the pushed revision across merged-result and branch pipelines"
     };
     const merged = yield* api.read(target);
     assert.equal(merged.pipeline?.sha, "synthetic-merge");
-    assert.equal(merged.pipeline?.jobs[0]?.id, "10");
+    assert.deepStrictEqual(
+      merged.pipeline?.jobs.map((job) => job.id),
+      ["1", "500", "10"],
+    );
+    assert.deepStrictEqual(merged.pipeline?.changeRequest, {
+      number: 4,
+      url: "https://git.example/mr/4",
+    });
     parents = ["base", "old-head"];
     assert.deepStrictEqual(yield* api.read(target), { current: true, pipeline: null });
     mr = false;
