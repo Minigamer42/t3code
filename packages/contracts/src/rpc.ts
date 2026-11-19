@@ -1,4 +1,5 @@
 import { GitWorkflowProgress, GitWorkflowProgressInput } from "./gitWorkflowProgress.ts";
+import { CiActivity } from "./ci.ts";
 import { GitStackStatusInput, GitStackStatusResult, GitStackManageInput } from "./gitStack.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -488,6 +489,7 @@ export const WS_METHODS = {
   gitStartCommitWorkflow: "git.startCommitWorkflow",
   gitCancelCommitWorkflow: "git.cancelCommitWorkflow",
   gitSubscribeWorkflowProgress: "git.subscribeWorkflowProgress",
+  gitSubscribeCiActivities: "git.subscribeCiActivities",
   gitStackStatus: "git.stackStatus",
   gitStackManage: "git.stackManage",
   gitListRewriteableCommits: "git.listRewriteableCommits",
@@ -1603,6 +1605,12 @@ const WsGitWorkflowProgressRpc = Rpc.make(WS_METHODS.gitSubscribeWorkflowProgres
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
   stream: true,
 });
+const WsGitCiActivitiesRpc = Rpc.make(WS_METHODS.gitSubscribeCiActivities, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(CiActivity),
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
 const WsGitStackStatusRpc = Rpc.make(WS_METHODS.gitStackStatus, {
   payload: GitStackStatusInput,
   success: GitStackStatusResult,
@@ -2349,6 +2357,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
   WsGitWorkflowProgressRpc,
+  WsGitCiActivitiesRpc,
   WsGitStackStatusRpc,
   WsGitStackManageRpc,
   WsGitListRewriteableCommitsRpc,

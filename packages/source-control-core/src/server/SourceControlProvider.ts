@@ -10,6 +10,7 @@ import type {
   SourceControlProviderKind,
   SourceControlRepositoryCloneUrls,
   SourceControlRepositoryVisibility,
+  CiPipeline,
 } from "@t3tools/contracts";
 
 export interface SourceControlLinkSubject {
@@ -118,6 +119,31 @@ export class SourceControlProvider extends Context.Service<
   SourceControlProvider,
   {
     readonly kind: SourceControlProviderKind;
+    readonly ci?: {
+      readonly read: (input: {
+        readonly cwd: string;
+        readonly host: string;
+        readonly repository: string;
+        readonly branch: string;
+        readonly sha: string;
+      }) => Effect.Effect<
+        { readonly current: boolean; readonly pipeline: CiPipeline | null },
+        SourceControlProviderError
+      >;
+      readonly trace: (input: {
+        readonly cwd: string;
+        readonly host: string;
+        readonly repository: string;
+        readonly jobId: string;
+      }) => Effect.Effect<string, SourceControlProviderError>;
+      readonly run: (input: {
+        readonly cwd: string;
+        readonly host: string;
+        readonly repository: string;
+        readonly jobId: string;
+        readonly action: "retry-job" | "play-job";
+      }) => Effect.Effect<void, SourceControlProviderError>;
+    };
     /** The caller verifies owners, so hosts may drop unsupported `owner:branch` selectors. */
     readonly headBranchProbe?: (input: {
       readonly headSelectors: ReadonlyArray<string>;
@@ -185,10 +211,7 @@ export class SourceControlProvider extends Context.Service<
       readonly reference: string;
     }) => Effect.Effect<ChangeRequest, SourceControlProviderError>;
     readonly changeRequestDependencies?: {
-      readonly list: (input: {
-        readonly cwd: string;
-        readonly reference: string;
-      }) => Effect.Effect<
+      readonly list: (input: { readonly cwd: string; readonly reference: string }) => Effect.Effect<
         ReadonlyArray<{
           readonly id: string;
           readonly url: string | null;

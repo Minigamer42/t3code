@@ -1,0 +1,351 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { expect, it } from "@effect/vitest";
+import {
+  ThreadId,
+  type CiPipeline,
+  type CiActivity,
+  SourceControlProviderKind,
+  SourceControlProviderError,
+} from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import { ChildProcessSpawner } from "effect/process";
+import * as Provider from "@t3tools/source-control-core/server/SourceControlProvider";
+import * as Providers from "../sourceControl/SourceControlProviderRegistry.ts";
+import * as ServerConfig from "../config.ts";
+import * as Process from "../vcs/VcsProcess.ts";
+import * as Git from "../vcs/GitVcsDriver.ts";
+import * as Monitor from "./CiMonitor.ts";
+
+const fixture = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ci-test-" });
+  yield* fs.makeDirectory(`${cwd}/.t3code`);
+  yield* fs.writeFileString(
+    `${cwd}/.t3code/ci.json`,
+    '{"recovery":{"repair":{"jobs":["test"],"match":["classify"],"action":{"type":"retry-job"},"maxAttempts":1}}}',
+  );
+  let pipeline: CiPipeline | null = {
+    id: "12",
+    sha: "merge-sha",
+    status: "failed",
+    url: "https://git.example/pipelines/12",
+    jobs: [{ id: "34", name: "test", status: "failed", url: null, allowFailure: false }],
+  };
+  let current = true;
+  let match = 0;
+  let posts = 0;
+  let reads = 0;
+  const commands: string[][] = [];
+  let ambiguousPost = false;
+  const api = {
+    read: () =>
+      Effect.sync(() => {
+        reads++;
+        return { current, pipeline };
+      }),
+    trace: () => Effect.succeed("test failed"),
+    run: () =>
+      Effect.gen(function* () {
+        posts++;
+        if (ambiguousPost)
+          return yield* new SourceControlProviderError({
+            provider: SourceControlProviderKind.make("gitlab"),
+            cwd,
+            operation: "ci",
+            detail: "Response lost",
+          });
+      }),
+  };
+  const provider = yield* Provider.SourceControlProvider.pipe(
+    Effect.provide(
+      Layer.mock(Provider.SourceControlProvider)({
+        kind: SourceControlProviderKind.make("gitlab"),
+        ci: api,
+      }),
+    ),
+  );
+  const make = Monitor.make.pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        ServerConfig.layerTest(cwd, cwd),
+        Layer.mock(Providers.SourceControlProviderRegistry)({
+          resolve: () => Effect.succeed(provider),
+          resolveLink: () => undefined,
+        }),
+        Layer.mock(Process.VcsProcess)({
+          run: () =>
+            Effect.succeed({
+              exitCode: ChildProcessSpawner.ExitCode(match),
+              stdout: "",
+              stderr: match === 2 ? "classifier broke" : "",
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            }),
+        }),
+        Layer.mock(Git.GitVcsDriver)({
+          resolvePushTarget: () =>
+            Effect.succeed({
+              remoteName: "fork",
+              branchName: "remote-feature",
+              viaPushRemote: true,
+            }),
+          execute: ({ args }) =>
+            Effect.sync(() => {
+              commands.push([...args]);
+              return {
+                exitCode: ChildProcessSpawner.ExitCode(0),
+                stdout: args[0] === "remote" ? "git@git.example:acme/app.git" : "a".repeat(40),
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              };
+            }),
+        }),
+      ),
+    ),
+  );
+  const input = {
+    cwd,
+    host: "git.example",
+    repository: "acme/app",
+    branch: "feature",
+    sha: "a".repeat(40),
+    threadId: ThreadId.make("originating-thread"),
+  };
+  const snapshots = (service: Monitor.CiMonitor["Service"]) =>
+    Stream.runHead(service.subscribe).pipe(Effect.map(Option.getOrThrow));
+  return {
+    cwd,
+    fs,
+    make,
+    input,
+    snapshots,
+    pipeline: () => pipeline,
+    setPipeline: (value: CiPipeline | null) => {
+      pipeline = value;
+    },
+    setCurrent: (value: boolean) => {
+      current = value;
+    },
+    setMatch: (value: number) => {
+      match = value;
+    },
+    posts: () => posts,
+    reads: () => reads,
+    commands,
+    loseResponse: () => {
+      ambiguousPost = true;
+    },
+  };
+});
+it.layer(NodeServices.layer)("background CI", (it) => {
+  it.effect("does not repair cancelled, skipped, or manually gated pipelines", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      for (const [status, state] of [
+        ["canceled", "cancelled"],
+        ["skipped", "skipped"],
+        ["manual", "waiting"],
+      ] as const) {
+        yield* service.register({ ...f.input, branch: status });
+        f.setPipeline({ ...f.pipeline()!, status });
+        yield* service.sweep;
+        expect((yield* f.snapshots(service)).find((item) => item.branch === status)?.state).toBe(
+          state,
+        );
+      }
+      expect(f.posts()).toBe(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("tracks the push destination instead of the comparison upstream", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      yield* service.recordPush({ cwd: f.cwd, branch: "feature", threadId: f.input.threadId });
+      const activity = (yield* f.snapshots(service))[0];
+      expect(activity).toMatchObject({
+        branch: "remote-feature",
+        localBranch: "feature",
+        host: "git.example",
+        repository: "acme/app",
+        sha: f.input.sha,
+      });
+      expect(f.commands).toContainEqual(["remote", "get-url", "--push", "fork"]);
+      expect(f.reads()).toBe(0);
+      yield* service.recordPush({
+        cwd: f.cwd,
+        branch: "feature",
+        remoteName: "stack-remote",
+        threadId: f.input.threadId,
+      });
+      expect(f.commands).toContainEqual(["remote", "get-url", "--push", "stack-remote"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "returns an unresolved failure to its originating thread only once across restarts",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* f.fs.writeFileString(
+          `${f.cwd}/.t3code/ci.json`,
+          '{"onUnresolvedFailure":{"action":"resume-originating-thread","instructions":"Diagnose this failure"}}',
+        );
+        const notified = yield* Deferred.make<void>();
+        const deliveries: string[] = [];
+        const wake = (activity: CiActivity) =>
+          Effect.sync(() => {
+            deliveries.push(activity.threadId!);
+          }).pipe(Effect.andThen(Deferred.succeed(notified, undefined)), Effect.as(true));
+        const service = yield* f.make;
+        yield* service.register(f.input);
+        yield* service.start(wake);
+        yield* Deferred.await(notified);
+        yield* service.sweep;
+        const restarted = yield* f.make;
+        yield* restarted.start(wake);
+        yield* restarted.sweep;
+        expect(deliveries).toEqual([f.input.threadId]);
+      }).pipe(Effect.scoped),
+  );
+  it.effect("starts CI discovery after publication ends without taking a checkout lease", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      yield* service.withPublication(
+        f.cwd,
+        Effect.gen(function* () {
+          yield* service.register(f.input);
+          yield* service.sweep;
+          expect(f.reads()).toBe(0);
+        }),
+      );
+      yield* service.sweep;
+      expect(f.reads()).toBeGreaterThan(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("retains a consumed allowance when a recovery POST response is lost", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      f.loseResponse();
+      yield* service.register(f.input);
+      yield* service.sweep;
+      expect((yield* f.snapshots(service))[0]?.attempts.repair).toBe(1);
+      const restarted = yield* f.make;
+      yield* restarted.sweep;
+      expect(f.posts()).toBe(1);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("persists retry allowances across restart and waits for actual pipeline success", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const first = yield* f.make;
+      yield* first.register(f.input);
+      expect(f.reads()).toBe(0);
+      yield* first.sweep;
+      expect(f.posts()).toBe(1);
+      expect((yield* f.snapshots(first))[0]?.state).toBe("recovering");
+      const restarted = yield* f.make;
+      yield* restarted.register(f.input);
+      yield* restarted.sweep;
+      expect(f.posts()).toBe(1);
+      expect((yield* f.snapshots(restarted))[0]?.state).toBe("failed");
+      const nextInput = { ...f.input, sha: "b".repeat(40) };
+      yield* restarted.register(nextInput);
+      f.setPipeline({
+        ...f.pipeline()!,
+        status: "running",
+        jobs: [{ ...f.pipeline()!.jobs[0]!, status: "running" }],
+      });
+      yield* restarted.sweep;
+      expect((yield* f.snapshots(restarted))[0]?.state).toBe("running");
+      f.setPipeline({
+        ...f.pipeline()!,
+        status: "success",
+        jobs: [{ ...f.pipeline()!.jobs[0]!, status: "success" }],
+      });
+      yield* restarted.sweep;
+      expect((yield* f.snapshots(restarted))[0]?.state).toBe("passed");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("supersedes older pushes and refuses recovery for a remotely changed head", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      yield* service.register(f.input);
+      yield* service.register({ ...f.input, sha: "b".repeat(40) });
+      expect((yield* f.snapshots(service)).find((item) => item.sha === f.input.sha)?.state).toBe(
+        "superseded",
+      );
+      f.setCurrent(false);
+      yield* service.sweep;
+      expect(f.posts()).toBe(0);
+      expect((yield* f.snapshots(service)).every((item) => item.state === "superseded")).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("reports classifier errors and never retries unclassified failures", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      for (const exit of [1, 2]) {
+        f.setMatch(exit);
+        yield* service.register({ ...f.input, sha: String(exit).repeat(40) });
+        yield* service.sweep;
+        const activity = (yield* f.snapshots(service)).find(
+          (item) => item.sha === String(exit).repeat(40),
+        );
+        expect(activity?.state).toBe("failed");
+        if (exit === 2) expect(activity?.label).toContain("classifier broke");
+      }
+      expect(f.posts()).toBe(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps tracking without a pipeline and accepts configured manual reset jobs", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.fs.writeFileString(
+        `${f.cwd}/.t3code/ci.json`,
+        '{"recovery":{"reset":{"jobs":["test"],"match":["classify"],"action":{"type":"play-job","name":"reset:stack"},"maxAttempts":1}}}',
+      );
+      const service = yield* f.make;
+      f.setPipeline(null);
+      yield* service.register(f.input);
+      yield* service.sweep;
+      expect((yield* f.snapshots(service))[0]?.state).toBe("waiting");
+      f.setPipeline({
+        id: "12",
+        sha: "merge",
+        status: "failed",
+        url: "https://git.example/pipelines/12",
+        jobs: [
+          { id: "34", name: "test", status: "failed", url: null, allowFailure: false },
+          { id: "35", name: "reset:stack", status: "manual", url: null, allowFailure: true },
+        ],
+      });
+      yield* service.sweep;
+      expect(f.posts()).toBe(1);
+      f.setPipeline({
+        ...f.pipeline()!,
+        jobs: f
+          .pipeline()!
+          .jobs.map((job) => (job.name === "reset:stack" ? { ...job, status: "running" } : job)),
+      });
+      yield* service.sweep;
+      expect((yield* f.snapshots(service))[0]?.state).toBe("recovering");
+      expect(f.posts()).toBe(1);
+    }).pipe(Effect.scoped),
+  );
+});

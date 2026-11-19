@@ -526,3 +526,73 @@ it.effect("reads and updates MR blockers on the MR's host and target project", (
     assert.equal(commands.length, 4);
   }),
 );
+
+it.effect("tracks the pushed revision across merged-result and branch pipelines", () =>
+  Effect.gen(function* () {
+    const sha = "a".repeat(40);
+    let newer = false;
+    let parents = ["base", sha];
+    let mr = true;
+    const executeCalls: string[][] = [];
+    const provider = yield* makeProvider({
+      execute: (input) =>
+        Effect.sync(() => {
+          executeCalls.push([...input.args]);
+          const endpoint = input.args[5]!;
+          let value: unknown;
+          if (input.args.includes("POST")) value = {};
+          else if (endpoint.endsWith("/trace")) return processOutput("failed job trace");
+          else if (endpoint.includes("repository/branches/"))
+            value = { commit: { id: newer ? "new-head" : sha } };
+          else if (endpoint.includes("merge_requests?"))
+            value = mr ? [{ iid: 4, sha, source_project_id: 1, target_project_id: 1 }] : [];
+          else if (endpoint.endsWith("merge_requests/4"))
+            value = {
+              head_pipeline: {
+                id: 8,
+                sha: "synthetic-merge",
+                status: "failed",
+                web_url: "https://git.example/pipelines/8",
+              },
+            };
+          else if (endpoint.includes("repository/commits/")) value = { parent_ids: parents };
+          else if (endpoint.includes("pipelines?"))
+            value = [{ id: 9, sha, status: "running", web_url: "https://git.example/pipelines/9" }];
+          else if (endpoint.includes("/jobs?"))
+            value = [
+              { id: 10, name: "test", status: "failed", web_url: null, allow_failure: false },
+            ];
+          else throw new Error(`Unexpected endpoint: ${endpoint}`);
+          return processOutput(JSON.stringify(value));
+        }),
+    });
+    const api = provider.ci!;
+    const target = {
+      cwd: "/checkout",
+      host: "git.example:8443",
+      repository: "group/sub/repo",
+      branch: "feature/a",
+      sha,
+    };
+    const merged = yield* api.read(target);
+    assert.equal(merged.pipeline?.sha, "synthetic-merge");
+    assert.equal(merged.pipeline?.jobs[0]?.id, "10");
+    parents = ["base", "old-head"];
+    assert.deepStrictEqual(yield* api.read(target), { current: true, pipeline: null });
+    mr = false;
+    assert.equal((yield* api.read(target)).pipeline?.sha, sha);
+    newer = true;
+    assert.deepStrictEqual(yield* api.read(target), { current: false, pipeline: null });
+    assert.equal(yield* api.trace({ ...target, jobId: "10" }), "failed job trace");
+    yield* api.run({ ...target, jobId: "10", action: "retry-job" });
+    yield* api.run({ ...target, jobId: "11", action: "play-job" });
+    assert.deepStrictEqual(
+      executeCalls.slice(-2).map((args) => args.slice(-1)[0]),
+      ["projects/group%2Fsub%2Frepo/jobs/10/retry", "projects/group%2Fsub%2Frepo/jobs/11/play"],
+    );
+    assert.equal(
+      executeCalls.every((args) => args[2] === "git.example:8443"),
+      true,
+    );
+  }),
+);
