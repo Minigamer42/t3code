@@ -1474,6 +1474,7 @@ describe("PullRequestSyncReactor", () => {
               makeLink(41, { state: "merged" }, { source: "stack-dismissed" }),
             ],
           }),
+          makeThread("imported", { pullRequests: [makeLink(42, {}, { source: "stack" })] }),
           makeThread("settled", {
             settledOverride: "settled",
             settledAt: "2026-08-21T00:00:00.000Z",
@@ -1491,6 +1492,7 @@ describe("PullRequestSyncReactor", () => {
           syncCommands.map((command) => [command.threadId, command.stack] as const),
           [
             [ThreadId.make("one"), { kind: "native", ...stack }],
+            [ThreadId.make("imported"), { kind: "native", ...stack }],
             [ThreadId.make("settled"), { kind: "native", ...stack }],
           ],
         );
