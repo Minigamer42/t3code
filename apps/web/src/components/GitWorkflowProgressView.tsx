@@ -3,9 +3,9 @@ import { cn } from "~/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 
 const stepColors: Record<GitWorkflowStep["state"], string> = {
-  pending: "bg-muted-foreground/20",
+  pending: "bg-info",
   skipped: "bg-muted-foreground/20",
-  running: "bg-primary",
+  running: "bg-info",
   completed: "bg-success",
   failed: "bg-destructive",
 };
@@ -128,9 +128,9 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
                       <span className="min-w-0 truncate text-muted-foreground">{step.label}</span>
                       <span
                         className={cn("shrink-0", {
-                          "text-muted-foreground":
-                            step.state === "pending" || step.state === "skipped",
-                          "text-primary": step.state === "running",
+                          "text-muted-foreground": step.state === "skipped",
+                          "text-info-foreground":
+                            step.state === "pending" || step.state === "running",
                           "text-success": step.state === "completed",
                           "text-destructive": step.state === "failed",
                         })}

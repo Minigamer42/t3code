@@ -4,9 +4,9 @@ import { AppText as Text } from "../../../components/ui/AppText";
 import { cn } from "../../../lib/cn";
 
 const stepColors: Record<GitWorkflowStep["state"], string> = {
-  pending: "bg-subtle-strong",
+  pending: "bg-blue-500",
   skipped: "bg-subtle-strong",
-  running: "bg-primary",
+  running: "bg-blue-500",
   completed: "bg-emerald-500",
   failed: "bg-danger-foreground",
 };
@@ -103,9 +103,8 @@ export function GitWorkflowProgressView({ progress }: { readonly progress: GitWo
                     </Text>
                     <Text
                       className={cn("text-xs", {
-                        "text-foreground-secondary":
-                          step.state === "pending" || step.state === "skipped",
-                        "text-primary": step.state === "running",
+                        "text-foreground-secondary": step.state === "skipped",
+                        "text-blue-500": step.state === "pending" || step.state === "running",
                         "text-emerald-500": step.state === "completed",
                         "text-danger-foreground": step.state === "failed",
                       })}
