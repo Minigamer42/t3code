@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind, VcsProcessExitError } from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import { refineUnknownRemoteProvider } from "@t3tools/source-control-core/server/discovery";
 import { processOutput } from "@t3tools/source-control-testing/TestSourceControlHost";
@@ -595,4 +595,41 @@ it.effect("tracks the pushed revision across merged-result and branch pipelines"
       true,
     );
   }),
+);
+
+it.effect(
+  "stops tracking removed branches without treating other request errors as invalid JSON",
+  () =>
+    Effect.gen(function* () {
+      let failureKind: "not-found" | "authentication" = "not-found";
+      const provider = yield* makeProvider({
+        execute: () =>
+          Effect.fail(
+            new GitLabCli.GitLabCliCommandError({
+              cwd: "/checkout",
+              operation: "execute",
+              command: "glab",
+              cause: new VcsProcessExitError({
+                cwd: "/checkout",
+                operation: "execute",
+                command: "glab",
+                exitCode: 1,
+                failureKind,
+                detail: "API request failed",
+              }),
+            }),
+          ),
+      });
+      const target = {
+        cwd: "/checkout",
+        host: "git.example",
+        repository: "acme/app",
+        branch: "removed",
+        sha: "a".repeat(40),
+      };
+      assert.deepStrictEqual(yield* provider.ci!.read(target), { current: false, pipeline: null });
+      failureKind = "authentication";
+      const error = yield* provider.ci!.read(target).pipe(Effect.flip);
+      assert.equal(error.detail, "GitLab CI request failed.");
+    }),
 );

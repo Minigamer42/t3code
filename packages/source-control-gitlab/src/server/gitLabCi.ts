@@ -1,4 +1,8 @@
-import { SourceControlProviderError, SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  SourceControlProviderError,
+  SourceControlProviderKind,
+  VcsProcessExitError,
+} from "@t3tools/contracts";
 import type * as Provider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -27,6 +31,8 @@ const Mr = Schema.Struct({
   target_project_id: Schema.Number,
 });
 const isProviderError = Schema.is(SourceControlProviderError);
+const isCliCommandError = Schema.is(GitLabCli.GitLabCliCommandError);
+const isProcessExitError = Schema.is(VcsProcessExitError);
 export const make = Effect.gen(function* () {
   const cli = yield* GitLabCli.GitLabCli;
   const request = Effect.fn("GitLabCi.request")(function* (
@@ -74,8 +80,8 @@ export const make = Effect.gen(function* () {
     input: { cwd: string; host: string; repository: string },
     endpoint: string,
   ) {
-    return yield* request(input, endpoint).pipe(
-      Effect.flatMap((reply) => decodeJson(reply.stdout)),
+    const reply = yield* request(input, endpoint);
+    return yield* decodeJson(reply.stdout).pipe(
       Effect.mapError(
         (cause) =>
           new SourceControlProviderError({
@@ -100,8 +106,21 @@ export const make = Effect.gen(function* () {
               Schema.Struct({ commit: Schema.Struct({ id: Schema.String }) }),
             ),
           ),
+          Effect.catchTags({
+            SourceControlProviderError: (error) => {
+              const cliError = error.cause;
+              if (
+                isCliCommandError(cliError) &&
+                isProcessExitError(cliError.cause) &&
+                cliError.cause.failureKind === "not-found"
+              )
+                return Effect.succeed(null);
+              return Effect.fail(error);
+            },
+          }),
         );
-        if (branch.commit.id !== input.sha) return { current: false, pipeline: null };
+        if (branch === null || branch.commit.id !== input.sha)
+          return { current: false, pipeline: null };
         const mrs = yield* json(
           input,
           `merge_requests?state=opened&source_branch=${encodeURIComponent(input.branch)}&per_page=100`,
