@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { ciFailureMessage } from "../../apps/server/src/ci/ciFailureMessage.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * Replays small fake threads on a Claude or Codex model to check T3's MCP tool use. A trimmed
@@ -305,6 +306,15 @@ export const McpToolUseCase = Schema.Struct({
   rule: Schema.optional(Schema.String),
   privacy: Schema.optional(Schema.Literals(["commit-safe", "private"])),
   setup: Schema.Struct({
+    ciFailure: Schema.optional(
+      Schema.Struct({
+        branch: Schema.String,
+        sha: Schema.String,
+        label: Schema.String,
+        pipelineUrl: Schema.String,
+        instructions: Schema.String,
+      }),
+    ),
     role: Schema.Literals(["top", "delegated-child", "native-subagent"]),
     /** Runs only on this harness, for cases whose right answer depends on it. */
     harness: Schema.optional(Schema.Literals(["claude", "codex"])),
@@ -1028,6 +1038,18 @@ const loadTools = (tools: Array<ApiTool>, id: string, found: ReadonlyArray<ApiTo
 /** Messages for a case: reminders, context, prior turns with real tool blocks, then the prompt. */
 export const buildMessages = (sample: Sample) => {
   const { testCase, base, tools } = sample;
+  const failure = testCase.setup.ciFailure;
+  const rawPrompt = failure
+    ? ciFailureMessage(
+        {
+          branch: failure.branch,
+          sha: failure.sha,
+          label: failure.label,
+          pipeline: { url: failure.pipelineUrl },
+        },
+        failure.instructions,
+      )
+    : testCase.prompt;
   const messages: Array<ApiMessage> = [];
   const push = (role: ApiMessage["role"], ...blocks: ReadonlyArray<Block>) => {
     const last = messages.at(-1);
@@ -1036,7 +1058,7 @@ export const buildMessages = (sample: Sample) => {
   };
   const { role, context, delegateRole, priorTurns = [] } = testCase.setup;
   const sideChat = testCase.setup.sideChat;
-  if (testCase.prompt === "" && (role !== "top" || sideChat !== undefined)) {
+  if (rawPrompt === "" && (role !== "top" || sideChat !== undefined)) {
     throw new Error(
       `${testCase.id}: Empty-prompt replay requires a top-level thread without side-chat context.`,
     );
@@ -1098,13 +1120,12 @@ export const buildMessages = (sample: Sample) => {
   }
   const userText =
     testCase.promptContext === undefined
-      ? testCase.prompt
-      : projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext });
+      ? rawPrompt
+      : projectComposerContextForProvider({ text: rawPrompt, ...testCase.promptContext });
   const prompt =
     sideChatContext === undefined ? userText : withInlineContext(sideChatContext, userText);
   const childPrompt = () => taskPrompt({ task: prompt, role: delegateRole });
-  if (testCase.prompt !== "")
-    push("user", text(role === "delegated-child" ? childPrompt() : prompt));
+  if (prompt !== "") push("user", text(role === "delegated-child" ? childPrompt() : prompt));
   // Claude Code gives a subagent its SubagentStart hooks' context as a reminder after the task.
   if (native && base.subagentContext) {
     push("user", reminder(`SubagentStart hook additional context: ${base.subagentContext}`));

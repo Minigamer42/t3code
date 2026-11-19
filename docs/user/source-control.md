@@ -327,6 +327,62 @@ array instead:
 }
 ```
 
+## Background CI
+
+Create `.t3code/ci.json` to track CI after pushes made through T3, including MCP and stack
+publication. GitLab is currently supported. Tracking runs on the connected server, persists across
+restarts, and leaves checkout actions available. The CI entry shows the pushed revision, job status
+and recovery outcome; selecting it returns to the originating thread without switching branches.
+A newer push supersedes unfinished tracking for the previous revision.
+
+An empty `{}` enables tracking only. Add project-owned recovery predicates for known transient
+failures:
+
+```json
+{
+  "recovery": {
+    "test-timeout": {
+      "jobs": ["test:unit"],
+      "match": ["python3", ".t3code/ci-recovery.py", "timeout"],
+      "action": { "type": "retry-job" },
+      "maxAttempts": 1
+    },
+    "database-reset": {
+      "jobs": ["test:integration"],
+      "match": ["python3", ".t3code/ci-recovery.py", "database"],
+      "action": { "type": "play-job", "name": "reset:stack" },
+      "maxAttempts": 1
+    }
+  }
+}
+```
+
+`jobs` matches exact failed job names. Predicate commands receive JSON on stdin with `version: 1`,
+`activity`, `pipeline`, `job`, and `tracePath`. The trace is a temporary file available for the
+command's lifetime. Exit 0 permits recovery, exit 1 declines it, and any other exit reports a
+classification error. Commands run from the directory containing `.t3code`, using argv directly.
+Project scripts decide what a failure means; T3 has no project-specific failure classifications.
+
+The rule key identifies its persisted allowance for a pushed revision. T3 rechecks the remote head
+and job before a recovery attempt and records the allowance before sending the request. A lost
+response does not grant another attempt. The existing `afterPush` hooks finish before discovery;
+CI monitoring does not hold the checkout's Git-action lock. Recovery does not create review requests.
+
+To return unresolved failures to the agent, add:
+
+```json
+{
+  "onUnresolvedFailure": {
+    "action": "resume-originating-thread",
+    "instructions": "Diagnose the failed job, fix supported source defects, verify and publish through T3. Report unsupported infrastructure failures without speculative source changes."
+  }
+}
+```
+
+This queues a turn only if the originating thread still uses the same branch and clean checkout at
+the published revision. Otherwise the CI entry reports that automatic repair is paused. Without
+this setting, unresolved failures remain visible for manual investigation.
+
 ## Review and merge
 
 Open **Pull requests** to review changes and comments, request reviewers, check out a branch,
