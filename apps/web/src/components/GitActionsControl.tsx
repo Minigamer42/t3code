@@ -1391,27 +1391,6 @@ export default function GitActionsControl({
     setDialogCommitMessage((current) => current || commitMessage);
   };
 
-  const runDialogActionOnNewBranch = () => {
-    if (!isCommitDialogOpen) return;
-    const commitMessage = dialogCommitMessage.trim();
-
-    setIsCommitDialogOpen(false);
-    setDialogCommitMessage("");
-    setDialogInstructions("");
-    setExcludedFiles(new Set());
-    setIsEditingFiles(false);
-
-    void runGitActionWithToast({
-      action: "commit",
-      splitCommits: false,
-      ...(dialogInstructions.trim() ? { instructions: dialogInstructions.trim() } : {}),
-      ...(commitMessage ? { commitMessage } : {}),
-      ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
-      featureBranch: true,
-      skipDefaultBranchPrompt: true,
-    }).then(restoreDialogCommitMessageOnFailure(commitMessage));
-  };
-
   const runQuickAction = async () => {
     if (
       activeEnvironmentId === null ||
@@ -1519,7 +1498,11 @@ export default function GitActionsControl({
       return;
     }
     if (refreshedQuickAction.action) {
-      void runGitActionWithToast({ action: refreshedQuickAction.action, statusOverride: status });
+      void runGitActionWithToast({
+        action: refreshedQuickAction.action,
+        statusOverride: status,
+        featureBranch: status.isDefaultRef,
+      });
     }
   };
 
@@ -1568,7 +1551,7 @@ export default function GitActionsControl({
     setIsCommitDialogOpen(true);
   };
 
-  const runDialogAction = () => {
+  const runDialogAction = (featureBranch: boolean) => {
     if (!isCommitDialogOpen) return;
     const commitMessage = dialogCommitMessage.trim();
     setIsCommitDialogOpen(false);
@@ -1579,6 +1562,8 @@ export default function GitActionsControl({
     void runGitActionWithToast({
       action: "commit",
       splitCommits: false,
+      featureBranch,
+      skipDefaultBranchPrompt: true,
       ...(dialogInstructions.trim() ? { instructions: dialogInstructions.trim() } : {}),
       ...(commitMessage ? { commitMessage } : {}),
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
@@ -2035,18 +2020,24 @@ export default function GitActionsControl({
                 <Button variant="outline" size="sm" onClick={closeCommitDialog}>
                   Cancel
                 </Button>
+                {isDefaultRef ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canWriteSourceControl || noneSelected}
+                    onClick={() => runDialogAction(false)}
+                  >
+                    Commit on current branch
+                  </Button>
+                ) : null}
                 <Button
-                  variant="outline"
                   size="sm"
-                  disabled={!canChangeThreadBranch || noneSelected}
-                  onClick={runDialogActionOnNewBranch}
-                >
-                  Commit on new branch
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={!canWriteSourceControl || noneSelected}
-                  onClick={runDialogAction}
+                  disabled={
+                    !canWriteSourceControl ||
+                    (isDefaultRef && !canChangeThreadBranch) ||
+                    noneSelected
+                  }
+                  onClick={() => runDialogAction(isDefaultRef)}
                 >
                   Commit
                 </Button>

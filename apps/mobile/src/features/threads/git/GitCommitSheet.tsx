@@ -525,17 +525,22 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
             icon="arrow.branch"
             tone="primary"
             fullWidth
-            disabled={!canStartWorkflow || workflowUnavailable || busy}
-            onPress={() => void runWorkflow()}
+            disabled={
+              !canStartWorkflow ||
+              (!rewriteHistory && isDefaultRef && !canChangeThreadBranch) ||
+              workflowUnavailable ||
+              busy
+            }
+            onPress={() => void runWorkflow(!rewriteHistory && isDefaultRef)}
           />
-          {!rewriteHistory ? (
+          {!rewriteHistory && isDefaultRef ? (
             <Button
-              label="Commit on a new branch"
+              label="Commit on current branch"
               icon="arrow.branch"
               tone="text"
               fullWidth
-              disabled={!canStartWorkflow || !canChangeThreadBranch || workflowUnavailable || busy}
-              onPress={() => void runWorkflow(true)}
+              disabled={!canStartWorkflow || workflowUnavailable || busy}
+              onPress={() => void runWorkflow(false)}
             />
           ) : null}
         </View>
@@ -546,17 +551,24 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
             icon="checkmark"
             tone="primary"
             fullWidth
-            disabled={!canWriteSourceControl || noneSelected || busy}
-            onPress={() => void runCommitAction(false)}
+            disabled={
+              !canWriteSourceControl ||
+              (isDefaultRef && !canChangeThreadBranch) ||
+              noneSelected ||
+              busy
+            }
+            onPress={() => void runCommitAction(isDefaultRef)}
           />
-          <Button
-            label="Commit on a new branch"
-            icon="arrow.branch"
-            tone="text"
-            fullWidth
-            disabled={!canWriteSourceControl || !canChangeThreadBranch || noneSelected || busy}
-            onPress={() => void runCommitAction(true)}
-          />
+          {isDefaultRef ? (
+            <Button
+              label="Commit on current branch"
+              icon="arrow.branch"
+              tone="text"
+              fullWidth
+              disabled={!canWriteSourceControl || noneSelected || busy}
+              onPress={() => void runCommitAction(false)}
+            />
+          ) : null}
         </View>
       )}
     </FitSheet>

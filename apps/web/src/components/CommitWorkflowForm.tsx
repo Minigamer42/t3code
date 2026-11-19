@@ -199,7 +199,9 @@ export function CommitWorkflowForm(props: {
             </p>
           )}
           {scope === "working_tree" && props.isDefaultRef && (
-            <p className="text-sm text-warning">This will commit directly to the default branch.</p>
+            <p className="text-sm text-warning">
+              Choose the current branch to commit directly to the default branch.
+            </p>
           )}
           <label className="block space-y-2 text-sm">
             <span>Grouping instructions (optional)</span>
@@ -224,20 +226,25 @@ export function CommitWorkflowForm(props: {
         <Button variant="outline" size="sm" onClick={props.onClose}>
           Cancel
         </Button>
-        {scope === "working_tree" ? (
+        {scope === "working_tree" && props.isDefaultRef ? (
           <Button
             variant="outline"
             size="sm"
-            disabled={!canStart || !canOperateThread || unavailable}
-            onClick={() => submit(true)}
+            disabled={!canStart || unavailable}
+            onClick={() => submit(false)}
           >
-            Commit on new branch
+            Commit on current branch
           </Button>
         ) : null}
         <Button
           size="sm"
-          disabled={!canStart || unavailable || invalidRange}
-          onClick={() => submit()}
+          disabled={
+            !canStart ||
+            unavailable ||
+            invalidRange ||
+            (scope === "working_tree" && props.isDefaultRef && !canOperateThread)
+          }
+          onClick={() => submit(scope === "working_tree" && props.isDefaultRef)}
         >
           {scope === "branch" ? "Rebuild history" : "Create logical commits"}
         </Button>

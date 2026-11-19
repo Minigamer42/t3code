@@ -266,7 +266,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
       return;
     }
     if (quickAction.kind === "run_action" && quickAction.action) {
-      await runActionWithPrompt({ action: quickAction.action });
+      await runActionWithPrompt({ action: quickAction.action, featureBranch: isDefaultRef });
     }
   };
 
