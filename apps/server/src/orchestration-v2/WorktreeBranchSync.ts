@@ -22,7 +22,7 @@ export const makeReconcile = Effect.gen(function* () {
     readonly refName: string | null;
   }) {
     if (input.refName === null) return;
-    const paths = yield* projections.getThreadWorktreePaths({ includeArchived: true });
+    const paths = yield* projections.getThreadWorktreePaths({ includeArchived: false });
     const matchingPaths = new Set<string>();
     for (const worktreePath of new Set(paths.map((thread) => thread.worktreePath))) {
       const realPath =
@@ -38,14 +38,22 @@ export const makeReconcile = Effect.gen(function* () {
     );
     if (matchingThreads.size === 0) return;
     const snapshot = yield* threads.getShellSnapshot({ threadIds: [...matchingThreads.keys()] });
-    const sharing = [...snapshot.threads, ...snapshot.archivedThreads].filter(
+    const sharing = snapshot.threads.filter(
       (thread) =>
-        thread.worktreePath === matchingThreads.get(thread.id) && thread.branch !== input.refName,
+        (thread.activeRunId !== null || thread.latestRunId === null) &&
+        thread.archivedAt === null &&
+        thread.settledAt === null &&
+        thread.settledOverride !== "settled" &&
+        thread.worktreePath === matchingThreads.get(thread.id) &&
+        thread.branch !== input.refName,
     );
     if (sharing.length === 0) return;
     // Status events may queue behind a generated rename or another checkout.
     if ((yield* git.currentBranch(input.cwd)) !== input.refName) return;
+    const localBranches = new Set(yield* git.listLocalBranchNames(input.cwd));
     for (const thread of sharing) {
+      // A checkout keeps the old branch; only a removed ref can be a rename.
+      if (thread.branch !== null && localBranches.has(thread.branch)) continue;
       yield* threads
         .dispatch({
           type: "thread.metadata.update",

@@ -23,13 +23,25 @@ it.effect.each([false, true])(
     const reconciled = Deferred.makeUnsafe<void>();
     const commands: OrchestrationV2ServerCommand[] = [];
     const thread = (id: string, branch: string, worktreePath: string | null) =>
-      ({ id: ThreadId.make(id), branch, worktreePath }) as OrchestrationV2ThreadShell;
+      ({
+        id: ThreadId.make(id),
+        branch,
+        worktreePath,
+        activeRunId:
+          id === "generated" || id === "shared" || id === "active-unrelated" ? "run" : null,
+        latestRunId: "run",
+        archivedAt: null,
+        settledAt: null,
+        settledOverride: null,
+      }) as OrchestrationV2ThreadShell;
     const snapshot = {
       schemaVersion: 2,
       snapshotSequence: 0,
       threads: [
         thread("generated", "t3/unify-converter-branches", "/worktree"),
         thread("shared", "t3/bfc349ae", "/link/worktree"),
+        thread("active-unrelated", "ticket-owned", "/worktree"),
+        thread("completed", "ticket-old", "/worktree"),
         thread("current", "union", "/worktree"),
         thread("root", "main", null),
         thread("other", "feature", "/other"),
@@ -53,7 +65,6 @@ it.effect.each([false, true])(
         [
           ["generated", "union", "t3/unify-converter-branches", "/worktree"],
           ["shared", "union", "t3/bfc349ae", "/link/worktree"],
-          ["archived", "union", "t3/bfc349ae", "/worktree"],
         ],
       );
     }).pipe(
@@ -83,6 +94,8 @@ it.effect.each([false, true])(
           }),
           Layer.mock(GitWorkflowService.GitWorkflowService)({
             currentBranch: () => Effect.succeed("union"),
+            listLocalBranchNames: () =>
+              Effect.succeed(["union", "ticket-owned", "main", "feature"]),
           }),
           Layer.mock(ThreadManagement.ThreadManagementService)({
             getShellSnapshot: () => Effect.succeed(snapshot),
