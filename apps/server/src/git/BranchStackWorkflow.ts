@@ -572,10 +572,15 @@ export const make = Effect.gen(function* () {
             true,
           );
         }
-        const headSha = yield* head(cwd, name);
+        const localHead = yield* git(
+          cwd,
+          ["rev-parse", "--verify", "--quiet", `refs/heads/${name}^{commit}`],
+          true,
+        );
+        const headSha = localHead.exitCode === 0 ? localHead.stdout.trim() : null;
         const parentSha = target.stdout.trim();
         const behindCount =
-          target.exitCode === 0
+          headSha !== null && target.exitCode === 0
             ? Number(yield* text(cwd, ["rev-list", "--count", `${headSha}..${parentSha}`]))
             : 0;
         const recordedIndex = active?.layers.findIndex((layer) => layer.branch === name) ?? -1;
@@ -583,18 +588,22 @@ export const make = Effect.gen(function* () {
         const recordedParent = active?.layers[recordedIndex - 1]?.branch ?? active?.base;
         let previousParent =
           recorded && recordedParent === parent ? recorded.parentHead : undefined;
-        if (active && previousParent === undefined && target.exitCode === 0) {
+        if (active && headSha !== null && previousParent === undefined && target.exitCode === 0) {
           const shared = yield* git(cwd, ["merge-base", headSha, parentSha], true);
           if (shared.exitCode === 0) previousParent = shared.stdout.trim();
         }
         const parentWasRewound =
+          headSha !== null &&
           behindCount === 0 &&
           target.exitCode === 0 &&
           previousParent !== undefined &&
           previousParent !== parentSha &&
           (yield* isAncestor(cwd, parentSha, previousParent)) &&
           (yield* isAncestor(cwd, previousParent, headSha));
-        const needsRestack = behindCount > 0 || parentWasRewound;
+        const needsRestack =
+          behindCount > 0 ||
+          parentWasRewound ||
+          (headSha !== null && index > 0 && target.exitCode !== 0);
         layers.push({
           branch: name,
           parent,

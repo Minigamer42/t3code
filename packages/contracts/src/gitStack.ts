@@ -33,7 +33,8 @@ export const GitStackStatusResult = Schema.Struct({
       branch: Schema.String,
       parent: Schema.String,
       parentHead: Schema.optional(Schema.String),
-      headSha: Schema.String,
+      // Null identifies a recorded branch that no longer exists locally.
+      headSha: Schema.NullOr(Schema.String),
       needsRestack: Schema.Boolean,
       behindCount: Schema.optional(NonNegativeInt),
       hasChanges: Schema.Boolean,

@@ -20,6 +20,8 @@ export function getStackBranchSwitchDisabledReason({
   readonly paused: boolean;
 }): string | null {
   if (layer.current) return "Current branch";
+  if (layer.headSha === null)
+    return "This branch no longer exists locally. Update the stack or remove it in Edit layers.";
   if (!canSwitch) return "This connection cannot change the thread's branch.";
   if (busy) return "Wait for the current Git action to finish.";
   if (paused) return "Continue or abort the paused stack update before switching branches.";
