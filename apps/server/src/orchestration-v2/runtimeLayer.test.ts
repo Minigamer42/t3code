@@ -4101,6 +4101,39 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.source,
         "manual",
       );
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("multi-pr-settle"),
+        threadId,
+      });
+      const lateLink = {
+        type: "thread.pull-request.link" as const,
+        threadId,
+        ...key,
+        number: 3,
+        url: "https://github.com/pingdotgg/t3code/pull/3",
+      };
+      const rejected = yield* orchestrator
+        .dispatch({
+          ...lateLink,
+          commandId: CommandId.make("multi-pr-late-discovery"),
+          source: "stack",
+        })
+        .pipe(Effect.flip);
+      assert.equal(rejected._tag, "OrchestratorDispatchError");
+      assert.deepEqual(
+        (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.map((link) => link.number),
+        [2],
+      );
+      yield* orchestrator.dispatch({
+        ...lateLink,
+        commandId: CommandId.make("multi-pr-explicit-late-link"),
+        source: "manual",
+      });
+      assert.deepEqual(
+        (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.map((link) => link.number),
+        [2, 3],
+      );
     }),
   );
 

@@ -4163,6 +4163,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     if (
+      command.type === "thread.pull-request.link" &&
+      command.source === "stack" &&
+      (thread.settledOverride === "settled" ||
+        thread.settledAt !== null ||
+        thread.archivedAt !== null)
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Automatic pull request links cannot be added to a settled or archived thread.",
+      });
+    }
+    if (
       command.type === "thread.pull-request.watch" &&
       command.watching &&
       isProviderNativeSubagentThread(thread)
