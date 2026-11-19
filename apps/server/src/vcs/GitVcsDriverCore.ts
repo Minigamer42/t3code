@@ -608,7 +608,7 @@ function printableGitDiagnostic(value: string): string {
   return printable.trim().replace(/\s+/gu, " ");
 }
 
-function gitCommandFailureDetail(stderr: string, fallback: string): string {
+export function gitCommandFailureDetail(stderr: string, fallback: string): string {
   const lines = stderr
     .split(/\r?\n/gu)
     .map((line) => line.trim())

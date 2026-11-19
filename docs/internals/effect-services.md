@@ -133,10 +133,11 @@ optional-service layer. Don't route around the layer with an imperative runtime.
 - **Safe values.** Attributes and log annotations stay bounded: no raw payloads, command arguments
   or output, signed URLs, credentials, query strings, or arbitrary defect text. The exact value
   lives only in `cause`. Expose a category, length, count, or a URL's protocol and host instead.
-  `DeviceBootError.diagnostics` and after-push hook failures in `GitManagerError.diagnostics` are
-  deliberate exceptions: users need the host's launch or hook failure text to diagnose their setup.
-  Both are capped at 2,000 characters and included in the error message; other service errors keep
-  the rule above.
+  `DeviceBootError.diagnostics` and hook/stack Git failures in `GitManagerError.diagnostics` are
+  deliberate exceptions: users need launch output, hook output, and the failing stack Git command
+  to diagnose these failures. Diagnostics are capped at 2,000 characters and included in the error
+  message; stack Git diagnostics redact credentials and URL query strings. Other service errors
+  keep the rule above.
 - **Translation.** Construct the error where the failure happens, and map it to a transport error
   only in the transport. A translation boundary passes through domain errors already in the target
   channel and wraps only unknown or lower-level failures. Map each failure where its context is

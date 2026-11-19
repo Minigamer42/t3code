@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import { gitCommandFailureDetail } from "../vcs/GitVcsDriverCore.ts";
 
 const LayerState = Schema.Struct({
   branch: Schema.String,
@@ -141,6 +142,7 @@ export const make = Effect.gen(function* () {
     args: ReadonlyArray<string>,
     allowNonZeroExit = false,
   ) {
+    let diagnostic: string | undefined;
     return yield* process
       .run({
         operation: "BranchStack.git",
@@ -148,16 +150,29 @@ export const make = Effect.gen(function* () {
         args,
         cwd,
         allowNonZeroExit,
+        classifyFailure: (stderr) => {
+          diagnostic = gitCommandFailureDetail(stderr, "Git returned no diagnostic.");
+          return null;
+        },
         env: { GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true" },
         timeoutMs: 10 * 60_000,
       })
       .pipe(
-        Effect.mapError((cause) =>
-          failure(
-            cwd,
-            "The stack Git operation failed. Check the checkout and remote connection before retrying.",
-            cause,
-          ),
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "stack",
+              cwd,
+              detail: "The stack Git operation failed.",
+              diagnostics: [
+                gitCommandFailureDetail(`git ${args.join(" ")}`, "git"),
+                diagnostic ??
+                  gitCommandFailureDetail(cause.message, "Git could not complete the operation."),
+              ]
+                .join("\n")
+                .slice(0, 2000),
+              cause,
+            }),
         ),
       );
   });
