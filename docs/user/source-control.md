@@ -330,9 +330,15 @@ array instead:
 ## Background CI
 
 Create `.t3code/ci.json` to track CI after pushes made through T3, including MCP and stack
-publication. GitLab is currently supported. Tracking runs on the connected server, persists across
+publication, and local Git pushes from your IDE or terminal while T3 is running. GitLab is currently supported. Tracking runs on the connected server, persists across
 restarts, and leaves checkout actions available. The CI entry shows the pushed revision, job status
 and recovery outcome; selecting it returns to the originating thread without switching branches.
+Local pushes are detected from Git’s remote-tracking reflogs within about 20 seconds; fetches do not
+start tracking. T3 scans configured projects and their thread worktrees. If exactly one thread matches
+the pushed branch, the activity links to it; ambiguous pushes are tracked without automatic thread
+repair. External pushes start CI tracking and recovery; local `afterPush` hooks still run only for T3
+push actions. Pushes made before the server starts are not discovered retrospectively.
+
 Successful activities disappear automatically. Failed, cancelled, and skipped activities remain until
 you dismiss them; dismissal applies across connected clients and persists across restarts. Running
 activities cannot be dismissed. A newer push supersedes unfinished tracking for the previous revision.

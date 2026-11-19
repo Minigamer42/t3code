@@ -1,3 +1,5 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Projects from "../orchestration-v2/ProjectStore.ts";
 import { expect, it } from "@effect/vitest";
 import { CiActivity, ThreadId, ProjectId, CommandId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -60,6 +62,8 @@ it.effect("queues CI repair only for the unchanged originating checkout", () =>
       yield* Reactor.start().pipe(
         Effect.provide(
           Layer.mergeAll(
+            NodeServices.layer,
+            Layer.mock(Projects.ProjectStoreV2)({}),
             Layer.mock(Monitor.CiMonitor)({
               start: (wake) =>
                 wake(activity, "Inspect the failed job", CommandId.make("ci-failure:push")).pipe(

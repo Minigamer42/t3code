@@ -1,3 +1,5 @@
+import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
+import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
@@ -13,6 +15,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
 import * as Provider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as Providers from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -42,6 +45,7 @@ const fixture = Effect.gen(function* () {
   let reads = 0;
   const commands: string[][] = [];
   let ambiguousPost = false;
+  let localPushes = "";
   const api = {
     read: () =>
       Effect.sync(() => {
@@ -99,7 +103,18 @@ const fixture = Effect.gen(function* () {
               commands.push([...args]);
               return {
                 exitCode: ChildProcessSpawner.ExitCode(0),
-                stdout: args[0] === "remote" ? "git@git.example:acme/app.git" : "a".repeat(40),
+                stdout:
+                  args[0] === "reflog"
+                    ? localPushes
+                    : args[0] === "for-each-ref"
+                      ? "local\0origin\0refs/heads/published\0origin\0refs/heads/published\n"
+                      : args[0] === "remote"
+                        ? args[1] === "get-url"
+                          ? "git@git.example:acme/app.git"
+                          : "origin\nfork\n"
+                        : args.includes("--git-common-dir")
+                          ? `${cwd}/.git`
+                          : "a".repeat(40),
                 stderr: "",
                 stdoutTruncated: false,
                 stderrTruncated: false,
@@ -138,6 +153,9 @@ const fixture = Effect.gen(function* () {
     posts: () => posts,
     reads: () => reads,
     commands,
+    setLocalPushes: (value: string) => {
+      localPushes = value;
+    },
     loseResponse: () => {
       ambiguousPost = true;
     },
@@ -192,6 +210,43 @@ it.layer(NodeServices.layer)("background CI", (it) => {
           yield* f.fs.readFileString(`${f.cwd}/userdata/ci-activities.json`),
         ) as Array<{ activity: CiActivity }>;
         expect(stored.find((item) => item.activity.id === id)?.activity.attempts.repair).toBe(1);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "discovers local pushes without treating fetches as pushes or using the current local HEAD",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const service = yield* f.make;
+        const sha = "b".repeat(40);
+        const input = {
+          cwd: f.cwd,
+          threads: [{ id: f.input.threadId, branch: "local", worktreePath: null }],
+        };
+        f.setLocalPushes(`refs/remotes/origin/published@{0}\0${sha}\0fetch origin: fast-forward\n`);
+        yield* service.discoverLocalPushes(input);
+        expect(yield* f.snapshots(service)).toEqual([]);
+        yield* TestClock.adjust("20 seconds");
+        f.setLocalPushes(`refs/remotes/origin/published@{0}\0${sha}\0update by push\n`);
+        yield* service.withPublication(f.cwd, service.discoverLocalPushes(input));
+        expect(yield* f.snapshots(service)).toEqual([]);
+        yield* service.discoverLocalPushes(input);
+        expect((yield* f.snapshots(service))[0]).toMatchObject({
+          sha,
+          branch: "published",
+          localBranch: "local",
+          threadId: f.input.threadId,
+        });
+        yield* service.discoverLocalPushes(input);
+        expect((yield* f.snapshots(service)).length).toBe(1);
+        yield* TestClock.adjust("20 seconds");
+        f.setLocalPushes(`refs/remotes/origin/published@{0}\0${"c".repeat(40)}\0update by push\n`);
+        yield* service.discoverLocalPushes({
+          ...input,
+          threads: [...input.threads, { ...input.threads[0]!, id: ThreadId.make("another") }],
+        });
+        expect((yield* f.snapshots(service))[0]?.threadId).toBeNull();
       }).pipe(Effect.scoped),
   );
 
@@ -386,3 +441,61 @@ it.layer(NodeServices.layer)("background CI", (it) => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.live("reads actual push reflogs after a checkout switch and ignores a fetched branch", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-local-push-" });
+    const cwd = `${directory}/checkout`;
+    const bare = `${directory}/remote.git`;
+    const host = yield* SourceControlHost.SourceControlHost;
+    const run = (...args: string[]) =>
+      host.process
+        .run({ operation: "test", command: "git", cwd: directory, args })
+        .pipe(Effect.map((result) => result.stdout));
+    yield* run("init", "--bare", bare);
+    yield* run("init", "-b", "main", cwd);
+    const git = (...args: string[]) => run("-C", cwd, ...args);
+    yield* git("config", "user.name", "CI discovery test");
+    yield* git("config", "user.email", "ci@example.test");
+    yield* git("config", "core.logAllRefUpdates", "true");
+    yield* git("commit", "--allow-empty", "-m", "base");
+    yield* git("switch", "-c", "local");
+    yield* git("remote", "add", "origin", "https://git.example/acme/app.git");
+    yield* fs.makeDirectory(`${cwd}/.t3code`);
+    yield* fs.writeFileString(`${cwd}/.t3code/ci.json`, "{}");
+    const service = yield* Monitor.make.pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ServerConfig.layerTest(cwd, directory),
+          Layer.mock(Providers.SourceControlProviderRegistry)({ resolveLink: () => undefined }),
+          Layer.mock(Process.VcsProcess)({}),
+          Layer.mock(Git.GitVcsDriver)({ execute: (input) => host.git.execute(input) }),
+        ),
+      ),
+    );
+    // Only these commands override the fixture URL; discovery sees a normal forge remote.
+    yield* git("-c", `remote.origin.pushurl=${bare}`, "push", "-u", "origin", "local:published");
+    const sha = (yield* git("rev-parse", "HEAD")).trim();
+    yield* run("--git-dir", bare, "update-ref", "refs/heads/fetched", sha);
+    yield* git("fetch", bare, "+refs/heads/*:refs/remotes/origin/*");
+    yield* git("commit", "--allow-empty", "-m", "not pushed");
+    yield* git("switch", "main");
+    const threadId = ThreadId.make("external-push-thread");
+    yield* service.discoverLocalPushes({
+      cwd,
+      threads: [{ id: threadId, branch: "local", worktreePath: null }],
+    });
+    const activities = Option.getOrThrow(yield* Stream.runHead(service.subscribe));
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toMatchObject({
+      sha,
+      branch: "published",
+      localBranch: "local",
+      threadId,
+    });
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(Layer.mergeAll(NodeServices.layer, TestSourceControlHost.layerWithRealGit())),
+  ),
+);

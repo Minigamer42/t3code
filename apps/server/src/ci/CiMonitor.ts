@@ -95,6 +95,14 @@ export class CiMonitor extends Context.Service<
       localBranch?: string;
       threadId: ThreadId | null;
     }) => Effect.Effect<void, GitManagerError>;
+    readonly discoverLocalPushes: (input: {
+      readonly cwd: string;
+      readonly threads: ReadonlyArray<{
+        readonly id: ThreadId;
+        readonly branch: string | null;
+        readonly worktreePath: string | null;
+      }>;
+    }) => Effect.Effect<void, GitManagerError>;
     readonly dismiss: (activityId: string) => Effect.Effect<void, GitManagerError>;
     readonly subscribe: Stream.Stream<readonly CiActivity[]>;
     readonly sweep: Effect.Effect<void, GitManagerError>;
@@ -104,6 +112,7 @@ export class CiMonitor extends Context.Service<
         instructions: string,
         commandId: CommandId,
       ) => Effect.Effect<boolean, GitManagerError>,
+      discover?: Effect.Effect<void>,
     ) => Effect.Effect<void, never, import("effect/Scope").Scope>;
   }
 >()("t3/ci/CiMonitor") {}
@@ -125,6 +134,8 @@ export const make = Effect.gen(function* () {
   const sweeper = yield* Semaphore.make(1);
   let started = false;
   const publications = new Map<string, number>();
+  const discoveryStartedAt = yield* Clock.currentTimeMillis;
+  const scannedRepositories = new Map<string, number>();
   let wake:
     | ((
         activity: CiActivity,
@@ -518,6 +529,143 @@ export const make = Effect.gen(function* () {
           ),
         ),
     ),
+    discoverLocalPushes: Effect.fn("CiMonitor.discoverLocalPushes")(
+      function* (input: Parameters<CiMonitor["Service"]["discoverLocalPushes"]>[0]) {
+        if (
+          publications.has(input.cwd) ||
+          input.threads.some(
+            (thread) => thread.worktreePath && publications.has(thread.worktreePath),
+          )
+        )
+          return;
+        const config = yield* Config.read(input.cwd).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+        );
+        if (!config) return;
+        const common = (yield* git.execute({
+          cwd: input.cwd,
+          operation: "ci.discover",
+          args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        })).stdout.trim();
+        const now = yield* Clock.currentTimeMillis;
+        const since = scannedRepositories.get(common) ?? discoveryStartedAt;
+        if (scannedRepositories.has(common) && now - since < 10_000) return;
+        const result = yield* git.execute({
+          cwd: input.cwd,
+          operation: "ci.discover",
+          args: [
+            "reflog",
+            "show",
+            "--all",
+            `--since=@${Math.floor(since / 1000) - 1}`,
+            "--format=%gD%x00%H%x00%gs",
+          ],
+          maxOutputBytes: 1_000_000,
+        });
+        if (result.stdoutTruncated)
+          return yield* new GitManagerError({
+            cwd: input.cwd,
+            operation: "ci",
+            detail: "Local push discovery exceeded the output limit.",
+          });
+        const pushes = new Map<string, string>();
+        for (const line of result.stdout.split("\n")) {
+          const [selector, sha, message] = line.split("\0");
+          const ref = selector?.replace(/@\{[^}]+\}$/, "");
+          if (
+            message === "update by push" &&
+            ref?.startsWith("refs/remotes/") &&
+            sha &&
+            !pushes.has(ref)
+          )
+            pushes.set(ref, sha);
+        }
+        if (pushes.size) {
+          const remotes = (yield* git.execute({
+            cwd: input.cwd,
+            operation: "ci.discover",
+            args: ["remote"],
+          })).stdout
+            .trim()
+            .split("\n")
+            .sort((a, b) => b.length - a.length);
+          const heads = yield* git.execute({
+            cwd: input.cwd,
+            operation: "ci.discover",
+            args: [
+              "for-each-ref",
+              "--format=%(refname:strip=2)%00%(upstream:remotename)%00%(upstream:remoteref)%00%(push:remotename)%00%(push:remoteref)",
+              "refs/heads",
+            ],
+            maxOutputBytes: 1_000_000,
+          });
+          if (heads.stdoutTruncated)
+            return yield* new GitManagerError({
+              cwd: input.cwd,
+              operation: "ci",
+              detail: "Local branch discovery exceeded the output limit.",
+            });
+          const mappings = heads.stdout
+            .trim()
+            .split("\n")
+            .map((line) => line.split("\0"));
+          for (const [ref, sha] of pushes) {
+            const remote = remotes.find((name) => name && ref.startsWith(`refs/remotes/${name}/`));
+            if (!remote) continue;
+            const branch = ref.slice(`refs/remotes/${remote}/`.length);
+            const branches = mappings
+              .filter(
+                ([local, upstreamRemote, upstreamRef, pushRemote, pushRef]) =>
+                  (pushRemote || upstreamRemote) === remote &&
+                  (pushRef || upstreamRef || `refs/heads/${local}`) === `refs/heads/${branch}`,
+              )
+              .map(([local]) => local!);
+            const matching = input.threads.filter(
+              (thread) => thread.branch !== null && branches.includes(thread.branch),
+            );
+            const thread = matching.length === 1 ? matching[0] : undefined;
+            const localBranch = thread?.branch ?? (branches.length === 1 ? branches[0]! : branch);
+            const remoteUrl = (yield* git.execute({
+              cwd: input.cwd,
+              operation: "ci.discover",
+              args: ["remote", "get-url", "--push", remote],
+            })).stdout.trim();
+            const host = parseGitRemoteHost(remoteUrl)?.host;
+            const repository = repositoryPathFromRemoteUrl(remoteUrl);
+            if (!host || !repository)
+              return yield* new GitManagerError({
+                cwd: input.cwd,
+                operation: "ci",
+                detail: "Local push remote could not be identified for CI tracking.",
+              });
+            yield* register({
+              cwd: thread?.worktreePath ?? input.cwd,
+              branch,
+              localBranch,
+              sha,
+              host,
+              repository,
+              threadId: thread?.id ?? null,
+            });
+          }
+        }
+        scannedRepositories.set(common, now);
+      },
+      (effect, input) =>
+        effect.pipe(
+          Effect.mapError((cause) =>
+            isManagerError(cause)
+              ? cause
+              : new GitManagerError({
+                  cwd: input.cwd,
+                  operation: "ci",
+                  detail: "Local push discovery failed.",
+                  cause,
+                }),
+          ),
+        ),
+    ),
     dismiss: Effect.fn("CiMonitor.dismiss")(
       function* (activityId: string) {
         const record = (yield* SubscriptionRef.get(records)).find(
@@ -555,12 +703,16 @@ export const make = Effect.gen(function* () {
       ),
     ),
     sweep: sweep(),
-    start: Effect.fn("CiMonitor.start")(function* (onFailure) {
+    start: Effect.fn("CiMonitor.start")(function* (onFailure, discover) {
       if (started) return;
       started = true;
       wake = onFailure;
       yield* forkParked(
-        sweep().pipe(Effect.ignore({ log: true }), Effect.repeat(Schedule.spaced("20 seconds"))),
+        (discover ?? Effect.void).pipe(
+          Effect.andThen(sweep()),
+          Effect.ignore({ log: true }),
+          Effect.repeat(Schedule.spaced("20 seconds")),
+        ),
       );
     }),
   });
