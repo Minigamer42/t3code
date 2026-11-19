@@ -3,6 +3,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  RunId,
   type GitRunStackedActionResult,
   type GitStackStatusResult,
   type OrchestrationV2ServerCommand as OrchestrationCommand,
@@ -80,6 +81,7 @@ function prResult(pr: GitRunStackedActionResult["pr"]): Pick<GitRunStackedAction
 const layerDependenciesFor = (
   dispatch: Orchestrator.OrchestratorV2Shape["dispatch"],
   threadShell: PullRequestTestThread | null = thread,
+  completed = false,
 ) =>
   Layer.mergeAll(
     Layer.mock(ProjectStore.ProjectStoreV2)({ getShell: () => Effect.succeedSome(project) }),
@@ -87,7 +89,15 @@ const layerDependenciesFor = (
       getShell: () => Effect.succeedSome(project),
     }),
     Layer.mock(Orchestrator.OrchestratorV2)({
-      getThreadShell: () => Effect.succeed(threadShell ? v2PullRequestThread(threadShell) : null),
+      getThreadShell: () =>
+        Effect.succeed(
+          threadShell
+            ? {
+                ...v2PullRequestThread(threadShell),
+                ...(completed ? { latestRunId: RunId.make("completed-run") } : {}),
+              }
+            : null,
+        ),
       getPullRequestSnapshot: () =>
         Effect.succeed({
           snapshotSequence: 1,
@@ -222,24 +232,34 @@ it.effect(
     }),
 );
 
-it.effect.each(["normal", "other-worktree", "dismissed", "linked"] as const)(
+it.effect.each([
+  "normal",
+  "other-worktree",
+  "dismissed",
+  "linked",
+  "settled",
+  "reused",
+  "coordinator",
+  "completed-unowned",
+] as const)(
   "links open local stack reviews to matching threads without resurrecting hidden links: %s",
   (mode) =>
     Effect.gen(function* () {
       const { commands, dispatch } = yield* recordingDispatch();
       const url = (number: number) => `https://gitlab.example/acme/app/-/merge_requests/${number}`;
-      const shell: PullRequestTestThread = {
+      let shell: PullRequestTestThread = {
         ...thread,
         branch: "upper",
+        settledAt: mode === "settled" ? "2026-08-21T00:00:00.000Z" : null,
         worktreePath: mode === "other-worktree" ? "/elsewhere" : null,
         pullRequests:
-          mode === "dismissed" || mode === "linked"
+          mode === "dismissed" || mode === "linked" || mode === "reused" || mode === "coordinator"
             ? [
                 {
                   host: "gitlab.example",
                   repository: "acme/app",
-                  number: 1,
-                  url: url(1),
+                  number: mode === "reused" ? 99 : 1,
+                  url: url(mode === "reused" ? 99 : 1),
                   source: mode === "dismissed" ? "stack-dismissed" : "manual",
                   linkedAt: "2026-01-01T00:00:00.000Z",
                   snapshot: null,
@@ -248,15 +268,29 @@ it.effect.each(["normal", "other-worktree", "dismissed", "linked"] as const)(
               ]
             : [],
       };
+      if (mode === "coordinator") {
+        shell = {
+          ...shell,
+          pullRequests: [
+            ...shell.pullRequests,
+            {
+              ...shell.pullRequests[0]!,
+              number: 4,
+              url: url(4),
+              source: "agent",
+            },
+          ],
+        };
+      }
       const stack: GitStackStatusResult = {
         managed: true,
         base: "main",
         baseIsDefault: true,
         remote: "origin",
         operation: null,
-        layers: ["lower", "upper", "merged"].map((branch, i) => ({
+        layers: ["lower", "upper", "merged", "unrelated"].map((branch, i) => ({
           branch,
-          parent: i === 0 ? "main" : "lower",
+          parent: i === 0 || i === 3 ? "main" : "lower",
           headSha: "a".repeat(40),
           needsRestack: false,
           hasChanges: false,
@@ -266,7 +300,7 @@ it.effect.each(["normal", "other-worktree", "dismissed", "linked"] as const)(
         })),
       };
       yield* linkStackPullRequests({ cwd: project.workspaceRoot, stack, commandId }).pipe(
-        Effect.provide(layerDependenciesFor(dispatch, shell)),
+        Effect.provide(layerDependenciesFor(dispatch, shell, mode === "completed-unowned")),
       );
       if (mode === "dismissed")
         yield* linkCreatedPullRequest({
@@ -279,7 +313,10 @@ it.effect.each(["normal", "other-worktree", "dismissed", "linked"] as const)(
           command.type === "thread.pull-request.link" ? [[command.number, command.source]] : [],
         ),
       ).toEqual(
-        mode === "other-worktree"
+        mode === "other-worktree" ||
+          mode === "settled" ||
+          mode === "reused" ||
+          mode === "completed-unowned"
           ? []
           : mode === "normal"
             ? [
@@ -288,5 +325,21 @@ it.effect.each(["normal", "other-worktree", "dismissed", "linked"] as const)(
               ]
             : [[2, "stack"]],
       );
+      const beforeRepeat = yield* Ref.get(commands);
+      shell = {
+        ...shell,
+        pullRequests: [
+          ...shell.pullRequests,
+          ...beforeRepeat.flatMap((command) =>
+            command.type === "thread.pull-request.link"
+              ? [{ ...command, linkedAt: "2026-08-21T00:00:00.000Z", snapshot: null, stack: null }]
+              : [],
+          ),
+        ],
+      };
+      yield* linkStackPullRequests({ cwd: project.workspaceRoot, stack, commandId }).pipe(
+        Effect.provide(layerDependenciesFor(dispatch, shell, mode === "completed-unowned")),
+      );
+      expect(yield* Ref.get(commands)).toEqual(beforeRepeat);
     }),
 );

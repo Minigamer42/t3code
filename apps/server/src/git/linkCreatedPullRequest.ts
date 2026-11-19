@@ -119,6 +119,9 @@ export const linkStackPullRequests = Effect.fn("linkStackPullRequests")(
       const current = yield* engine.getThreadShell(thread.id);
       if (
         !current ||
+        current.archivedAt !== null ||
+        current.settledAt !== null ||
+        current.settledOverride === "settled" ||
         current.projectId !== thread.projectId ||
         current.branch !== thread.branch ||
         current.worktreePath !== thread.worktreePath
@@ -130,8 +133,51 @@ export const linkStackPullRequests = Effect.fn("linkStackPullRequests")(
         (current.worktreePath ?? project.value.workspaceRoot) !== input.cwd
       )
         continue;
-      const known = new Set((current.pullRequests ?? []).map(threadPullRequestKeyOf));
+      const links = current.pullRequests ?? [];
+      const owned = new Set(
+        links
+          .filter(
+            (link) =>
+              link.source === "created" ||
+              link.source === "manual" ||
+              link.source === "agent" ||
+              link.watch !== undefined,
+          )
+          .map(threadPullRequestKeyOf),
+      );
+      if (owned.size === 0 && current.latestRunId !== null && current.activeRunId === null)
+        continue;
+      const related = new Set<string>();
       for (const layer of input.stack.layers) {
+        const key =
+          layer.pullRequest &&
+          sourceControlDefinitions.parseChangeRequestUrl(layer.pullRequest.url)?.link;
+        if (
+          owned.size > 0
+            ? key && owned.has(threadPullRequestKeyOf(key))
+            : layer.branch === current.branch
+        ) {
+          related.add(layer.branch);
+        }
+      }
+      // The default base joins independent tickets; only layer-to-layer edges establish dependency.
+      const neighbors = new Map<string, string[]>();
+      for (const layer of input.stack.layers) {
+        if (!branches.has(layer.parent)) continue;
+        neighbors.set(layer.branch, [...(neighbors.get(layer.branch) ?? []), layer.parent]);
+        neighbors.set(layer.parent, [...(neighbors.get(layer.parent) ?? []), layer.branch]);
+      }
+      const pending = [...related];
+      for (let index = 0; index < pending.length; index += 1) {
+        for (const branch of neighbors.get(pending[index]!) ?? []) {
+          if (related.has(branch)) continue;
+          related.add(branch);
+          pending.push(branch);
+        }
+      }
+      const known = new Set(links.map(threadPullRequestKeyOf));
+      for (const layer of input.stack.layers) {
+        if (!related.has(layer.branch)) continue;
         const pr = layer.pullRequest;
         if (pr?.state !== "open") continue;
         const key = sourceControlDefinitions.parseChangeRequestUrl(pr.url)?.link;
