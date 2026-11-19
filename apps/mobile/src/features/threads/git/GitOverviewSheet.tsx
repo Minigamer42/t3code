@@ -267,14 +267,20 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       void onPressMenuItem(item);
       return;
     }
-    if (item.id === "push" && isDefaultRef && !gitStatus.data?.hasWorkingTreeChanges) {
+    if ((item.id === "push" || item.id === "pr") && isDefaultRef) {
       presentRoute(() =>
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
           threadId: String(threadId),
-          confirmAction: "push",
+          confirmAction: gitStatus.data?.hasWorkingTreeChanges
+            ? item.id === "pr"
+              ? "commit_push_pr"
+              : "commit_push"
+            : item.id === "pr"
+              ? "create_pr"
+              : "push",
           branchName: gitStatus.data?.refName ?? "",
-          includesCommit: "false",
+          includesCommit: String(gitStatus.data?.hasWorkingTreeChanges === true),
         }),
       );
       return;

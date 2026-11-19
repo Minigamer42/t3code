@@ -46,6 +46,14 @@ test(
     await expect(screen.getByRole("button", "Push", { exact: true })).toBeEnabled();
     await expect(screen.getByRole("button", "Push & create PR", { exact: true })).toBeEnabled();
     await app.screenshot("outgoing-git-actions");
+    await screen.getByRole("button", "Push & create PR options", { exact: true }).tap();
+    await expect(
+      screen.getByRole("button", "Push on current branch", { exact: true }),
+    ).toBeEnabled();
+    await expect(screen.getByRole("button", "Push & create PR", { exact: true })).toBeEnabled();
+    await app.screenshot("push-pr-dialog");
+    await screen.getByRole("button", "Cancel", { exact: true }).tap();
+
     await screen.getByRole("button", "Push options", { exact: true }).tap();
     await expect(
       screen.getByRole("button", "Push on current branch", { exact: true }),
@@ -74,6 +82,17 @@ test(
       }),
     );
     await expect(screen.getByRole("button", "Commit options", { exact: true })).toBeEnabled();
+    for (const label of ["Commit & push", "Commit, push & create PR"]) {
+      await screen.getByRole("button", `${label} options`, { exact: true }).tap();
+      await expect(
+        screen.getByRole("button", "Commit & push on current branch", { exact: true }),
+      ).toBeEnabled();
+      await expect(screen.getByRole("button", label, { exact: true })).toBeEnabled();
+      await app.screenshot(
+        label === "Commit & push" ? "commit-push-dialog" : "commit-push-pr-dialog",
+      );
+      await screen.getByRole("button", "Cancel", { exact: true }).tap();
+    }
     await screen.getByRole("button", "Commit options", { exact: true }).tap();
     await expect(
       screen.getByRole("button", "Commit on current branch", { exact: true }),
@@ -118,6 +137,13 @@ test(
       !(await browser.evaluate(() => document.querySelector("[data-thread-details-card]") !== null))
     ) {
       await screen.getByRole("button", "Toggle thread details panel").tap();
+    }
+    for (const label of ["Commit & push", "Commit, push & create PR"]) {
+      await screen.getByRole("button", `${label} options`, { exact: true }).tap();
+      await expect(
+        screen.getByRole("button", "Commit & push on current branch", { exact: true }),
+      ).not.toBeVisible();
+      await screen.getByRole("button", "Cancel", { exact: true }).tap();
     }
     await screen.getByRole("button", "Commit options", { exact: true }).tap();
     await expect(

@@ -2053,6 +2053,27 @@ export default function GitActionsControl({
           label={contextAction.label}
           onClose={() => setContextAction(null)}
           onRun={(instructions) => runMenuItem(contextAction, instructions)}
+          {...(isDefaultRef && (contextAction.id === "push" || contextAction.id === "pr")
+            ? {
+                currentBranchAction: {
+                  label: gitStatusForActions?.hasWorkingTreeChanges
+                    ? "Commit & push on current branch"
+                    : "Push on current branch",
+                  ...(contextAction.id === "pr"
+                    ? {
+                        description: `Creating a ${changeRequestTerminology.shortLabel} requires a feature branch. The current-branch action skips ${changeRequestTerminology.shortLabel} creation.`,
+                      }
+                    : {}),
+                  onRun: (instructions: string) => {
+                    void runGitActionWithToast({
+                      action: gitStatusForActions?.hasWorkingTreeChanges ? "commit_push" : "push",
+                      ...(instructions ? { instructions } : {}),
+                      skipDefaultBranchPrompt: true,
+                    });
+                  },
+                },
+              }
+            : {})}
         />
       ) : null}
       {regenerateSelection !== null ? (

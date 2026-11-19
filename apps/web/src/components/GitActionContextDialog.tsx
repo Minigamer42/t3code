@@ -16,10 +16,16 @@ export function GitActionContextDialog({
   label,
   onRun,
   onClose,
+  currentBranchAction,
 }: {
   label: string;
   onRun: (instructions: string) => void;
   onClose: () => void;
+  currentBranchAction?: {
+    label: string;
+    description?: string;
+    onRun: (instructions: string) => void;
+  };
 }) {
   const [instructions, setInstructions] = useState("");
   return (
@@ -29,7 +35,7 @@ export function GitActionContextDialog({
         if (!open) onClose();
       }}
     >
-      <DialogPopup>
+      <DialogPopup className={currentBranchAction ? "max-w-xl" : undefined}>
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription>
@@ -47,12 +53,28 @@ export function GitActionContextDialog({
               placeholder="For example: explain the migration risk, or keep the API changes in a separate commit."
             />
           </label>
+          {currentBranchAction?.description ? (
+            <p className="text-sm text-muted-foreground">{currentBranchAction.description}</p>
+          ) : null}
         </DialogPanel>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+        <DialogFooter className="sm:flex-wrap">
+          <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
+          {currentBranchAction ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onClose();
+                currentBranchAction.onRun(instructions.trim());
+              }}
+            >
+              {currentBranchAction.label}
+            </Button>
+          ) : null}
           <Button
+            size="sm"
             onClick={() => {
               onClose();
               onRun(instructions.trim());

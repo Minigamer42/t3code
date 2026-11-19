@@ -4,9 +4,10 @@ import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { View } from "react-native";
 
+import { AppText as Text, AppTextInput as TextInput } from "../../../components/ui/AppText";
 import { SheetHeader } from "../../../components/ui/SheetHeader";
 import { FitSheet } from "../../../components/ui/FitSheet";
 import { SheetIntro } from "../../../components/ui/SheetIntro";
@@ -37,6 +38,7 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
   ).changeRequest;
 
   const params = props.route.params;
+  const [instructions, setInstructions] = useState(params.instructions ?? "");
 
   const confirmAction = params.confirmAction as
     | "push"
@@ -67,9 +69,14 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
     if (!canWriteSourceControl || !confirmAction) return;
     navigation.dispatch(StackActions.replace("Thread", { environmentId, threadId }));
     await gitActions.onRunSelectedThreadGitAction({
-      action: confirmAction,
+      action:
+        confirmAction === "commit_push_pr"
+          ? "commit_push"
+          : confirmAction === "create_pr"
+            ? "push"
+            : confirmAction,
       ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
-      ...(params.instructions ? { instructions: params.instructions } : {}),
+      ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
       ...(params.filePaths ? { filePaths: params.filePaths.split(",") } : {}),
     });
   };
@@ -83,7 +90,7 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
         action: confirmAction,
         featureBranch: true,
         ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
-        ...(params.instructions ? { instructions: params.instructions } : {}),
+        ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
         ...(params.filePaths ? { filePaths: params.filePaths.split(",") } : {}),
       });
       return;
@@ -101,13 +108,17 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
     );
     const created = await gitActions.onCreateSelectedThreadBranch(newBranchName);
     if (created === null) return;
-    await gitActions.onRunSelectedThreadGitAction({ action: confirmAction });
+    await gitActions.onRunSelectedThreadGitAction({
+      action: confirmAction,
+      ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
+    });
   }, [
     canChangeThreadBranch,
     confirmAction,
     gitActions,
     gitState.selectedThreadBranches,
     includesCommit,
+    instructions,
     params,
     navigation,
     environmentId,
@@ -122,13 +133,26 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
       <SheetIntro
         eyebrow="Confirm"
         title={copy?.title ?? "Run action on default branch?"}
-        description={copy?.description ?? "Choose how to continue."}
+        description={
+          confirmAction === "create_pr" || confirmAction === "commit_push_pr"
+            ? `Push directly to ${branchName} without creating a ${terminology.shortLabel}, or create a feature branch for the full action.`
+            : (copy?.description ?? "Choose how to continue.")
+        }
       />
 
       <View className="gap-3">
+        <Text className="text-sm text-foreground-secondary">Additional context (optional)</Text>
+        <TextInput
+          multiline
+          accessibilityLabel="Additional context"
+          value={instructions}
+          onChangeText={setInstructions}
+          maxLength={10_000}
+          className="min-h-24 rounded-xl border border-border bg-card p-3 text-foreground"
+        />
         <SheetActionButton
           icon="arrow.right.circle"
-          label={pushOnly ? "Push on current branch" : (copy?.continueLabel ?? "Continue")}
+          label={includesCommit ? "Commit & push on current branch" : "Push on current branch"}
           disabled={!canWriteSourceControl}
           onPress={() => void continuePendingAction()}
         />
