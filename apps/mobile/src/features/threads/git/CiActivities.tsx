@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { View } from "react-native";
+import { Linking, Pressable, View } from "react-native";
+import { AppText as Text } from "../../../components/ui/AppText";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { Button } from "../../../components/ui/Button";
 import { isCiActivityFinished, type EnvironmentId } from "@t3tools/contracts";
@@ -24,11 +25,30 @@ export function CiActivities({ environmentId }: { readonly environmentId: Enviro
             <ListRow
               icon="arrow.triangle.branch"
               label={`CI · ${activity.branch} · ${activity.sha.slice(0, 7)}`}
-              description={activity.label}
               onPress={() => {
                 if (activity.threadId) openThread({ environmentId, threadId: activity.threadId });
               }}
             />
+            <View className="flex-row items-center gap-2 px-4 pb-2">
+              <Text numberOfLines={1} className="min-w-0 shrink text-xs text-foreground-secondary">
+                {activity.label}
+              </Text>
+              {activity.pipeline?.changeRequest ? (
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={`Open MR #${activity.pipeline.changeRequest.number}`}
+                  hitSlop={8}
+                  onPress={() => {
+                    if (activity.pipeline?.changeRequest)
+                      void Linking.openURL(activity.pipeline.changeRequest.url);
+                  }}
+                >
+                  <Text className="text-xs text-primary-text underline">
+                    #{activity.pipeline.changeRequest.number}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
           {isCiActivityFinished(activity) ? (
             <Button

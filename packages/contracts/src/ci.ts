@@ -46,7 +46,9 @@ export const CiActivity = Schema.Struct({
 export type CiActivity = typeof CiActivity.Type;
 
 export function ciProgressJobs(jobs: ReadonlyArray<CiJob>): ReadonlyArray<CiJob> {
-  return jobs.filter((job) => job.status !== "manual" && job.status !== "skipped");
+  return jobs.filter(
+    (job) => job.status !== "created" && job.status !== "manual" && job.status !== "skipped",
+  );
 }
 
 export function isCiActivityFinished(activity: Pick<CiActivity, "state">): boolean {
