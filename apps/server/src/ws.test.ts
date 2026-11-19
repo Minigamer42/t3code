@@ -1,3 +1,4 @@
+import * as CiMonitor from "./ci/CiMonitor.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { WebSocket } from "@effect/platform-node/NodeWS";
@@ -833,6 +834,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(CodexInstallation.CodexInstallation)({ managedDirectory: "/unused" }),
   Layer.mock(DeviceService.DeviceService)({}),
   Layer.mock(EnvironmentTheme.EnvironmentThemeService)({}),
+  Layer.mock(CiMonitor.CiMonitor)({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(CommitWorkflowService.CommitWorkflowService)({}),
   Layer.mock(HostResources.HostResources)({}),

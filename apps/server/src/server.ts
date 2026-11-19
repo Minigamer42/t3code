@@ -1,3 +1,4 @@
+import * as CiFailureReactor from "./ci/CiFailureReactor.ts";
 import * as SourceControlMcpService from "./mcp/SourceControlMcpService.ts";
 import * as GenerationSpeedHistory from "./usage/GenerationSpeedHistory.ts";
 import * as BrowserAuth from "./cloud/BrowserAuth.ts";
@@ -106,6 +107,7 @@ import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as CiMonitor from "./ci/CiMonitor.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -463,7 +465,13 @@ const layerGit = Layer.empty.pipe(
   Layer.provideMerge(GitVcsDriver.layer),
 );
 
+const layerCiMonitor = CiMonitor.layer.pipe(
+  Layer.provide(GitVcsDriver.layer),
+  Layer.provide(VcsProcess.layer),
+  Layer.provide(layerSourceControlProviderRegistry),
+);
 const layerGitWorkflow = GitWorkflowService.layer.pipe(
+  Layer.provideMerge(layerCiMonitor),
   Layer.provide(layerPullRequestService.pipe(Layer.provide(RuntimeLayer.layerProjectService))),
   Layer.provideMerge(layerVcsDriverRegistry),
   Layer.provideMerge(layerGit),
@@ -733,6 +741,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ProviderInstallation.layer,
   ReplayMarkers.layer,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
+  Layer.effectDiscard(CiFailureReactor.start()).pipe(Layer.provide(layerCiMonitor)),
 ).pipe(
   Layer.provideMerge(layerOrchestrationApplication),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),

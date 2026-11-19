@@ -1,4 +1,5 @@
 import { GitActionRow } from "./GitActionRow";
+import { CiActivities } from "./CiActivities";
 import { GitWorkflowProgressView } from "./GitWorkflowProgressView";
 import { gitEnvironment } from "../../../state/git";
 import { BranchStackControl } from "./BranchStackControl";
@@ -349,6 +350,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         </ListSection>
       ) : null}
       {workflowQuery.data ? <GitWorkflowProgressView progress={workflowQuery.data} /> : null}
+      <CiActivities environmentId={environmentId} />
       <ListSection>
         {sheetMenuItems
           .filter(({ item }) => item.id === "branch")

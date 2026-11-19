@@ -116,6 +116,11 @@ export interface GitActionProgressReporter {
 }
 
 export interface GitRunStackedActionOptions {
+  readonly onPush?: (
+    cwd: string,
+    branch: string,
+    remoteName?: string,
+  ) => Effect.Effect<void, GitManagerError>;
   readonly actionId?: string;
   readonly progressReporter?: GitActionProgressReporter;
   readonly onPullRequest?: (
@@ -4901,6 +4906,15 @@ export const make = Effect.gen(function* () {
 
   const runStackedAction: GitManager["Service"]["runStackedAction"] = Effect.fn("runStackedAction")(
     function* (input, options) {
+      const completeActionPush = Effect.fn("GitManager.completeActionPush")(function* (
+        cwd: string,
+        branch: string,
+        remoteName?: string,
+      ) {
+        const outcome = yield* Effect.exit(completePush(cwd, branch));
+        if (options?.onPush) yield* options.onPush(cwd, branch, remoteName);
+        return yield* outcome;
+      });
       const progress = yield* createProgressEmitter(input, options);
       const currentPhase = yield* Ref.make<Option.Option<GitActionProgressPhase>>(Option.none());
 
@@ -5192,7 +5206,7 @@ export const make = Effect.gen(function* () {
           yield* branchStacks.update(input.cwd, {
             publishThrough: currentBranch!,
             mergedBranches,
-            afterPush: completePush,
+            afterPush: (cwd, branch) => completeActionPush(cwd, branch, localStack.remote),
             onProgress: (update) => {
               coreSteps = update.steps;
               return onProgress({ ...update, steps: [...coreSteps, ...reviewSteps] });
@@ -5345,7 +5359,7 @@ export const make = Effect.gen(function* () {
 
         const afterPush =
           push.status === "pushed" && !maintainStack && push.branch
-            ? completePush(input.cwd, push.branch)
+            ? completeActionPush(input.cwd, push.branch)
             : Effect.void;
         const runPr: Effect.Effect<GitRunStackedActionResult["pr"], GitManagerServiceError> =
           maintainStack

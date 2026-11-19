@@ -1,3 +1,4 @@
+import * as CiMonitor from "../ci/CiMonitor.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -41,6 +42,12 @@ import * as ManagedProjectFolders from "./ManagedProjectFolders.ts";
 
 const layerGitWorkflow = (vcsProcess?: Layer.Layer<VcsProcess.VcsProcess>) =>
   GitWorkflow.layer.pipe(
+    Layer.provide(
+      Layer.mock(CiMonitor.CiMonitor)({
+        recordPush: () => Effect.void,
+        withPublication: (_cwd, effect) => effect,
+      }),
+    ),
     Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
     Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(vcsProcess ?? VcsProcess.layer))),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),

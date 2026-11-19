@@ -56,6 +56,10 @@ export function createGitEnvironmentAtoms<R, E>(
       invalidateCachedVcsRefs(registry, { environmentId, cwd: input.cwd }),
   });
   return {
+    ciActivities: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:git:ci-activities",
+      tag: WS_METHODS.gitSubscribeCiActivities,
+    }),
     workflowProgress: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:git:workflow-progress",
       tag: WS_METHODS.gitSubscribeWorkflowProgress,

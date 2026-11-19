@@ -1,3 +1,4 @@
+import * as CiMonitor from "../ci/CiMonitor.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { ProjectId } from "@t3tools/contracts";
 import { assert, expect, it, vi } from "@effect/vitest";
@@ -48,6 +49,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("GitWorkflowServi
       Effect.provide(
         GitWorkflowService.layer.pipe(
           Layer.provide(
+            Layer.mock(CiMonitor.CiMonitor)({
+              recordPush: () => Effect.void,
+              withPublication: (_cwd, effect) => effect,
+            }),
+          ),
+          Layer.provide(
             Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
               resolve: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
             }),
@@ -94,6 +101,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("GitWorkflowServi
       Effect.scoped,
       Effect.provide(
         GitWorkflowService.layer.pipe(
+          Layer.provide(
+            Layer.mock(CiMonitor.CiMonitor)({
+              recordPush: () => Effect.void,
+              withPublication: (_cwd, effect) => effect,
+            }),
+          ),
           Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
           Layer.provide(
             Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({

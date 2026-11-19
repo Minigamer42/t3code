@@ -1,4 +1,5 @@
 import * as Stream from "effect/Stream";
+import * as CiMonitor from "../ci/CiMonitor.ts";
 import type { GitWorkflowProgress } from "@t3tools/contracts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
@@ -229,6 +230,7 @@ export const make = Effect.gen(function* () {
   const gitManager = yield* GitManager.GitManager;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const fileSystem = yield* FileSystem.FileSystem;
+  const ciMonitor = yield* CiMonitor.CiMonitor;
 
   // Nested projects and path aliases must share the checkout's branch-mutation lease.
   const withCheckoutLease = <A, E, R>(rootPath: string, effect: Effect.Effect<A, E, R>) =>
@@ -467,11 +469,29 @@ export const make = Effect.gen(function* () {
       );
     }),
     runStackedAction: Effect.fn("GitWorkflowService.runStackedAction")(function (input, options) {
-      return ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
-        Effect.flatMap((handle) =>
-          withCheckoutLease(
-            handle.repository.rootPath,
-            gitManager.runStackedAction(input, options),
+      return ciMonitor.withPublication(
+        input.cwd,
+        ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
+          Effect.flatMap((handle) =>
+            withCheckoutLease(
+              handle.repository.rootPath,
+              gitManager.runStackedAction(input, {
+                ...options,
+                onPush: (cwd, branch, remoteName) =>
+                  ciMonitor
+                    .recordPush({
+                      cwd,
+                      branch,
+                      ...(remoteName ? { remoteName } : {}),
+                      threadId: input.threadId ?? null,
+                    })
+                    .pipe(
+                      Effect.andThen(
+                        options?.onPush ? options.onPush(cwd, branch, remoteName) : Effect.void,
+                      ),
+                    ),
+              }),
+            ),
           ),
         ),
       );

@@ -1,3 +1,4 @@
+import * as CiMonitor from "../ci/CiMonitor.ts";
 import { driver as gitLabDriver } from "@t3tools/source-control-gitlab/server/driver";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as HttpClient from "effect/http/HttpClient";
@@ -2135,6 +2136,12 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           VcsStatusBroadcaster.layer.pipe(
             Layer.provide(
               GitWorkflowService.layer.pipe(
+                Layer.provide(
+                  Layer.mock(CiMonitor.CiMonitor)({
+                    recordPush: () => Effect.void,
+                    withPublication: (_cwd, effect) => effect,
+                  }),
+                ),
                 Layer.provide(Layer.mock(PullRequestService.PullRequestService)({})),
                 Layer.provide(Layer.succeed(GitManager.GitManager, manager)),
                 Layer.provide(
@@ -8433,7 +8440,15 @@ console.log(JSON.stringify([\`daten/sql/\${branch}.sql\`, \`notes/\${process.env
         const events: string[] = [];
         const workflows = yield* Effect.forEach([0, 1], () =>
           GitWorkflowService.make.pipe(
-            Effect.provide(Layer.mock(PullRequestService.PullRequestService)({})),
+            Effect.provide(
+              Layer.mergeAll(
+                Layer.mock(CiMonitor.CiMonitor)({
+                  recordPush: () => Effect.void,
+                  withPublication: (_cwd, effect) => effect,
+                }),
+                Layer.mock(PullRequestService.PullRequestService)({}),
+              ),
+            ),
             // Cache the real filesystem result so startImmediately reaches lease acquisition.
             Effect.provideService(FileSystem.FileSystem, {
               ...fileSystem,

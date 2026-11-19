@@ -39,6 +39,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
 export const RPC_REQUIRED_SCOPES = {
   ...CLIENT_GUARDED_RPC_SCOPES,
+  [WS_METHODS.gitSubscribeCiActivities]: AuthOrchestrationReadScope,
   [WS_METHODS.gitSubscribeWorkflowProgress]: AuthOrchestrationReadScope,
   [WS_METHODS.gitStackStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.gitListRewriteableCommits]: AuthOrchestrationReadScope,

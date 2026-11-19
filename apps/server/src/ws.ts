@@ -218,6 +218,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as CommitWorkflowService from "./git/CommitWorkflowService.ts";
 import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
+import * as CiMonitor from "./ci/CiMonitor.ts";
 import { linkCreatedPullRequest, linkStackPullRequests } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
@@ -1517,6 +1518,7 @@ export const layerWsRpc = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const ciMonitor = yield* CiMonitor.CiMonitor;
       const commitWorkflow = yield* CommitWorkflowService.CommitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
@@ -3201,6 +3203,7 @@ export const layerWsRpc = (
         [WS_METHODS.gitCancelCommitWorkflow]: (input) => commitWorkflow.cancel(input),
         [WS_METHODS.gitSubscribeWorkflowProgress]: (input) =>
           gitWorkflow.subscribeWorkflowProgress(input),
+        [WS_METHODS.gitSubscribeCiActivities]: () => ciMonitor.subscribe,
         [WS_METHODS.gitStackStatus]: (input) => gitWorkflow.stackStatus(input),
         [WS_METHODS.gitStackManage]: (input) =>
           gitWorkflow.manageStack(input).pipe(

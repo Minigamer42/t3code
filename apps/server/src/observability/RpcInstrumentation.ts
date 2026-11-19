@@ -190,6 +190,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.vcsRefreshStatus]: "vcs",
   [WS_METHODS.vcsPull]: "git",
   [WS_METHODS.gitRunStackedAction]: "vcs",
+  [WS_METHODS.gitSubscribeCiActivities]: "git",
   [WS_METHODS.gitSubscribeWorkflowProgress]: "git",
   [WS_METHODS.gitStackStatus]: "git",
   [WS_METHODS.gitStackManage]: "git",

@@ -1,3 +1,4 @@
+import * as CiMonitor from "../ci/CiMonitor.ts";
 import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -1968,7 +1969,19 @@ effectIt.effect(
         );
         expect(harness.projection().runs.at(-1)?.status).toBe("running");
       }
-    }).pipe(Effect.scoped, Effect.provide(layerRealGit)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layerRealGit.pipe(
+          Layer.provide(
+            Layer.mock(CiMonitor.CiMonitor)({
+              recordPush: () => Effect.void,
+              withPublication: (_cwd, effect) => effect,
+            }),
+          ),
+        ),
+      ),
+    ),
 );
 
 effectIt.effect("leaves a managed worktree folder without .git that holds user files", () =>

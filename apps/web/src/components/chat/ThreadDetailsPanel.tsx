@@ -16,6 +16,7 @@ import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import { type EnvMode, type EnvironmentOption } from "../BranchToolbar.logic";
 import { BranchToolbar } from "../BranchToolbar";
 import { BranchStackControl } from "../BranchStackControl";
+import { CiActivities } from "../CiActivities";
 import BaseGitActionsControl from "../GitActionsControl";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
@@ -285,6 +286,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   onBranchChange={props.onActiveThreadBranchOverrideChange}
                 />
               ) : null}
+              <CiActivities environmentId={props.environmentId} />
 
               {density === "full" && !props.draftId && visible.servers ? (
                 <ThreadServersPanel environmentId={props.environmentId} threadId={props.threadId} />
