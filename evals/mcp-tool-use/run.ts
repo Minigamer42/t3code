@@ -308,6 +308,7 @@ export const McpToolUseCase = Schema.Struct({
   setup: Schema.Struct({
     ciFailure: Schema.optional(
       Schema.Struct({
+        cwd: Schema.optional(Schema.String),
         branch: Schema.String,
         sha: Schema.String,
         label: Schema.String,
@@ -1042,6 +1043,7 @@ export const buildMessages = (sample: Sample) => {
   const rawPrompt = failure
     ? ciFailureMessage(
         {
+          ...(failure.cwd ? { cwd: failure.cwd } : {}),
           branch: failure.branch,
           sha: failure.sha,
           label: failure.label,

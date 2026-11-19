@@ -11,7 +11,7 @@ import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Engine from "../orchestration-v2/Orchestrator.ts";
 import * as Git from "../vcs/GitVcsDriver.ts";
 
-it.effect("queues CI repair only for the unchanged originating checkout", () =>
+it.effect("queues CI failure diagnosis despite dirty, moved or reassigned checkouts", () =>
   Effect.gen(function* () {
     const activity: CiActivity = {
       id: "push",
@@ -31,22 +31,30 @@ it.effect("queues CI repair only for the unchanged originating checkout", () =>
     };
     const cases = [
       { branch: "local", sha: activity.sha, changes: "", threadBranch: "local", expected: true },
-      { branch: "other", sha: activity.sha, changes: "", threadBranch: "local", expected: false },
+      { branch: "other", sha: activity.sha, changes: "", threadBranch: "local", expected: true },
       {
         branch: "local",
         sha: "new-local-head",
         changes: "",
         threadBranch: "local",
-        expected: false,
+        expected: true,
       },
       {
         branch: "local",
         sha: activity.sha,
         changes: " M file.txt",
         threadBranch: "local",
+        expected: true,
+      },
+      { branch: "local", sha: activity.sha, changes: "", threadBranch: "other", expected: true },
+      {
+        branch: "local",
+        sha: activity.sha,
+        changes: "",
+        threadBranch: "local",
+        threadExists: false,
         expected: false,
       },
-      { branch: "local", sha: activity.sha, changes: "", threadBranch: "other", expected: false },
     ];
     for (const row of cases) {
       const deliveries: Threads.ThreadManagementSendInput[] = [];
@@ -76,7 +84,10 @@ it.effect("queues CI repair only for the unchanged originating checkout", () =>
                   Effect.orDie,
                 ),
             }),
-            Layer.mock(Engine.OrchestratorV2)({ getThreadShell: () => Effect.succeed(thread) }),
+            Layer.mock(Engine.OrchestratorV2)({
+              getThreadShell: () =>
+                Effect.succeed("threadExists" in row && !row.threadExists ? null : thread),
+            }),
             Layer.mock(Threads.ThreadManagementService)({
               sendToThread: (input) =>
                 Effect.sync(() => {
@@ -108,6 +119,7 @@ it.effect("queues CI repair only for the unchanged originating checkout", () =>
         expect(deliveries[0]?.threadId).toBe(activity.threadId);
         expect(deliveries[0]?.mode).toBe("queue");
         expect(deliveries[0]?.text).toContain(activity.sha);
+        expect(deliveries[0]?.text).toContain(activity.cwd);
       }
     }
   }),

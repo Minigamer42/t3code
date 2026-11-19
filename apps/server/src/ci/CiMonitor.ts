@@ -371,7 +371,7 @@ export const make = Effect.gen(function* () {
                 ).pipe(
                   Effect.tapError(Effect.logError),
                   Effect.match({
-                    onSuccess: (queued) => (queued ? "queued" : "checkout changed"),
+                    onSuccess: (queued) => (queued ? "queued" : "originating thread unavailable"),
                     onFailure: () => "thread notification failed",
                   }),
                 );

@@ -8,13 +8,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as CiProjectConfig from "../vcs/CiProjectConfig.ts";
-import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
 export const start = Effect.fn("CiFailureReactor.start")(function* () {
   const monitor = yield* CiMonitor.CiMonitor;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const engine = yield* Orchestrator.OrchestratorV2;
-  const git = yield* GitVcsDriver.GitVcsDriver;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -59,28 +57,7 @@ export const start = Effect.fn("CiFailureReactor.start")(function* () {
       Effect.gen(function* () {
         if (!activity.threadId) return false;
         const thread = yield* engine.getThreadShell(activity.threadId);
-        if (
-          !thread ||
-          thread.branch !== activity.localBranch ||
-          (thread.worktreePath !== null && thread.worktreePath !== activity.cwd)
-        )
-          return false;
-        const branch = (yield* git.execute({
-          cwd: activity.cwd,
-          operation: "ci.resume",
-          args: ["branch", "--show-current"],
-        })).stdout.trim();
-        const head = (yield* git.execute({
-          cwd: activity.cwd,
-          operation: "ci.resume",
-          args: ["rev-parse", "HEAD"],
-        })).stdout.trim();
-        const changes = (yield* git.execute({
-          cwd: activity.cwd,
-          operation: "ci.resume",
-          args: ["status", "--porcelain"],
-        })).stdout.trim();
-        if (branch !== activity.localBranch || head !== activity.sha || changes) return false;
+        if (!thread) return false;
         yield* threads.sendToThread({
           projectId: thread.projectId,
           threadId: thread.id,

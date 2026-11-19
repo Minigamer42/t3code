@@ -387,9 +387,12 @@ To return unresolved failures to the agent, add:
 }
 ```
 
-This queues a turn only if the originating thread still uses the same branch and clean checkout at
-the published revision. Otherwise the CI entry reports that automatic repair is paused. Without
-this setting, unresolved failures remain visible for manual investigation.
+This queues a turn in the originating thread even when its checkout is dirty or has changed. The
+agent checks whether the published failure is still current, preserves unrelated work, and follows
+the project's coordination policy to obtain checkout access. If it cannot safely proceed, it asks
+a concrete question so the blocked work remains visible. The notification does not reserve a shared
+checkout or authorize resetting another agent's work. Without this setting, unresolved failures
+remain visible for manual investigation.
 
 ## Review and merge
 
