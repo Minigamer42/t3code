@@ -442,7 +442,7 @@ export function ThreadDetailsPrRow({
       <TooltipTrigger
         render={
           <ThreadDetailsControl
-            type="button"
+            render={<a href={openAriaLabel} target="_blank" rel="noopener noreferrer" />}
             variant="ghost"
             size="sm"
             part={wrap ? "title" : part}
@@ -476,7 +476,16 @@ export function ThreadDetailsPrRow({
         <div className="pb-1.5">
           {openRow(detail.title, "row", true)}
           <div className="flex h-5 min-w-0 items-center gap-0.5 ps-9 pe-2.5 text-xs text-muted-foreground">
-            <span className="me-1 shrink-0 tabular-nums">#{number}</span>
+            <a
+              href={openAriaLabel}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="me-1 shrink-0 tabular-nums"
+              onClick={onOpen}
+              onAuxClick={onOpen}
+            >
+              #{number}
+            </a>
             {showChecks && checksRollup !== null ? (
               <PullRequestChecksPopover
                 checksState={checksRollup}

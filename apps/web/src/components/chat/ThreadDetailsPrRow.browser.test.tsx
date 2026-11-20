@@ -6,6 +6,7 @@ import {
   type PullRequestCheck,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
+import type { MouseEvent } from "react";
 import { DraftId } from "~/composerDraftStore";
 import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
@@ -158,6 +159,34 @@ const clickButton = async (scope: ParentNode, label: string) =>
       .find((button) => button.textContent?.trim() === label)!
       .click();
   });
+
+it.each(["title", "number"])(
+  "provides a native MR link for middle clicks on its %s",
+  async (part) => {
+    await using screen = await setup();
+    const onOpen = vi.fn((event: MouseEvent<HTMLElement>) => event.preventDefault());
+    await screen.rerender(
+      <ThreadDetailsPrRow
+        environmentId={EnvironmentId.make("environment")}
+        pr={null}
+        number={11469}
+        status={null}
+        project={null}
+        label="Guard diagnostics"
+        openAriaLabel="https://git.example/merge_requests/11469"
+        onOpen={onOpen}
+      />,
+    );
+    const link = screen.getByRole("link", {
+      name: part === "title" ? "https://git.example/merge_requests/11469" : "#11469",
+      exact: true,
+    });
+    await expect.element(link).toHaveAttribute("href", "https://git.example/merge_requests/11469");
+    await link.click({ button: "middle" });
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen.mock.calls[0]?.[0].button).toBe(1);
+  },
+);
 
 it("merges with the last selected merge method", async () => {
   await using screen = await setup();
