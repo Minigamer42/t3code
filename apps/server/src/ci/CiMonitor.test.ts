@@ -73,12 +73,14 @@ const fixture = Effect.gen(function* () {
       }),
     ),
   );
+  let detectedProvider = provider;
   const make = Monitor.make.pipe(
     Effect.provide(
       Layer.mergeAll(
         ServerConfig.layerTest(cwd, cwd),
         Layer.mock(Providers.SourceControlProviderRegistry)({
-          resolve: () => Effect.succeed(provider),
+          resolve: () => Effect.succeed(detectedProvider),
+          get: () => Effect.succeed(provider),
           resolveLink: () => undefined,
         }),
         Layer.mock(Process.VcsProcess)({
@@ -140,6 +142,13 @@ const fixture = Effect.gen(function* () {
     make,
     input,
     snapshots,
+    setUnknownProvider: () => {
+      const { ci: _ci, ...withoutCi } = provider;
+      detectedProvider = { ...withoutCi, kind: SourceControlProviderKind.make("unknown") };
+    },
+    restoreProvider: () => {
+      detectedProvider = provider;
+    },
     pipeline: () => pipeline,
     setPipeline: (value: CiPipeline | null) => {
       pipeline = value;
@@ -162,6 +171,44 @@ const fixture = Effect.gen(function* () {
   };
 });
 it.layer(NodeServices.layer)("background CI", (it) => {
+  it.effect("keeps a confirmed CI provider across detection changes and restarts", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      f.setPipeline({ ...f.pipeline()!, status: "running" });
+      yield* service.register(f.input);
+      yield* service.sweep;
+      expect(f.reads()).toBe(1);
+      f.setUnknownProvider();
+      const restarted = yield* f.make;
+      yield* restarted.sweep;
+      expect((yield* f.snapshots(restarted))[0]).toMatchObject({
+        state: "running",
+        label: "Pipeline running",
+      });
+      expect(f.reads()).toBe(2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("retries unresolved provider detection instead of declaring CI unsupported", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const service = yield* f.make;
+      yield* service.register(f.input);
+      f.setUnknownProvider();
+      yield* service.sweep;
+      expect((yield* f.snapshots(service))[0]).toMatchObject({
+        state: "waiting",
+        label: "CI unavailable; retrying (1/3)",
+      });
+      expect(f.posts()).toBe(0);
+      f.restoreProvider();
+      f.setPipeline({ ...f.pipeline()!, status: "running" });
+      yield* service.sweep;
+      expect((yield* f.snapshots(service))[0]?.state).toBe("running");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("does not repair cancelled, skipped, or manually gated pipelines", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

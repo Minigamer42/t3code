@@ -6,6 +6,7 @@ import {
   CommandId,
   GitManagerError,
   SourceControlProviderError,
+  SourceControlProviderKind,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -35,6 +36,7 @@ const Record = Schema.Struct({
   notified: Schema.Boolean,
   readFailures: Schema.Number,
   dismissed: Schema.optionalKey(Schema.Boolean),
+  providerKind: Schema.optionalKey(SourceControlProviderKind),
 });
 const Records = Schema.Array(Record);
 const decodeRecords = Schema.decodeUnknownEffect(Schema.fromJsonString(Records));
@@ -195,7 +197,16 @@ export const make = Effect.gen(function* () {
   });
   const check = Effect.fn("CiMonitor.check")(function* (record: Record) {
     const activity = record.activity;
-    const provider = yield* providers.resolve({ cwd: activity.cwd });
+    const provider = yield* record.providerKind
+      ? providers.get(record.providerKind)
+      : providers.resolve({ cwd: activity.cwd });
+    if (provider.kind === "unknown")
+      return yield* new SourceControlProviderError({
+        provider: provider.kind,
+        cwd: activity.cwd,
+        operation: "ci",
+        detail: "The source control provider could not be identified for CI tracking.",
+      });
     const api = provider.ci;
     if (!api)
       return yield* update(record, {
@@ -203,6 +214,10 @@ export const make = Effect.gen(function* () {
         label: "CI tracking is not supported by this source control provider.",
       });
     const read = yield* api.read(activity);
+    if (record.providerKind !== provider.kind) {
+      record = { ...record, providerKind: provider.kind };
+      yield* save(record);
+    }
     if (!read.current)
       return yield* update(record, {
         state: "superseded",
