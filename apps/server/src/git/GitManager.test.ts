@@ -688,6 +688,7 @@ function runStackedAction(
     instructions?: string;
     splitCommits?: boolean;
     featureBranch?: boolean;
+    projectId?: ProjectId;
     forceWithLease?: boolean;
     filePaths?: readonly string[];
   },
@@ -740,7 +741,10 @@ function makeManager(input?: {
     prefix: "t3-git-manager-test-",
   });
 
-  const layerServerSettings = ServerSettings.ServerSettingsService.layerTest(input?.serverSettings);
+  const layerServerSettings = ServerSettings.ServerSettingsService.layerTest({
+    createFeatureBranchOnMain: false,
+    ...input?.serverSettings,
+  });
 
   const gitCommands = input?.gitCommands;
   const gitSpawnGate = input?.gitSpawnGate;
@@ -2008,6 +2012,60 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           "Keep this out",
         );
       }),
+  );
+
+  it.effect.each([
+    ["commit", true],
+    ["commit", false],
+    ["push", true],
+    ["push", false],
+    ["commit_push", true],
+    ["commit_push", false],
+  ] as const)("main-ref action %s follows the feature-branch setting %s", ([action, enabled]) =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDir("t3-main-action-");
+      yield* initRepo(cwd);
+      const remote = yield* createBareRemote();
+      yield* runGit(cwd, ["remote", "add", "origin", remote]);
+      yield* runGit(cwd, ["push", "-u", "origin", "main"]);
+      const mainBefore = (yield* runGit(cwd, ["rev-parse", "main"])).stdout.trim();
+      NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "hello\nfeature change\n");
+      if (action === "push") {
+        yield* runGit(cwd, ["add", "README.md"]);
+        yield* runGit(cwd, ["commit", "-m", "Feature change"]);
+      }
+      const projectId = ProjectId.make("project:main-ref-setting");
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          createFeatureBranchOnMain: !enabled,
+          projectSettingsOverrides: { [projectId]: { createFeatureBranchOnMain: enabled } },
+        },
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd,
+        action,
+        projectId,
+        ...(action !== "push" ? { commitMessage: "Feature change", splitCommits: false } : {}),
+      });
+      const current = (yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim();
+      expect(current === "main").toBe(!enabled);
+      expect(result.branch.status).toBe(enabled ? "created" : "skipped_not_requested");
+      if (enabled && action !== "push")
+        expect((yield* runGit(cwd, ["rev-parse", "main"])).stdout.trim()).toBe(mainBefore);
+      if (action !== "commit") {
+        expect(
+          (yield* runGit(remote, [
+            "--git-dir=.",
+            "rev-parse",
+            `refs/heads/${current}`,
+          ])).stdout.trim(),
+        ).toBe((yield* runGit(cwd, ["rev-parse", "HEAD"])).stdout.trim());
+        if (enabled)
+          expect((yield* runGit(remote, ["--git-dir=.", "rev-parse", "main"])).stdout.trim()).toBe(
+            mainBefore,
+          );
+      }
+    }),
   );
 
   it.effect.each(["commit", "prepare", "create_branch", "commit-detached"] as const)(

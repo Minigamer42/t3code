@@ -206,9 +206,12 @@ export const make = Effect.gen(function* () {
                 threadId: thread.id,
                 projectId: thread.projectId,
                 actionId: yield* commandId,
-                featureBranch:
-                  input.featureBranch ??
-                  (commitAction && (status.isDefaultRef || status.refName === null)),
+                ...(input.featureBranch === undefined &&
+                commitAction &&
+                (status.refName === null ||
+                  (input.action === "commit_push_pr" && status.isDefaultRef))
+                  ? { featureBranch: true }
+                  : {}),
               },
               {
                 onPullRequest: (pr, source) =>

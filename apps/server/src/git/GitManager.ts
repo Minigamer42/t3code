@@ -4965,14 +4965,30 @@ export const make = Effect.gen(function* () {
               input.cwd,
               localStack.layers.map((layer) => layer.branch),
             )));
+        const actionSettings = yield* projectSettingsFor(input).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitManagerError({
+                operation: "runStackedAction",
+                cwd: input.cwd,
+                detail: "Failed to get server settings.",
+                cause,
+              }),
+          ),
+        );
+        const featureBranch =
+          input.action === "create_branch" ||
+          (input.featureBranch ??
+            (actionSettings.settings.createFeatureBranchOnMain &&
+              initialStatus.isDefaultBranch &&
+              !input.forceWithLease));
         const maintainStack =
-          !input.featureBranch &&
+          !featureBranch &&
           respectsExplicitBase &&
           autoTrackingAllowed &&
           publishing &&
           layerIndex >= 0 &&
           (localStack.managed || localStack.layers.length > 1);
-        const featureBranch = input.featureBranch === true || input.action === "create_branch";
         const branchOnly =
           input.action === "create_branch" ||
           (featureBranch &&
@@ -5027,13 +5043,6 @@ export const make = Effect.gen(function* () {
           });
         }
 
-        if (featureBranch && !wantsCommit && !branchOnly) {
-          return yield* new GitManagerError({
-            operation: "runStackedAction",
-            cwd: input.cwd,
-            detail: "Feature-branch checkout is only supported for commit actions.",
-          });
-        }
         const phases: GitActionProgressPhase[] = [
           ...(featureBranch ? (["branch"] as const) : []),
           ...(wantsCommit ? (["commit"] as const) : []),
@@ -5065,7 +5074,7 @@ export const make = Effect.gen(function* () {
         let commitMessageForStep = input.commitMessage;
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
-        const textGenerationSettings = yield* projectSettingsFor(input).pipe(
+        const textGenerationSettings = yield* Effect.succeed(actionSettings).pipe(
           Effect.flatMap(({ settings, projectId }) =>
             settings.sourceControlWriterModelSelection === null
               ? Effect.succeed({
@@ -5131,7 +5140,7 @@ export const make = Effect.gen(function* () {
         const changeRequestTerms = wantsPr ? yield* changeRequestTermsFor(input.cwd) : null;
         // A stale or missing origin/HEAD hides the default branch from status, so check here
         // before anything is committed or pushed to it.
-        if (changeRequestTerms && !input.featureBranch && initialStatus.branch) {
+        if (changeRequestTerms && !featureBranch && initialStatus.branch) {
           yield* ensurePrHeadIsNotBase(
             input.cwd,
             { ...initialStatus, branch: initialStatus.branch },

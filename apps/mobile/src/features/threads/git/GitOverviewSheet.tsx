@@ -1,3 +1,4 @@
+import { useCreateFeatureBranchOnMain } from "../../../state/use-main-ref-action";
 import { GitActionRow } from "./GitActionRow";
 import { CiActivities } from "./CiActivities";
 import { GitWorkflowProgressView } from "./GitWorkflowProgressView";
@@ -93,6 +94,10 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   });
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
+  const createFeatureBranchOnMain = useCreateFeatureBranchOnMain(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.projectId ?? null,
+  );
   const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
 
   const gitStatus = useEnvironmentQuery(
@@ -125,7 +130,13 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       : null,
   );
   const menuItems = isRepo
-    ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote, stackQuery.data)
+    ? buildMenuItems(
+        gitStatus.data,
+        busy,
+        hasPrimaryRemote,
+        stackQuery.data,
+        createFeatureBranchOnMain,
+      )
     : [];
 
   const sheetMenuItems = menuItems.map((item) => ({
@@ -176,6 +187,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       branchName &&
       confirmableAction &&
       !input.featureBranch &&
+      createFeatureBranchOnMain &&
       requiresDefaultBranchConfirmation(input.action, isDefaultRef)
     ) {
       presentRoute(() =>
@@ -376,13 +388,15 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
             busy ||
             !isRepo ||
             !gitStatus.data?.hasWorkingTreeChanges ||
-            ((!gitStatus.data?.refName || isDefaultRef) && !canChangeThreadBranch)
+            ((!gitStatus.data?.refName || (isDefaultRef && createFeatureBranchOnMain)) &&
+              !canChangeThreadBranch)
           }
           onPress={() => {
             if (!isInspector) navigation.goBack();
             void gitActions.onRunSelectedThreadGitAction({
               action: "commit",
-              featureBranch: !gitStatus.data?.refName || isDefaultRef,
+              featureBranch:
+                !gitStatus.data?.refName || (isDefaultRef && createFeatureBranchOnMain),
             });
           }}
         />

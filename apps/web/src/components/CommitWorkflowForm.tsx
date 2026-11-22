@@ -20,6 +20,7 @@ export function CommitWorkflowForm(props: {
   readonly cwd: string;
   readonly hasChanges: boolean;
   readonly isDefaultRef: boolean;
+  readonly createFeatureBranchOnMain?: boolean;
   readonly branch: string | null;
   readonly filePaths?: ReadonlyArray<string>;
   readonly fileSelection?: ReactNode;
@@ -230,10 +231,16 @@ export function CommitWorkflowForm(props: {
           <Button
             variant="outline"
             size="sm"
-            disabled={!canStart || unavailable}
-            onClick={() => submit(false)}
+            disabled={
+              !canStart ||
+              unavailable ||
+              (!(props.createFeatureBranchOnMain ?? true) && !canOperateThread)
+            }
+            onClick={() => submit(!(props.createFeatureBranchOnMain ?? true))}
           >
-            Commit on current branch
+            {(props.createFeatureBranchOnMain ?? true)
+              ? "Commit on current branch"
+              : "Create feature branch & commit"}
           </Button>
         ) : null}
         <Button
@@ -242,9 +249,18 @@ export function CommitWorkflowForm(props: {
             !canStart ||
             unavailable ||
             invalidRange ||
-            (scope === "working_tree" && props.isDefaultRef && !canOperateThread)
+            (scope === "working_tree" &&
+              props.isDefaultRef &&
+              (props.createFeatureBranchOnMain ?? true) &&
+              !canOperateThread)
           }
-          onClick={() => submit(scope === "working_tree" && props.isDefaultRef)}
+          onClick={() =>
+            submit(
+              scope === "working_tree" &&
+                props.isDefaultRef &&
+                (props.createFeatureBranchOnMain ?? true),
+            )
+          }
         >
           {scope === "branch" ? "Rebuild history" : "Create logical commits"}
         </Button>

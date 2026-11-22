@@ -1,3 +1,4 @@
+import { useCreateFeatureBranchOnMain } from "../../state/use-main-ref-action";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useProjects, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
@@ -130,6 +131,10 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
     (candidate) => candidate.environmentId === environmentId && candidate.id === thread?.projectId,
   );
   const cwd = thread?.worktreePath ?? project?.workspaceRoot;
+  const createFeatureBranchOnMain = useCreateFeatureBranchOnMain(
+    EnvironmentId.make(String(environmentId)),
+    thread?.projectId ?? null,
+  );
   const stackQuery = useEnvironmentQuery(
     cwd
       ? gitEnvironment.stackStatus({
@@ -214,6 +219,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
       branchName &&
       confirmableAction &&
       !input.featureBranch &&
+      createFeatureBranchOnMain &&
       requiresDefaultBranchConfirmation(input.action, isDefaultRef)
     ) {
       if (props.hasThread === false) {
@@ -266,7 +272,10 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
       return;
     }
     if (quickAction.kind === "run_action" && quickAction.action) {
-      await runActionWithPrompt({ action: quickAction.action, featureBranch: isDefaultRef });
+      await runActionWithPrompt({
+        action: quickAction.action,
+        featureBranch: isDefaultRef && createFeatureBranchOnMain,
+      });
     }
   };
 

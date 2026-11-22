@@ -140,6 +140,19 @@ describe("git action copy", () => {
     }
   });
 
+  it("keeps MR creation on a feature branch when main-ref commits and pushes are direct", () => {
+    const items = buildMenuItems(
+      status({ refName: "main", isDefaultRef: true, hasWorkingTreeChanges: true }),
+      false,
+      true,
+      null,
+      false,
+    );
+    expect(items.find((item) => item.id === "commit")?.featureBranch).toBe(false);
+    expect(items.find((item) => item.id === "push")?.featureBranch).toBe(false);
+    expect(items.find((item) => item.id === "pr")?.featureBranch).toBe(true);
+  });
+
   it.each([
     { behind: 0, dirty: false, current: 1, restack: false },
     { behind: 2, dirty: false, current: 1, restack: true },

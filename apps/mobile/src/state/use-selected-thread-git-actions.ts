@@ -371,7 +371,7 @@ export function useSelectedThreadGitActions() {
           ...(input.splitCommits !== undefined ? { splitCommits: input.splitCommits } : {}),
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.instructions ? { instructions: input.instructions } : {}),
-          ...(input.featureBranch ? { featureBranch: input.featureBranch } : {}),
+          ...(input.featureBranch !== undefined ? { featureBranch: input.featureBranch } : {}),
           ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
           threadId: thread.id,
         });

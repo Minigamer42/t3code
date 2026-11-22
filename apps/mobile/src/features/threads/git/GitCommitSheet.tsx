@@ -1,3 +1,4 @@
+import { useCreateFeatureBranchOnMain } from "../../../state/use-main-ref-action";
 import { useDebouncedValue } from "../../../state/queries";
 import { CommandId } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
@@ -47,6 +48,10 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
+  const createFeatureBranchOnMain = useCreateFeatureBranchOnMain(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.projectId ?? null,
+  );
   const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
 
   const gitStatus = useEnvironmentQuery(
@@ -527,20 +532,34 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
             fullWidth
             disabled={
               !canStartWorkflow ||
-              (!rewriteHistory && isDefaultRef && !canChangeThreadBranch) ||
+              (!rewriteHistory &&
+                isDefaultRef &&
+                createFeatureBranchOnMain &&
+                !canChangeThreadBranch) ||
               workflowUnavailable ||
               busy
             }
-            onPress={() => void runWorkflow(!rewriteHistory && isDefaultRef)}
+            onPress={() =>
+              void runWorkflow(!rewriteHistory && isDefaultRef && createFeatureBranchOnMain)
+            }
           />
           {!rewriteHistory && isDefaultRef ? (
             <Button
-              label="Commit on current branch"
+              label={
+                createFeatureBranchOnMain
+                  ? "Commit on current branch"
+                  : "Create feature branch & commit"
+              }
               icon="arrow.branch"
               tone="text"
               fullWidth
-              disabled={!canStartWorkflow || workflowUnavailable || busy}
-              onPress={() => void runWorkflow(false)}
+              disabled={
+                !canStartWorkflow ||
+                workflowUnavailable ||
+                busy ||
+                (!createFeatureBranchOnMain && !canChangeThreadBranch)
+              }
+              onPress={() => void runWorkflow(!createFeatureBranchOnMain)}
             />
           ) : null}
         </View>
@@ -553,20 +572,29 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
             fullWidth
             disabled={
               !canWriteSourceControl ||
-              (isDefaultRef && !canChangeThreadBranch) ||
+              (isDefaultRef && createFeatureBranchOnMain && !canChangeThreadBranch) ||
               noneSelected ||
               busy
             }
-            onPress={() => void runCommitAction(isDefaultRef)}
+            onPress={() => void runCommitAction(isDefaultRef && createFeatureBranchOnMain)}
           />
           {isDefaultRef ? (
             <Button
-              label="Commit on current branch"
+              label={
+                createFeatureBranchOnMain
+                  ? "Commit on current branch"
+                  : "Create feature branch & commit"
+              }
               icon="arrow.branch"
               tone="text"
               fullWidth
-              disabled={!canWriteSourceControl || noneSelected || busy}
-              onPress={() => void runCommitAction(false)}
+              disabled={
+                !canWriteSourceControl ||
+                noneSelected ||
+                busy ||
+                (!createFeatureBranchOnMain && !canChangeThreadBranch)
+              }
+              onPress={() => void runCommitAction(!createFeatureBranchOnMain)}
             />
           ) : null}
         </View>

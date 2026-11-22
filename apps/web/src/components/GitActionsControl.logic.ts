@@ -183,6 +183,7 @@ export function buildMenuItems(
   isBusy: boolean,
   hasPrimaryRemote = true,
   stack?: GitStackStatusResult | null,
+  createFeatureBranchOnMain = true,
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
   const terminology = changeRequestTerminologyFor(gitStatus);
@@ -190,6 +191,8 @@ export function buildMenuItems(
   const needsRestack = getStackRestackRequired(gitStatus, stack);
   const hasBranch = gitStatus.refName !== null;
   const needsFeatureBranch = !hasBranch || gitStatus.isDefaultRef;
+  const branchBeforeCommitOrPush =
+    !hasBranch || (gitStatus.isDefaultRef && createFeatureBranchOnMain);
   const hasChanges = gitStatus.hasWorkingTreeChanges;
   const missingReviews = getStackHasMissingReviews(gitStatus, stack);
   const hasOpenPr = gitStatus.pr?.state === "open";
@@ -239,7 +242,7 @@ export function buildMenuItems(
       icon: "commit",
       kind: "run_action",
       action: "commit",
-      ...(needsFeatureBranch ? { featureBranch: true } : {}),
+      featureBranch: branchBeforeCommitOrPush,
     },
   ];
 
@@ -256,7 +259,7 @@ export function buildMenuItems(
       hasChanges ? "Commit & push" : "Push",
     ),
     action: "commit_push",
-    ...(needsFeatureBranch ? { featureBranch: true } : {}),
+    featureBranch: branchBeforeCommitOrPush,
     disabled: !canPush,
     icon: "push",
     kind: "open_dialog",

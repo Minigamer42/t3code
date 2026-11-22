@@ -1,3 +1,4 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { GitActionRow } from "./GitActionRow";
 import { GitActionContextDialog } from "./GitActionContextDialog";
 import { GitActionProgressView } from "./GitActionProgressView";
@@ -853,6 +854,12 @@ export default function GitActionsControl({
   const activeServerThread =
     activeServerThreadShell ?? activeServerThreadProjection?.projection.thread ?? null;
   const isLocalDraftThread = activeDraftThread !== null && activeServerThread === null;
+  const createFeatureBranchOnMain = serverConfig
+    ? resolveProjectSettings(
+        serverConfig.settings,
+        activeServerThread?.projectId ?? activeDraftThread?.projectId ?? null,
+      ).settings.createFeatureBranchOnMain
+    : true;
   const canChangeThreadBranch = canWriteSourceControl && (isLocalDraftThread || canOperateThread);
   const threadRefreshKey = draftId ?? activeThreadRef?.threadId ?? null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -1198,6 +1205,7 @@ export default function GitActionsControl({
     isGitActionRunning,
     hasPrimaryRemote,
     stackQuery.data,
+    createFeatureBranchOnMain,
   );
   const quickAction = resolveQuickAction(
     gitStatusForActions,
@@ -1266,9 +1274,13 @@ export default function GitActionsControl({
     onConfirmed,
     skipDefaultBranchPrompt = false,
     statusOverride,
-    featureBranch = false,
+    featureBranch: requestedFeatureBranch,
     filePaths,
   }: RunGitActionWithToastInput) {
+    const featureBranch =
+      requestedFeatureBranch ??
+      (!forceWithLease &&
+        !!((statusOverride ?? gitStatusForActions)?.isDefaultRef && createFeatureBranchOnMain));
     if (
       activeEnvironmentId === null ||
       !readEnvironmentScope(activeEnvironmentId, AuthSourceControlWriteScope) ||
@@ -1287,6 +1299,7 @@ export default function GitActionsControl({
       (action === "commit" || !!actionStatus?.hasWorkingTreeChanges || featureBranch);
     if (
       !skipDefaultBranchPrompt &&
+      createFeatureBranchOnMain &&
       requiresDefaultBranchConfirmation(action, actionIsDefaultBranch) &&
       actionBranch
     ) {
@@ -1322,7 +1335,7 @@ export default function GitActionsControl({
       ...(forceWithLease ? { forceWithLease: true } : {}),
       ...(commitMessage ? { commitMessage } : {}),
       ...(instructions ? { instructions } : {}),
-      ...(featureBranch ? { featureBranch } : {}),
+      featureBranch,
       ...(filePaths ? { filePaths } : {}),
       ...(activeServerThread ? { threadId: activeServerThread.id } : {}),
       ...(activeDraftThread ? { projectId: activeDraftThread.projectId } : {}),
@@ -1501,7 +1514,7 @@ export default function GitActionsControl({
       void runGitActionWithToast({
         action: refreshedQuickAction.action,
         statusOverride: status,
-        featureBranch: status.isDefaultRef,
+        featureBranch: status.isDefaultRef && createFeatureBranchOnMain,
       });
     }
   };
@@ -1955,6 +1968,7 @@ export default function GitActionsControl({
               controls={commitModeControls}
               hasChanges={gitStatusForActions?.hasWorkingTreeChanges ?? false}
               isDefaultRef={isDefaultRef}
+              createFeatureBranchOnMain={createFeatureBranchOnMain}
               branch={gitStatusForActions?.refName ?? null}
               {...(!allSelected ? { filePaths: selectedFiles.map((file) => file.path) } : {})}
               fileSelection={
@@ -2024,20 +2038,26 @@ export default function GitActionsControl({
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={!canWriteSourceControl || noneSelected}
-                    onClick={() => runDialogAction(false)}
+                    disabled={
+                      !canWriteSourceControl ||
+                      noneSelected ||
+                      (!createFeatureBranchOnMain && !canChangeThreadBranch)
+                    }
+                    onClick={() => runDialogAction(!createFeatureBranchOnMain)}
                   >
-                    Commit on current branch
+                    {createFeatureBranchOnMain
+                      ? "Commit on current branch"
+                      : "Create feature branch & commit"}
                   </Button>
                 ) : null}
                 <Button
                   size="sm"
                   disabled={
                     !canWriteSourceControl ||
-                    (isDefaultRef && !canChangeThreadBranch) ||
+                    (isDefaultRef && createFeatureBranchOnMain && !canChangeThreadBranch) ||
                     noneSelected
                   }
-                  onClick={() => runDialogAction(isDefaultRef)}
+                  onClick={() => runDialogAction(isDefaultRef && createFeatureBranchOnMain)}
                 >
                   Commit
                 </Button>
@@ -2053,7 +2073,8 @@ export default function GitActionsControl({
           label={contextAction.label}
           onClose={() => setContextAction(null)}
           onRun={(instructions) => runMenuItem(contextAction, instructions)}
-          {...(isDefaultRef && (contextAction.id === "push" || contextAction.id === "pr")
+          {...(isDefaultRef &&
+          (contextAction.id === "pr" || (contextAction.id === "push" && createFeatureBranchOnMain))
             ? {
                 currentBranchAction: {
                   label: gitStatusForActions?.hasWorkingTreeChanges
@@ -2067,6 +2088,7 @@ export default function GitActionsControl({
                   onRun: (instructions: string) => {
                     void runGitActionWithToast({
                       action: gitStatusForActions?.hasWorkingTreeChanges ? "commit_push" : "push",
+                      featureBranch: false,
                       ...(instructions ? { instructions } : {}),
                       skipDefaultBranchPrompt: true,
                     });
