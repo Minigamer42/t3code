@@ -41,6 +41,7 @@ import {
   type PendingThreadRequests,
 } from "./threadRequests.ts";
 import { arrayElementsEqual, parseThreadKey, threadKey } from "./entities.ts";
+import { collapseScheduledNoUpdates } from "./scheduledNoUpdatePresentation.ts";
 import { getProjectionArrayReplacementIndex } from "./orchestrationV2Projection.ts";
 
 const EMPTY_VISIBLE_TURN_ITEMS: OrchestrationV2ThreadProjection["visibleTurnItems"] = Object.freeze(
@@ -358,16 +359,21 @@ export function createEnvironmentThreadDetailAtoms<E>(
     const projectQuestionHistory = createQuestionHistoryProjector();
     let previousRows: OrchestrationV2ThreadProjection["visibleTurnItems"] | null = null;
     let previousNotice: UsageLimitNoticeRows | null = null;
+    let previousRuns: OrchestrationV2ThreadProjection["runs"] | null = null;
     let previous = EMPTY_VISIBLE_TURN_ITEMS;
     return Atom.make((get): OrchestrationV2ThreadProjection["visibleTurnItems"] => {
       const projection = Option.getOrNull(get(threadStateValueAtomFamily(key)).data);
       if (projection === null) return EMPTY_VISIBLE_TURN_ITEMS;
       const rows = projectQuestionHistory(projection);
       const notice = get(usageLimitNoticeRowsAtomFamily(key));
-      if (rows !== previousRows || notice !== previousNotice) {
+      if (rows !== previousRows || notice !== previousNotice || projection.runs !== previousRuns) {
+        previousRuns = projection.runs;
         previousRows = rows;
         previousNotice = notice;
-        previous = withoutUsageLimitNoticeRows(rows, notice);
+        previous = collapseScheduledNoUpdates(
+          withoutUsageLimitNoticeRows(rows, notice),
+          projection.runs,
+        );
       }
       return previous;
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-visible-turn-items:${key}`));
