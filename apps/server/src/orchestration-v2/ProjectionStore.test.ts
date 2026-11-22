@@ -26,6 +26,7 @@ import {
   ProviderTurnId,
   RuntimeRequestId,
   RunAttemptId,
+  ScheduledTaskId,
   RunId,
   ThreadId,
   TurnItemId,
@@ -7661,9 +7662,30 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     ["a typed /compact", "user", "mobile", undefined, false, "/compact"],
     ["a normalized idle command", "agent", "server", undefined, true, " \t\u00a0/COMPACT\u3000\n"],
     ["an ordinary prompt with idle metadata", "user", "web", "onReturn", false, "Continue"],
+    ["a quiet scheduled check", "agent", "server", undefined, true, "Check", "NO_UPDATE"],
+    [
+      "a whitespace-padded quiet check",
+      "agent",
+      "server",
+      undefined,
+      true,
+      "Check",
+      " \tNO_UPDATE\n",
+    ],
+    [
+      "a scheduled check without a final",
+      "agent",
+      "server",
+      undefined,
+      false,
+      "Check",
+      "NO_UPDATE",
+      true,
+    ],
+    ["a useful scheduled check", "agent", "server", undefined, false, "Check", "Started work"],
   ] as const)(
     "keeps the shell on the user's last turn only during %s",
-    ([name, createdBy, creationSource, idleCompaction, silent, text]) =>
+    ([name, createdBy, creationSource, idleCompaction, silent, text, response, omitFinal]) =>
       Effect.gen(function* () {
         const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
         const now = yield* DateTime.now;
@@ -7709,6 +7731,9 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             createdBy,
             creationSource,
             ...(idleCompaction === undefined ? {} : { idleCompaction }),
+            ...(response === undefined
+              ? {}
+              : { scheduledTaskId: ScheduledTaskId.make("quiet-check") }),
             id: messageId,
             threadId,
             runId,
@@ -7739,14 +7764,67 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             userMessageId: messageId,
             rootNodeId: null,
             activeAttemptId: null,
-            status: "running",
+            status: response === undefined ? "running" : "completed",
             requestedAt: now,
             startedAt: now,
-            completedAt: null,
+            completedAt: response === undefined ? null : now,
             checkpointId: null,
             contextHandoffId: null,
           },
         });
+
+        if (response !== undefined) {
+          const base = {
+            threadId,
+            runId,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            status: "completed" as const,
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+          };
+          for (const item of [
+            {
+              ...base,
+              id: TurnItemId.make(`${key}:prompt`),
+              ordinal: 1,
+              type: "user_message" as const,
+              messageId,
+              createdBy,
+              creationSource,
+              scheduledTaskId: ScheduledTaskId.make("quiet-check"),
+              inputIntent: "turn_start" as const,
+              text,
+              attachments: [],
+            },
+            {
+              ...base,
+              id: TurnItemId.make(`${key}:response`),
+              ordinal: 2,
+              type: "assistant_message" as const,
+              nodeId: NodeId.make(`${key}:native-message`),
+              messageId: MessageId.make(`${key}:response`),
+              phase: "final_answer" as const,
+              text: response,
+              streaming: false,
+            },
+          ]) {
+            if (omitFinal && item.type === "assistant_message") continue;
+            yield* projectionStore.apply({
+              id: EventId.make(`${key}:${item.ordinal}`),
+              type: "turn-item.updated",
+              threadId,
+              runId,
+              occurredAt: now,
+              payload: item,
+            });
+          }
+        }
 
         const presented = Effect.gen(function* () {
           const sqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
@@ -7764,8 +7842,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         });
         const visible = {
           latestRunId: runId,
-          activityRunStatus: "running" as const,
-          activeRunId: runId,
+          activityRunStatus: response === undefined ? ("running" as const) : null,
+          activeRunId: response === undefined ? runId : null,
           latestUserMessageAt: true,
         };
         const hidden = {
@@ -7778,6 +7856,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           silent ? hidden : visible,
           silent ? hidden : visible,
         ]);
+
+        if (response !== undefined) return;
 
         // A follow-up removed before it started stays latest unless a visible run outlives it.
         const removedRunId = RunId.make(`run:projection-shell-silent:${key}:removed`);

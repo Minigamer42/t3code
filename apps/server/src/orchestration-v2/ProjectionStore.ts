@@ -51,6 +51,8 @@ import type {
 } from "@t3tools/contracts";
 import {
   IDLE_COMPACTION_TEXT,
+  scheduledNoUpdateRunIds,
+  SCHEDULED_NO_UPDATE_RESPONSE,
   idleCompactionOf,
   isQueuedProviderThreadPlaceholder,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
@@ -1727,7 +1729,10 @@ export function threadShellFromProjection(
       )[0] ?? null;
   // T3 Code's own idle compactions stay out of the shell unless they fail, so thread lists,
   // notifications and the relay keep presenting the user's last turn.
-  const runs = projection.runs.filter((run) => !isSilentRunForShell(run, projection));
+  const quietRuns = scheduledNoUpdateRunIds(projection.runs, projection.turnItems);
+  const runs = projection.runs.filter(
+    (run) => !quietRuns.has(run.id) && !isSilentRunForShell(run, projection),
+  );
   const latestRun =
     usageLimitRunPresentedAsLatest(
       runs,
@@ -1753,7 +1758,12 @@ export function threadShellFromProjection(
   );
 
   const userMessages = projection.messages
-    .filter((message) => message.role === "user" && idleCompactionOf(message) === undefined)
+    .filter(
+      (message) =>
+        message.role === "user" &&
+        idleCompactionOf(message) === undefined &&
+        (message.runId === null || !quietRuns.has(message.runId)),
+    )
     .toSorted(
       (left, right) =>
         DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
@@ -7790,6 +7800,34 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const isSilentShellRun = (alias: string) => {
       const run = sql.literal(alias);
       return sql`(
+        (${run}.status = 'completed'
+          AND EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_turn_items prompt
+            WHERE prompt.run_id = ${run}.run_id AND prompt.type = 'user_message'
+              AND json_extract(prompt.payload_json, '$.scheduledTaskId') IS NOT NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_turn_items guard
+            WHERE guard.run_id = ${run}.run_id AND (
+              guard.type IN ('error', 'user_input_request', 'secret_request', 'link_request', 'approval_request', 'file_change')
+              OR guard.status IN ('failed', 'waiting', 'running', 'pending')
+              OR (guard.type = 'user_message' AND json_extract(guard.payload_json, '$.scheduledTaskId') IS NULL)
+            )
+          )
+          AND (SELECT CASE WHEN json_extract(response.payload_json, '$.streaming') = 0
+              AND coalesce(json_array_length(response.payload_json, '$.attachments'), 0) = 0
+              THEN trim(json_extract(response.payload_json, '$.text'),
+                char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195,
+                  8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))
+              ELSE NULL END
+            FROM orchestration_v2_projection_turn_items response
+            WHERE response.run_id = ${run}.run_id AND response.type = 'assistant_message'
+              AND response.provider_thread_id IS json_extract(${run}.payload_json, '$.providerThreadId')
+              AND json_extract(response.payload_json, '$.parentItemId') IS NULL
+              AND coalesce(json_extract(response.payload_json, '$.phase'), 'final_answer') = 'final_answer'
+            ORDER BY response.ordinal DESC LIMIT 1
+          ) IS ${SCHEDULED_NO_UPDATE_RESPONSE}
+        ) OR (
         ${run}.status <> 'failed'
         AND EXISTS (
           SELECT 1 FROM orchestration_v2_projection_messages prompt
@@ -7801,7 +7839,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             AND compaction.type = 'compaction'
             AND compaction.status = 'failed'
         )
-      )`;
+      ))`;
     };
     // The newest run not held or outlived before it started, matching latestUnheldRun.
     const presentedShellRunId = (threadId: Statement.Fragment) => sql`(
@@ -7999,6 +8037,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE message.thread_id = t.thread_id
                   AND message.role = 'user'
                   AND NOT ${isIdleCompactionMessage("message")}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM orchestration_v2_projection_runs quiet_message_run
+                    WHERE quiet_message_run.run_id = message.run_id
+                      AND ${isSilentShellRun("quiet_message_run")}
+                  )
                 ORDER BY message.updated_at DESC, message.message_id DESC
                 LIMIT 1
               ) AS latest_user_message_at,
@@ -8009,6 +8052,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND message.role = 'user'
                   AND json_extract(message.payload_json, '$.createdBy') = 'user'
                   AND NOT ${isIdleCompactionMessage("message")}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM orchestration_v2_projection_runs quiet_message_run
+                    WHERE quiet_message_run.run_id = message.run_id
+                      AND ${isSilentShellRun("quiet_message_run")}
+                  )
                 ORDER BY message.updated_at DESC, message.message_id DESC
                 LIMIT 1
               ) AS latest_user_authored_message_at,
@@ -8298,6 +8346,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 FROM orchestration_v2_projection_messages message
                 WHERE message.thread_id = t.thread_id AND message.role = 'user'
                   AND NOT ${isIdleCompactionMessage("message")}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM orchestration_v2_projection_runs quiet_message_run
+                    WHERE quiet_message_run.run_id = message.run_id
+                      AND ${isSilentShellRun("quiet_message_run")}
+                  )
                 ORDER BY message.updated_at DESC, message.message_id DESC
                 LIMIT 1
               ) AS latest_user_message_at,
@@ -8307,6 +8360,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE message.thread_id = t.thread_id AND message.role = 'user'
                   AND json_extract(message.payload_json, '$.createdBy') = 'user'
                   AND NOT ${isIdleCompactionMessage("message")}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM orchestration_v2_projection_runs quiet_message_run
+                    WHERE quiet_message_run.run_id = message.run_id
+                      AND ${isSilentShellRun("quiet_message_run")}
+                  )
                 ORDER BY message.updated_at DESC, message.message_id DESC
                 LIMIT 1
               ) AS latest_user_authored_message_at
@@ -8353,6 +8411,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     WHERE message.thread_id = t.thread_id AND message.role = 'user'
                       AND json_extract(message.payload_json, '$.createdBy') = 'user'
                       AND NOT ${isIdleCompactionMessage("message")}
+                      AND NOT EXISTS (
+                        SELECT 1 FROM orchestration_v2_projection_runs quiet_message_run
+                        WHERE quiet_message_run.run_id = message.run_id
+                          AND ${isSilentShellRun("quiet_message_run")}
+                      )
                       AND message.updated_at > COALESCE(
                         json_extract(link.payload_json, '$.startedAt'), link.updated_at
                       )
