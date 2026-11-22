@@ -57,11 +57,19 @@ describe("resolveProjectSettings", () => {
       defaultAutoPull: true,
       sidebarAutoSettleAfterDays: 3,
       projectSettingsOverrides: {
-        [projectId]: { defaultAutoPull: false, sidebarAutoSettleAfterDays: null },
+        [projectId]: {
+          defaultAutoPull: false,
+          sidebarAutoSettleAfterDays: null,
+          createFeatureBranchOnMain: false,
+        },
       },
     });
     const resolved = resolveProjectSettings(settings, projectId);
     expect(resolved.settings.defaultAutoPull).toBe(false);
+    expect(resolved.settings.createFeatureBranchOnMain).toBe(false);
+    expect(
+      resolveProjectSettings(settings, otherProjectId).settings.createFeatureBranchOnMain,
+    ).toBe(true);
     expect(resolved.settings.sidebarAutoSettleAfterDays).toBeNull();
     expect(resolved.settings.defaultThreadEnvMode).toBe(settings.defaultThreadEnvMode);
     expect(resolved.sources.defaultAutoPull).toBe("project");

@@ -363,6 +363,10 @@ describe("provider enabled defaults", () => {
 
 describe("ServerSettings worktree defaults", () => {
   it("defaults the thread env mode to inherit and keeps stored values", () => {
+    expect(decodeServerSettings({}).createFeatureBranchOnMain).toBe(true);
+    expect(
+      decodeServerSettings({ createFeatureBranchOnMain: false }).createFeatureBranchOnMain,
+    ).toBe(false);
     expect(decodeServerSettings({}).defaultThreadEnvMode).toBeNull();
     expect(decodeServerSettings({ defaultThreadEnvMode: "worktree" }).defaultThreadEnvMode).toBe(
       "worktree",

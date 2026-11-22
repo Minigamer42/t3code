@@ -236,6 +236,8 @@ finishes. Nothing is pushed.
 
 On the default branch or detached HEAD, **Create feature branch** appears first. **Commit**,
 **Push**, and **Create MR/PR** create a feature branch before changing or publishing commits.
+To commit and push directly to the main ref instead, turn off **Create a feature branch on the
+main ref** in the project’s Source control settings. Creating an MR/PR still uses a feature branch.
 Commit options still let you commit directly, including during a paused interactive rebase.
 
 Use **Push** to group pending changes into logical commits and push the branch.

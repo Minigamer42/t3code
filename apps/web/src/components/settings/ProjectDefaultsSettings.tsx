@@ -102,6 +102,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
+  const mixedFeatureBranch = useScopedSettingsMixed(["createFeatureBranchOnMain"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
@@ -441,6 +442,23 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 mixed={mixedAutoPull}
                 checked={mixedAutoPull ? false : settings.defaultAutoPull}
                 onCheckedChange={(enabled) => updateSettings({ defaultAutoPull: enabled })}
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["createFeatureBranchOnMain"]}
+            mixed={mixedFeatureBranch}
+            {...searchableSetting("create-feature-branch-on-main")}
+            description="Create a feature branch before committing or pushing from the main ref. Turn off to commit and push directly to the main ref."
+            control={
+              <Switch
+                aria-label="Create a feature branch on the main ref"
+                mixed={mixedFeatureBranch}
+                checked={mixedFeatureBranch ? false : settings.createFeatureBranchOnMain}
+                onCheckedChange={(enabled) =>
+                  updateSettings({ createFeatureBranchOnMain: enabled })
+                }
               />
             }
           />

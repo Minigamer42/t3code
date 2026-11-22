@@ -64,7 +64,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
     "sidebarAutoSettleOnMerge",
     "sidebarAutoSettleAfterDays",
   ],
-  "source-control": ["defaultAutoPull", "removeAgentCreditsOnMerge"],
+  "source-control": ["defaultAutoPull", "removeAgentCreditsOnMerge", "createFeatureBranchOnMain"],
   worktrees: [
     "newWorktreesStartFromOrigin",
     "worktreeSubmodules",
@@ -447,6 +447,17 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                   />
                 </SettingsSection>
                 <SettingsSection title="Default branch">
+                  <SettingsSwitchRow
+                    icon="arrow.triangle.branch"
+                    label="Create a feature branch on the main ref"
+                    subtitle={managedSubtitle(
+                      "createFeatureBranchOnMain",
+                      "Create a feature branch before committing or pushing from the main ref. Turn off to commit and push directly to it.",
+                    )}
+                    value={uniform("createFeatureBranchOnMain")}
+                    disabled={disabledFor("createFeatureBranchOnMain")}
+                    onValueChange={(value) => write({ createFeatureBranchOnMain: value })}
+                  />
                   <SettingsSwitchRow
                     icon="arrow.down.circle"
                     label="Automatically pull"
