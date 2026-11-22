@@ -7668,6 +7668,16 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     ["a normalized idle command", "agent", "server", undefined, true, " \t\u00a0/COMPACT\u3000\n"],
     ["an ordinary prompt with idle metadata", "user", "web", "onReturn", false, "Continue"],
     ["a quiet scheduled check", "agent", "server", undefined, true, "Check", "NO_UPDATE"],
+    ["a manual NO_UPDATE response", "user", "web", undefined, true, "Check", "NO_UPDATE"],
+    [
+      "a NO_UPDATE response after a failed tool",
+      "agent",
+      "server",
+      undefined,
+      true,
+      "Check",
+      "NO_UPDATE",
+    ],
     [
       "a whitespace-padded quiet check",
       "agent",
@@ -7736,7 +7746,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             createdBy,
             creationSource,
             ...(idleCompaction === undefined ? {} : { idleCompaction }),
-            ...(response === undefined
+            ...(response === undefined || createdBy === "user"
               ? {}
               : { scheduledTaskId: ScheduledTaskId.make("quiet-check") }),
             id: messageId,
@@ -7802,7 +7812,9 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
               messageId,
               createdBy,
               creationSource,
-              scheduledTaskId: ScheduledTaskId.make("quiet-check"),
+              ...(createdBy === "user"
+                ? {}
+                : { scheduledTaskId: ScheduledTaskId.make("quiet-check") }),
               inputIntent: "turn_start" as const,
               text,
               attachments: [],
@@ -7829,6 +7841,36 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
               payload: item,
             });
           }
+        }
+
+        if (name === "a NO_UPDATE response after a failed tool") {
+          yield* projectionStore.apply({
+            id: EventId.make(`${key}:failed-tool`),
+            type: "turn-item.updated",
+            threadId,
+            runId,
+            occurredAt: now,
+            payload: {
+              id: TurnItemId.make(`${key}:failed-tool`),
+              threadId,
+              runId,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 3,
+              status: "failed",
+              title: null,
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              type: "dynamic_tool",
+              toolName: "query",
+              input: null,
+              output: "Connection refused",
+            },
+          });
         }
 
         const presented = Effect.gen(function* () {
@@ -7862,7 +7904,23 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           silent ? hidden : visible,
         ]);
 
-        if (response !== undefined) return;
+        if (response !== undefined) {
+          if (silent && !omitFinal) {
+            const run = (yield* projectionStore.getThreadProjection(threadId)).runs[0]!;
+            for (const status of ["failed", "interrupted", "cancelled"] as const) {
+              yield* projectionStore.apply({
+                id: EventId.make(`${key}:${status}`),
+                type: "run.updated",
+                threadId,
+                runId,
+                occurredAt: now,
+                payload: { ...run, status },
+              });
+              assert.deepStrictEqual(yield* presented, [hidden, hidden]);
+            }
+          }
+          return;
+        }
 
         // A follow-up removed before it started stays latest unless a visible run outlives it.
         const removedRunId = RunId.make(`run:projection-shell-silent:${key}:removed`);

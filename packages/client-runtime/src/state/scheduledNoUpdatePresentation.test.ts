@@ -10,6 +10,7 @@ import {
   type OrchestrationV2ProjectedTurnItem,
 } from "@t3tools/contracts";
 import { v2Now, v2ThreadId, v2Projection } from "./orchestrationV2TestFixtures.ts";
+import { mergeOlderHistoryIntoProjection } from "./threadHistoryMerge.ts";
 import { collapseScheduledNoUpdates } from "./scheduledNoUpdatePresentation.ts";
 
 function fixture(id: string, text = "NO_UPDATE") {
@@ -97,17 +98,37 @@ describe("scheduled no-update presentation", () => {
     expect(result.slice(1)).toEqual(c.rows);
     expect(collapseScheduledNoUpdates([...rows], [...runs])[0]).toBe(result[0]);
     expect(rows).toHaveLength(6);
+    const current = {
+      ...v2Projection,
+      runs: [c.run],
+      turnItems: c.rows.map((row) => row.item),
+      visibleTurnItems: c.rows,
+    };
+    const history = [...a.rows, ...b.rows].map((row) => ({
+      ...row,
+      runStatus: "completed" as const,
+      runProviderThreadId: null,
+    }));
+    const loaded = mergeOlderHistoryIntoProjection(current, history);
+    expect(
+      collapseScheduledNoUpdates(loaded.visibleTurnItems, loaded.runs).map((row) => row.item),
+    ).toEqual(result.map((row) => row.item));
   });
 
-  it.each(["running", "failed", "interrupted", "waiting"] as const)(
+  it.each(["preparing", "queued", "starting", "running", "waiting"] as const)(
     "keeps %s checks visible",
     (status) => {
       const { run, rows } = fixture("a");
-      expect(collapseScheduledNoUpdates(rows, [{ ...run, status }])).toBe(rows);
+      const history = rows.map((row) => ({
+        ...row,
+        runStatus: "completed" as const,
+        runProviderThreadId: null,
+      }));
+      expect(collapseScheduledNoUpdates(history, [{ ...run, status }])).toBe(history);
     },
   );
 
-  it("requires an explicit root final, a scheduled prompt and no requests or errors", () => {
+  it("uses the exact final response regardless of earlier failures or how the run started", () => {
     for (const text of ["", "Nothing changed", "`NO_UPDATE`", "NO_UPDATE\nThere is a blocker."]) {
       const { rows, run } = fixture("a", text);
       expect(collapseScheduledNoUpdates(rows, [run])).toBe(rows);
@@ -117,7 +138,7 @@ describe("scheduled no-update presentation", () => {
     if (prompt.type !== "user_message") throw new Error("fixture");
     const { scheduledTaskId: _task, ...manual } = prompt;
     const manualRows = [row(manual), rows[1]!];
-    expect(collapseScheduledNoUpdates(manualRows, [run])).toBe(manualRows);
+    expect(collapseScheduledNoUpdates(manualRows, [run])).toHaveLength(1);
     const guarded = [
       ...rows,
       row({
@@ -129,9 +150,41 @@ describe("scheduled no-update presentation", () => {
         failure: { class: "unknown", code: null, message: "Failed", retryable: false },
       }),
     ];
-    expect(collapseScheduledNoUpdates(guarded, [run])).toBe(guarded);
+    for (const status of ["completed", "failed", "interrupted", "cancelled"] as const) {
+      expect(collapseScheduledNoUpdates(guarded, [{ ...run, status }])).toHaveLength(1);
+      const history = guarded.map((entry) => ({
+        ...entry,
+        runStatus: status,
+        runProviderThreadId: null,
+      }));
+      expect(collapseScheduledNoUpdates(history, [])).toHaveLength(1);
+    }
+    const failedTool = [
+      ...rows,
+      row({
+        ...base,
+        id: TurnItemId.make("failed-tool"),
+        ordinal: 3,
+        type: "dynamic_tool",
+        toolName: "query",
+        input: null,
+        output: "Connection refused",
+        status: "failed",
+      }),
+    ];
+    expect(collapseScheduledNoUpdates(failedTool, [run])).toHaveLength(1);
     const response = rows[1]!.item;
     if (response.type !== "assistant_message") throw new Error("fixture");
+    const laterResponse = [
+      ...rows,
+      row({
+        ...response,
+        id: TurnItemId.make("later-response"),
+        ordinal: 4,
+        text: "A real update",
+      }),
+    ];
+    expect(collapseScheduledNoUpdates(laterResponse, [run])).toBe(laterResponse);
     for (const changed of [
       { ...response, phase: "commentary" as const },
       { ...response, phase: "partial_answer" as const },

@@ -107,7 +107,8 @@ Leaving an edited form asks before discarding unsaved changes.
 For recurring checks that should stay quiet, ask the agent to finish with exactly
 `NO_UPDATE` when a completed check has nothing to report. Consecutive quiet runs
 collapse into an expandable history entry and do not create completion alerts.
-Failures, file changes, and requests for input stay visible.
+The exact final response controls this, even if earlier tool calls failed or files
+changed. This also works for ordinary turns. Active turns stay visible.
 
 ## Webhook automations
 

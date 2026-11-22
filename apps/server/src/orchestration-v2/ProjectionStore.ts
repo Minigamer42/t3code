@@ -7814,22 +7814,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const isSilentShellRun = (alias: string) => {
       const run = sql.literal(alias);
       return sql`(
-        (${run}.status = 'completed'
-          AND EXISTS (
-            SELECT 1 FROM orchestration_v2_projection_turn_items prompt
-            WHERE prompt.run_id = ${run}.run_id AND prompt.type = 'user_message'
-              AND json_extract(prompt.payload_json, '$.scheduledTaskId') IS NOT NULL
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM orchestration_v2_projection_turn_items guard
-            WHERE guard.run_id = ${run}.run_id AND (
-              guard.type IN ('error', 'user_input_request', 'secret_request', 'link_request', 'approval_request', 'file_change')
-              OR guard.status IN ('failed', 'waiting', 'running', 'pending')
-              OR (guard.type = 'user_message' AND json_extract(guard.payload_json, '$.scheduledTaskId') IS NULL)
-            )
-          )
+        (${run}.status IN ('completed', 'failed', 'interrupted', 'cancelled')
           AND (SELECT CASE WHEN json_extract(response.payload_json, '$.streaming') = 0
-              AND coalesce(json_array_length(response.payload_json, '$.attachments'), 0) = 0
               THEN trim(json_extract(response.payload_json, '$.text'),
                 char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195,
                   8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))

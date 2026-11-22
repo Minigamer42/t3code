@@ -17,8 +17,20 @@ export function collapseScheduledNoUpdates(
   rows: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
   runs: ReadonlyArray<OrchestrationV2Run>,
 ): ReadonlyArray<OrchestrationV2ProjectedTurnItem> {
+  const knownRunIds = new Set(runs.map((run) => run.id));
+  const historyRuns = rows.flatMap(({ item, runStatus, runProviderThreadId }) => {
+    if (
+      item.runId === null ||
+      knownRunIds.has(item.runId) ||
+      runStatus === undefined ||
+      runProviderThreadId === undefined
+    )
+      return [];
+    knownRunIds.add(item.runId);
+    return [{ id: item.runId, status: runStatus, providerThreadId: runProviderThreadId }];
+  });
   const quiet = scheduledNoUpdateRunIds(
-    runs,
+    historyRuns.length === 0 ? runs : [...runs, ...historyRuns],
     rows.map((row) => row.item),
   );
   if (quiet.size === 0) return rows;
