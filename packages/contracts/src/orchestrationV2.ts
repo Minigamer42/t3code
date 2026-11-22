@@ -1966,6 +1966,9 @@ const projectedTurnItemArray = <Row extends Schema.Top, Item extends Schema.Top>
   );
 
 export const OrchestrationV2ProjectedTurnItem = Schema.Struct({
+  /** History pages retain lifecycle state for runs outside the active snapshot. */
+  runStatus: Schema.optional(OrchestrationV2RunStatus),
+  runProviderThreadId: Schema.optional(Schema.NullOr(ProviderThreadId)),
   position: NonNegativeInt,
   visibility: Schema.Literals(["local", "inherited", "synthetic"]),
   sourceThreadId: ThreadId,

@@ -5884,6 +5884,11 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         const page: OrchestrationV2ThreadHistoryPage = yield* projectionStore
           .getThreadHistoryPage(threadId, cursor)
           .pipe(Effect.withTracer(history.tracer));
+        assert.isTrue(
+          page.items.every(
+            (row) => row.runStatus === "completed" && row.runProviderThreadId === null,
+          ),
+        );
         historyIds.push(...page.items.map((row) => String(row.sourceItemId)));
         historyPages += 1;
         cursor = page.hasMoreHistory ? page.nextCursor : null;

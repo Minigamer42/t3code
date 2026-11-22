@@ -2294,6 +2294,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       readonly createdBy?: "user" | "agent" | "system";
       readonly messageId?: MessageId;
       readonly runStatus?: string | undefined;
+      readonly runProviderThreadId?: OrchestrationV2Run["providerThreadId"] | undefined;
       readonly attemptId?: string | null;
       readonly attemptStatus?: string | null;
       readonly persistentOutput?: boolean;
@@ -6633,7 +6634,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         }
         WHERE item.thread_id = ${threadId}
         ORDER BY item.ordinal ASC, item.turn_item_id ASC`;
-        const runStatuses = new Map(records.runs.map((run) => [String(run.id), run.status]));
+        const indexedRuns = new Map(records.runs.map((run) => [String(run.id), run]));
         const items: Array<TimelineIndexItem> = rows.map((row) => ({
           id: TurnItemId.make(row.turn_item_id),
           threadId,
@@ -6643,7 +6644,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           type: row.type,
           status: row.status,
           ordinal: row.ordinal,
-          runStatus: row.run_id === null ? undefined : runStatuses.get(row.run_id),
+          runStatus: row.run_id === null ? undefined : indexedRuns.get(row.run_id)?.status,
+          runProviderThreadId:
+            row.run_id === null ? undefined : indexedRuns.get(row.run_id)?.providerThreadId,
           attemptId: row.attempt_id,
           attemptStatus: row.attempt_status,
           ...(row.input_intent === null ? {} : { inputIntent: row.input_intent }),
@@ -6809,7 +6812,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         }
         WHERE item.thread_id = ${threadId} ${where}
         ORDER BY item.ordinal ASC, item.turn_item_id ASC ${limit}`;
-      const runStatuses = new Map(runs.map((run) => [String(run.id), run.status]));
+      const indexedRuns = new Map(runs.map((run) => [String(run.id), run]));
       return rows.map((row): TimelineIndexItem => ({
         id: TurnItemId.make(row.turn_item_id),
         threadId,
@@ -6819,7 +6822,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         type: row.type,
         status: row.status,
         ordinal: row.ordinal,
-        runStatus: row.run_id === null ? undefined : runStatuses.get(row.run_id),
+        runStatus: row.run_id === null ? undefined : indexedRuns.get(row.run_id)?.status,
+        runProviderThreadId:
+          row.run_id === null ? undefined : indexedRuns.get(row.run_id)?.providerThreadId,
         attemptId: row.attempt_id,
         attemptStatus: row.attempt_status,
         persistentOutput: row.persistent_output === 1,
@@ -7410,6 +7415,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     visibility: row.visibility,
                     sourceThreadId: row.sourceThreadId,
                     sourceItemId: row.sourceItemId,
+                    ...(row.item.runStatus === "completed" ||
+                    row.item.runStatus === "failed" ||
+                    row.item.runStatus === "interrupted" ||
+                    row.item.runStatus === "cancelled"
+                      ? {
+                          runStatus: row.item.runStatus,
+                          runProviderThreadId: row.item.runProviderThreadId,
+                        }
+                      : {}),
                     item: projectTurnItemForWire(
                       row.item.deferredWork === undefined
                         ? item
