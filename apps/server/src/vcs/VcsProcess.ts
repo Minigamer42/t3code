@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import type { SourceControlProcessInput } from "@t3tools/source-control-core/server/SourceControlHost";
+import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -210,6 +211,8 @@ export const make = Effect.gen(function* () {
   const hostPlatform = yield* HostProcess.Platform;
   const vcsProcesses = yield* Semaphore.make(VCS_PROCESS_CONCURRENCY);
   const nonGitProcesses = yield* Semaphore.make(NON_GIT_PROCESS_CONCURRENCY);
+  // Polling must leave forge capacity for a user action even with a full refresh backlog.
+  const backgroundProcesses = yield* Semaphore.make(NON_GIT_PROCESS_CONCURRENCY / 2);
   const keyedProcesses = new Map<string, Semaphore.Semaphore>();
   const keyedPermit = (concurrency: NonNullable<VcsProcessInput["concurrency"]>) => {
     let semaphore = keyedProcesses.get(concurrency.key);
@@ -400,7 +403,10 @@ export const make = Effect.gen(function* () {
       );
     }
     const shared = input.command === "git" ? bounded : nonGitProcesses.withPermits(1)(bounded);
-    return yield* input.concurrency === undefined ? shared : keyedPermit(input.concurrency)(shared);
+    const keyed = input.concurrency === undefined ? shared : keyedPermit(input.concurrency)(shared);
+    return yield* input.command === "git" || (yield* SourceControlRateLimit.Interactive)
+      ? keyed
+      : backgroundProcesses.withPermits(1)(keyed);
   });
 
   return VcsProcess.of({ run });

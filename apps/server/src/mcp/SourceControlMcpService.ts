@@ -284,7 +284,9 @@ export const make = Effect.gen(function* () {
                 Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
               );
             if (input.action !== "untrack" && input.action !== "abort")
-              yield* pullRequests.refreshAfterTurn(thread.projectId, { pushed: true });
+              yield* pullRequests
+                .refreshAfterTurn(thread.projectId, { pushed: true })
+                .pipe(Effect.ignore({ log: true }), Effect.forkDetach);
             return stack;
           }),
         ),

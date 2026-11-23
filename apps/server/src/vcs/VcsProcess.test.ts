@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -353,7 +354,7 @@ describe("VcsProcess.run", () => {
           }),
         ),
         { concurrency: "unbounded" },
-      ).pipe(Effect.forkChild);
+      ).pipe(Effect.provideService(SourceControlRateLimit.Interactive, true), Effect.forkChild);
 
       yield* Effect.all(Array.from({ length: 4 }, () => Queue.take(starts)));
       yield* Effect.yieldNow;
@@ -419,6 +420,62 @@ describe("VcsProcess.run", () => {
         "git waited behind forge CLI runs that held every VCS process slot",
       ).toBe(true);
     }),
+  );
+
+  it.effect.each([false, true])(
+    "leaves interactive forge capacity during background polling (keyed: %s)",
+    (keyed) =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const completed = yield* Deferred.make<void>();
+        const starts = yield* Queue.unbounded<string>();
+        const service = yield* VcsProcess.make.pipe(
+          Effect.provideService(
+            ProcessRunner.ProcessRunner,
+            ProcessRunner.ProcessRunner.of({
+              run: (input) =>
+                Effect.gen(function* () {
+                  yield* Queue.offer(starts, input.args[0]!);
+                  if (input.args[0] === "background") yield* Deferred.await(gate);
+                  return {
+                    stdout: "",
+                    stderr: "",
+                    code: ChildProcessSpawner.ExitCode(0),
+                    timedOut: false,
+                    stdoutTruncated: false,
+                    stderrTruncated: false,
+                    stdoutInvalidUtf8: false,
+                    stderrInvalidUtf8: false,
+                  };
+                }),
+            }),
+          ),
+        );
+        const input = {
+          ...baseInput,
+          command: "glab",
+          ...(keyed ? { concurrency: { key: "forge", limit: 4 } } : {}),
+        };
+        const background = yield* Effect.forEach(Array.from({ length: 12 }), () =>
+          service
+            .run({ ...input, args: ["background"] })
+            .pipe(
+              Effect.provideService(SourceControlRateLimit.Interactive, false),
+              Effect.forkChild({ startImmediately: true }),
+            ),
+        );
+        yield* Queue.take(starts);
+        yield* Queue.take(starts);
+        const interactive = yield* service.run({ ...input, args: ["interactive"] }).pipe(
+          Effect.provideService(SourceControlRateLimit.Interactive, true),
+          Effect.tap(() => Deferred.succeed(completed, undefined)),
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const finishedBeforePolling = yield* Deferred.isDone(completed);
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.joinAll([...background, interactive]);
+        expect(finishedBeforePolling).toBe(true);
+      }),
   );
 
   it.effect("keeps git from opening a folder laid out as a bare repository", () =>

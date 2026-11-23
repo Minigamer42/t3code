@@ -4885,7 +4885,19 @@ export const make = Effect.gen(function* () {
         }
       }
       yield* invalidateStatus(input.cwd);
-      const result = yield* stackStatus(input);
+      // A local rebase changes no reviews; keep the metadata read before it instead of querying again.
+      const result =
+        input.action === "update"
+          ? {
+              ...updated,
+              layers: updated.layers.map((layer) => ({
+                ...layer,
+                pullRequest:
+                  status.layers.find((previous) => previous.branch === layer.branch)?.pullRequest ??
+                  null,
+              })),
+            }
+          : yield* stackStatus(input);
       if (
         input.action !== "untrack" &&
         input.action !== "abort" &&
@@ -4902,7 +4914,7 @@ export const make = Effect.gen(function* () {
       return yield* workflowProgress.run(input.cwd, "stack", "Preparing stack...", maintain);
     yield* workflowProgress.clear(input.cwd);
     return yield* maintain();
-  });
+  }, asUserAction);
 
   const runStackedAction: GitManager["Service"]["runStackedAction"] = Effect.fn("runStackedAction")(
     function* (input, options) {

@@ -3223,7 +3223,10 @@ export const layerWsRpc = (
             ),
             Effect.tap(() =>
               input.action !== "untrack" && input.action !== "abort"
-                ? refreshPushedPullRequests({ cwd: input.cwd }, { push: { status: "pushed" } })
+                ? refreshPushedPullRequests(
+                    { cwd: input.cwd },
+                    { push: { status: "pushed" } },
+                  ).pipe(Effect.forkDetach, Effect.asVoid)
                 : Effect.void,
             ),
             Effect.ensuring(refreshGitStatus(input.cwd)),

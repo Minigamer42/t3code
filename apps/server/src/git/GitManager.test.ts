@@ -1533,7 +1533,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       ).toEqual(expected);
       expect(recorded).toEqual(expected);
       expect((yield* runGit(cwd, ["branch", "--show-current"])).stdout.trim()).toBe(current);
-      yield* manager.manageStack({ cwd, action: "update" });
+      const callsBeforeUpdate = calls.length;
+      const refreshedStack = yield* manager.manageStack({ cwd, action: "update" });
+      if (mode === "update") {
+        expect(listedSelectors(calls.slice(callsBeforeUpdate)).toSorted()).toEqual(
+          branches.toSorted(),
+        );
+        expect(refreshedStack.layers.map((layer) => layer.pullRequest?.number)).toEqual([1, 2, 3]);
+      }
       expect(
         NodeFS.existsSync(marker) ? NodeFS.readFileSync(marker, "utf8").trim().split("\n") : [],
       ).toEqual(expected);
