@@ -1,18 +1,25 @@
 import { useState } from "react";
+import { AsyncResult } from "effect/reactivity";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
   type ThreadId,
+  type VcsStatusResult,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { fileBasename } from "@t3tools/shared/path";
 import { useProjects, useThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
-import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { threadEnvironment } from "../../state/threads";
 import { vcsEnvironment } from "../../state/vcs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+
+const selectCheckoutRefName = (result: AsyncResult.AsyncResult<VcsStatusResult, unknown>) => {
+  const status = AsyncResult.getOrElse(result, () => null);
+  return status?.isRepo ? status.refName : undefined;
+};
 
 /** Rebind an existing conversation; the server detaches its old provider session. */
 export function ThreadWorkspaceControl({
@@ -25,6 +32,11 @@ export function ThreadWorkspaceControl({
   const thread = useThreadShell(scopeThreadRef(environmentId, threadId));
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const project = projects.find((project) => project.id === thread?.projectId);
+  const cwd = thread?.worktreePath ?? project?.workspaceRoot ?? null;
+  const checkoutRefName = useEnvironmentQuerySelector(
+    thread && cwd ? vcsEnvironment.status({ environmentId, input: { cwd } }) : null,
+    selectCheckoutRefName,
+  );
   const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const updateMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -38,6 +50,7 @@ export function ThreadWorkspaceControl({
       : null,
   );
   if (!thread) return null;
+  const currentBranch = checkoutRefName === undefined ? thread.branch : checkoutRefName;
   const busy = ["preparing", "queued", "starting", "running", "waiting"].includes(
     thread.runtime?.status ?? "idle",
   );
@@ -96,13 +109,14 @@ export function ThreadWorkspaceControl({
           <SelectValue>
             {fileBasename(thread.worktreePath ?? project?.workspaceRoot ?? "Project checkout")}
             {" · "}
-            {thread.branch ?? "Detached HEAD"}
+            {currentBranch ?? "Detached HEAD"}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {data?.worktrees.map((worktree) => (
             <SelectItem key={worktree.path} value={worktree.path}>
-              {fileBasename(worktree.path)} · {worktree.refName ?? "Detached HEAD"}
+              {fileBasename(worktree.path)} ·{" "}
+              {(worktree.path === cwd ? currentBranch : worktree.refName) ?? "Detached HEAD"}
             </SelectItem>
           ))}
           {!data ? (
