@@ -1,3 +1,5 @@
+import { File, Paths } from "expo-file-system";
+import * as Dialog from "../components/ui/Dialog";
 import { createChildThreadApprovalsAtom } from "@t3tools/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -37,6 +39,26 @@ export const olderSettledThreads = createOlderSettledThreadAtoms(
 export const threadEnvironment = createThreadEnvironmentAtoms(
   connectionAtomRuntime,
   threadFamilies.snapshotAtom,
+  {
+    storage: {
+      read: (id) => {
+        const file = new File(Paths.document, `thread-actions-${encodeURIComponent(id)}.json`);
+        return file.exists ? file.textSync() : null;
+      },
+      write: (id, value) => {
+        const file = new File(Paths.document, `thread-actions-${encodeURIComponent(id)}.json`);
+        const staged = new File(Paths.document, `${file.name}.tmp`);
+        staged.create({ overwrite: true });
+        staged.write(value);
+        staged.moveSync(file, { overwrite: true });
+      },
+    },
+    onFailure: () =>
+      Dialog.alert(
+        "Could not sync queued thread action",
+        "The local change was reverted. Try again when the server is available.",
+      ),
+  },
 );
 export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(

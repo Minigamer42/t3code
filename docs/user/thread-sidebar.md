@@ -340,6 +340,10 @@ answer its questions.
 
 ## Snooze until later
 
+You can snooze, settle, pin, and undo those choices while a thread's server is
+unavailable. Changes take effect on this device immediately, survive a reload,
+and sync when the server reconnects. A rejected change is reverted with a notice.
+
 To change the choices in the snooze menu, open **Settings → Threads → Snooze options**.
 Each option is a duration, such as 3 hours, or a time on a day, such as 9:00 PM
 tomorrow. A weekday means the next one after today. Menus list the options soonest

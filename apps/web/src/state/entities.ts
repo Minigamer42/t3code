@@ -38,7 +38,7 @@ import {
   allEnvironmentProjectSnapshotsReadyAtom,
   allEnvironmentShellsBootstrappedAtom,
 } from "./shell";
-import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import { threadEnvironment, environmentThreadDetails, environmentThreadShells } from "./threads";
 import { waitForAtomValue } from "./waitForAtomValue";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
@@ -365,7 +365,10 @@ export function readEnvironmentSupportsServerBrowser(environmentId: EnvironmentI
 }
 
 export function readEnvironmentServerConfigLoaded(environmentId: EnvironmentId): boolean {
-  return appAtomRegistry.get(environmentServerConfigsAtom).has(environmentId);
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).has(environmentId) ||
+    !appAtomRegistry.get(threadEnvironment.readyAtom(environmentId))
+  );
 }
 
 export function readEnvironmentSupportsAutoSettleOptOut(environmentId: EnvironmentId): boolean {

@@ -80,32 +80,37 @@ vi.mock("../../state/atom-registry", async () => {
       state.dropBusy = value;
     },
     get: (atom: string) =>
-      atom === "connected-environments"
-        ? state.connectedEnvironmentIds
-        : atom === "thread-drop-busy"
-          ? state.dropBusy
-          : atom === "steady-shells-holding"
-            ? state.holdingRows
-            : atom === "thread-shells"
-              ? state.shells
-              : atom === "queued-thread-keys"
-                ? new Set<string>()
-                : new Map(
-                    [...state.scopes.keys()].map((environmentId) => [
-                      environmentId,
-                      {
-                        environment: {
-                          capabilities: {
-                            threadSettlement: true,
-                            threadSnooze: true,
-                            threadPinning: true,
-                            threadPinReorder: true,
-                            threadTitleRegeneration: true,
+      atom.startsWith("organize:")
+        ? state.scopes.get(atom.slice("organize:".length))?.has(AuthOrchestrationOperateScope) ===
+          true
+        : atom === "ready"
+          ? true
+          : atom === "connected-environments"
+            ? state.connectedEnvironmentIds
+            : atom === "thread-drop-busy"
+              ? state.dropBusy
+              : atom === "steady-shells-holding"
+                ? state.holdingRows
+                : atom === "thread-shells"
+                  ? state.shells
+                  : atom === "queued-thread-keys"
+                    ? new Set<string>()
+                    : new Map(
+                        [...state.scopes.keys()].map((environmentId) => [
+                          environmentId,
+                          {
+                            environment: {
+                              capabilities: {
+                                threadSettlement: true,
+                                threadSnooze: true,
+                                threadPinning: true,
+                                threadPinReorder: true,
+                                threadTitleRegeneration: true,
+                              },
+                            },
                           },
-                        },
-                      },
-                    ]),
-                  ),
+                        ]),
+                      ),
   };
   // Real atoms such as composerDraftsAtom go to a real registry; strings are stubbed state.
   return {
@@ -145,39 +150,43 @@ vi.mock("../../state/threads", () => ({
   environmentThreadShells: { threadShellsAtom: "thread-shells" },
   steadyNavigationThreadShellsAtom: "thread-shells",
   steadyShellsHoldingAtom: "steady-shells-holding",
-  threadEnvironment: Object.fromEntries(
-    [
-      "archive",
-      "unarchive",
-      "delete",
-      "settle",
-      "unsettle",
-      "snooze",
-      "unsnooze",
-      "pin",
-      "unpin",
-      "reorderPin",
-      "reorderActive",
-      "updateMetadata",
-      "regenerateTitle",
-    ].map((action) => [
-      action,
-      async (request: {
-        environmentId: string;
-        input: { threadId: string; orderKey?: string };
-      }) => {
-        state.requests.push({ action, ...request });
-        await state.heldActions.get(action);
-        if (!state.scopes.get(request.environmentId)?.has(AuthOrchestrationOperateScope)) {
-          return AsyncResult.failure(Cause.fail(new Error("Thread operation denied")));
-        }
-        if (action === state.failedAction)
-          return AsyncResult.failure(Cause.fail(new Error("Server rejected action")));
-        state.afterRequest?.();
-        return AsyncResult.success(action === "regenerateTitle" ? state.titleOutcome : undefined);
-      },
-    ]),
-  ),
+  threadEnvironment: {
+    canOrganizeAtom: (id: string) => `organize:${id}`,
+    readyAtom: () => "ready",
+    ...Object.fromEntries(
+      [
+        "archive",
+        "unarchive",
+        "delete",
+        "settle",
+        "unsettle",
+        "snooze",
+        "unsnooze",
+        "pin",
+        "unpin",
+        "reorderPin",
+        "reorderActive",
+        "updateMetadata",
+        "regenerateTitle",
+      ].map((action) => [
+        action,
+        async (request: {
+          environmentId: string;
+          input: { threadId: string; orderKey?: string };
+        }) => {
+          state.requests.push({ action, ...request });
+          await state.heldActions.get(action);
+          if (!state.scopes.get(request.environmentId)?.has(AuthOrchestrationOperateScope)) {
+            return AsyncResult.failure(Cause.fail(new Error("Thread operation denied")));
+          }
+          if (action === state.failedAction)
+            return AsyncResult.failure(Cause.fail(new Error("Server rejected action")));
+          state.afterRequest?.();
+          return AsyncResult.success(action === "regenerateTitle" ? state.titleOutcome : undefined);
+        },
+      ]),
+    ),
+  },
 }));
 
 import { appAtomRegistry } from "../../state/atom-registry";

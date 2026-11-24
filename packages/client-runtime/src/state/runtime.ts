@@ -146,6 +146,7 @@ export interface AtomCommandReporter {
 }
 
 export interface AtomCommand<W, A, E> {
+  readonly offlinePermissionAtom?: (environmentId: EnvironmentIdType) => Atom.Atom<boolean>;
   readonly label: string;
   readonly run: (registry: AtomRegistry.AtomRegistry, input: W) => Promise<AtomCommandResult<A, E>>;
 }

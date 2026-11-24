@@ -850,7 +850,11 @@ export function useThreadActions() {
   };
 
   const confirmAndUnpinThread = async (target: ScopedThreadRef) => {
-    const permissionFailure = threadOperationFailure(target);
+    const permissionFailure =
+      readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope) ||
+      appAtomRegistry.get(threadEnvironment.canOrganizeAtom(target.environmentId))
+        ? null
+        : threadOperationFailure(target);
     if (permissionFailure) return permissionFailure;
     const localApi = readLocalApi();
     const resolved = resolveThreadTarget(target);

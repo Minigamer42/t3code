@@ -10,7 +10,12 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
 } from "@t3tools/contracts";
 
-import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
+import { createEnvironmentSessionAtoms, sessionDeniesScope } from "./session.ts";
+import { AuthOrchestrationOperateScope, sessionGrantsScope } from "@t3tools/contracts";
+import {
+  createOptimisticThreadLifecycle,
+  type OfflineThreadLifecycleOptions,
+} from "./threadLifecycle.ts";
 import * as DateTime from "effect/DateTime";
 
 import {
@@ -81,6 +86,7 @@ export type { StopThreadToolInput } from "../operations/commands.ts";
 export function createThreadEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | SecureRandom.SecureRandom | R, E>,
   snapshotAtom: (environmentId: EnvironmentId) => Atom.Atom<OrchestrationV2ShellSnapshot | null>,
+  offlineOptions?: Omit<OfflineThreadLifecycleOptions, "readyAtom" | "createCommandId">,
 ) {
   const scheduler = createAtomCommandScheduler();
   const concurrency = {
@@ -445,7 +451,45 @@ export function createThreadEnvironmentAtoms<R, E>(
     pin: rowAction(sent.pin),
     unpin: rowAction(sent.unpin),
   };
-  const optimistic = createOptimisticThreadLifecycle(snapshotAtom);
+  const sessions = createEnvironmentSessionAtoms(runtime);
+  const readyAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => {
+      const connection = AsyncResult.getOrElse(
+        get(environmentConnectionAtom(runtime, environmentId)),
+        () => null,
+      );
+      return connection !== null && connectionProjectionPhase(connection[0]) === "ready";
+    }),
+  );
+  const canOrganizeAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => {
+      const result = get(sessions.sessionStateAtom(environmentId));
+      if (!get(readyAtom(environmentId)))
+        return !sessionDeniesScope(result, AuthOrchestrationOperateScope);
+      const session = AsyncResult.getOrElse(result, () => null);
+      return (
+        result._tag !== "Failure" &&
+        session !== null &&
+        sessionGrantsScope(session, AuthOrchestrationOperateScope)
+      );
+    }),
+  );
+  const newCommandId = createEnvironmentCommand(runtime, {
+    label: "thread-offline-command-id",
+    execute: Effect.fn("ThreadCommands.newCommandId")(function* (_input: {}) {
+      const random = yield* SecureRandom.SecureRandom;
+      return CommandId.make(yield* random.uuidV4());
+    }),
+  });
+  const optimistic = createOptimisticThreadLifecycle(snapshotAtom, {
+    ...offlineOptions,
+    readyAtom,
+    createCommandId: async (registry, environmentId) => {
+      const result = await newCommandId.run(registry, { environmentId, input: {} });
+      if (result._tag === "Failure") throw new Error("Could not queue thread action");
+      return result.value;
+    },
+  });
   const disconnectedAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => {
       const connection = AsyncResult.getOrElse(
@@ -476,96 +520,139 @@ export function createThreadEnvironmentAtoms<R, E>(
       return mapAtomCommandResult(armed, () => outcome);
     },
   };
-  return {
+  const result = {
     ...commands,
     regenerateTitle,
+    readyAtom,
+    canOrganizeAtom,
     rowActionsAtom,
     snapshotAtom: optimistic.snapshotAtom,
     pendingThreadIdsAtom: optimistic.pendingThreadIdsAtom,
-    settle: optimistic.wrap(commands.settle, (thread, _input, now, accepted) =>
-      !accepted &&
-      (thread.pendingRuntimeRequest !== null ||
-        ["preparing", "queued", "starting", "running", "waiting"].includes(thread.status))
-        ? thread
-        : {
-            ...thread,
-            pendingRuntimeRequest: null,
-            settledOverride: "settled",
-            settledAt: thread.settledOverride === "settled" ? (thread.settledAt ?? now) : now,
-            unsettledAt: null,
-            activeOrderKey: null,
-            pinnedAt: null,
-            pinOrderKey: null,
-            snoozedAt: null,
-            snoozedUntil: null,
-          },
+    settle: optimistic.wrap(
+      commands.settle,
+      (thread, _input, now, accepted) =>
+        !accepted &&
+        (thread.pendingRuntimeRequest !== null ||
+          ["preparing", "queued", "starting", "running", "waiting"].includes(thread.status))
+          ? thread
+          : {
+              ...thread,
+              pendingRuntimeRequest: null,
+              settledOverride: "settled",
+              settledAt: thread.settledOverride === "settled" ? (thread.settledAt ?? now) : now,
+              unsettledAt: null,
+              activeOrderKey: null,
+              pinnedAt: null,
+              pinOrderKey: null,
+              snoozedAt: null,
+              snoozedUntil: null,
+            },
+      true,
     ),
-    unsettle: optimistic.wrap(commands.unsettle, (thread, input, now) => ({
-      ...thread,
-      settledOverride: input.reason === "user" ? "active" : null,
-      settledAt: null,
-      unsettledAt:
-        thread.settledOverride === "active"
-          ? (thread.unsettledAt ?? null)
-          : input.restoreUnsettledAt === undefined
-            ? now
-            : input.restoreUnsettledAt === null
-              ? null
-              : DateTime.makeUnsafe(input.restoreUnsettledAt),
-    })),
-    snooze: optimistic.wrap(commands.snooze, (thread, input, now, accepted) =>
-      (!accepted &&
-        ((thread.pendingRuntimeRequest !== null &&
-          thread.pendingRuntimeRequest.kind !== "user_input") ||
-          ["preparing", "queued", "starting"].includes(thread.status))) ||
-      !(Date.parse(input.snoozedUntil) > DateTime.toEpochMillis(now))
-        ? thread
-        : {
-            ...thread,
-            snoozedUntil: DateTime.makeUnsafe(input.snoozedUntil),
-            snoozedAt: now,
-          },
+    unsettle: optimistic.wrap(
+      commands.unsettle,
+      (thread, input, now) => ({
+        ...thread,
+        settledOverride: input.reason === "user" ? "active" : null,
+        settledAt: null,
+        unsettledAt:
+          thread.settledOverride === "active"
+            ? (thread.unsettledAt ?? null)
+            : input.restoreUnsettledAt === undefined
+              ? now
+              : input.restoreUnsettledAt === null
+                ? null
+                : DateTime.makeUnsafe(input.restoreUnsettledAt),
+      }),
+      true,
     ),
-    unsnooze: optimistic.wrap(commands.unsnooze, (thread) => ({
-      ...thread,
-      snoozedUntil: null,
-      snoozedAt: null,
-    })),
+    snooze: optimistic.wrap(
+      commands.snooze,
+      (thread, input, now, accepted) =>
+        (!accepted &&
+          ((thread.pendingRuntimeRequest !== null &&
+            thread.pendingRuntimeRequest.kind !== "user_input") ||
+            ["preparing", "queued", "starting"].includes(thread.status))) ||
+        !(Date.parse(input.snoozedUntil) > DateTime.toEpochMillis(now))
+          ? thread
+          : {
+              ...thread,
+              snoozedUntil: DateTime.makeUnsafe(input.snoozedUntil),
+              snoozedAt: now,
+            },
+      true,
+    ),
+    unsnooze: optimistic.wrap(
+      commands.unsnooze,
+      (thread) => ({
+        ...thread,
+        snoozedUntil: null,
+        snoozedAt: null,
+      }),
+      true,
+    ),
     setAutoSettle: optimistic.wrap(commands.setAutoSettle, (thread, input, now) => ({
       ...thread,
       autoSettleDisabledAt: input.enabled ? null : (thread.autoSettleDisabledAt ?? now),
     })),
-    pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
-      ...thread,
-      pinnedAt: thread.pinnedAt ?? now,
-      pinOrderKey: thread.pinnedAt == null ? (input.orderKey ?? null) : thread.pinOrderKey,
-      ...(thread.settledOverride === "settled"
-        ? {
-            settledOverride: "active" as const,
-            settledAt: null,
-            unsettledAt: now,
-          }
-        : {}),
-      snoozedUntil: null,
-      snoozedAt: null,
-    })),
-    unpin: optimistic.wrap(commands.unpin, (thread) => ({
-      ...thread,
-      pinnedAt: null,
-      pinOrderKey: null,
-    })),
-    reorderPin: optimistic.wrap(commands.reorderPin, (thread, input) => ({
-      ...thread,
-      pinOrderKey: input.orderKey,
-    })),
-    reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
-      ...thread,
-      activeOrderKey: input.orderKey,
-    })),
+    pin: optimistic.wrap(
+      commands.pin,
+      (thread, input, now) => ({
+        ...thread,
+        pinnedAt: thread.pinnedAt ?? now,
+        pinOrderKey: thread.pinnedAt == null ? (input.orderKey ?? null) : thread.pinOrderKey,
+        ...(thread.settledOverride === "settled"
+          ? {
+              settledOverride: "active" as const,
+              settledAt: null,
+              unsettledAt: now,
+            }
+          : {}),
+        snoozedUntil: null,
+        snoozedAt: null,
+      }),
+      true,
+    ),
+    unpin: optimistic.wrap(
+      commands.unpin,
+      (thread) => ({
+        ...thread,
+        pinnedAt: null,
+        pinOrderKey: null,
+      }),
+      true,
+    ),
+    reorderPin: optimistic.wrap(
+      commands.reorderPin,
+      (thread, input) => ({
+        ...thread,
+        pinOrderKey: input.orderKey,
+      }),
+      true,
+    ),
+    reorderActive: optimistic.wrap(
+      commands.reorderActive,
+      (thread, input) => ({
+        ...thread,
+        activeOrderKey: input.orderKey,
+      }),
+      true,
+    ),
     // Shown at once, so a composer that releases its accepted pick keeps showing it.
     setModelSelection: optimistic.wrap(commands.setModelSelection, (thread, input) => ({
       ...thread,
       modelSelection: input.modelSelection,
     })),
+  };
+  return {
+    ...result,
+    settle: { ...result.settle, offlinePermissionAtom: canOrganizeAtom },
+    unsettle: { ...result.unsettle, offlinePermissionAtom: canOrganizeAtom },
+    snooze: { ...result.snooze, offlinePermissionAtom: canOrganizeAtom },
+    unsnooze: { ...result.unsnooze, offlinePermissionAtom: canOrganizeAtom },
+    reorderPin: { ...result.reorderPin, offlinePermissionAtom: canOrganizeAtom },
+    reorderActive: { ...result.reorderActive, offlinePermissionAtom: canOrganizeAtom },
+    pin: { ...result.pin, offlinePermissionAtom: canOrganizeAtom },
+    unpin: { ...result.unpin, offlinePermissionAtom: canOrganizeAtom },
   };
 }

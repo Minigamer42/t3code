@@ -1,3 +1,4 @@
+import { toastManager } from "../components/ui/toast";
 import { createChildThreadApprovalsAtom } from "@t3tools/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
@@ -32,6 +33,14 @@ export const olderSettledThreads = createOlderSettledThreadAtoms(
 export const threadEnvironment = createThreadEnvironmentAtoms(
   connectionAtomRuntime,
   threadFamilies.snapshotAtom,
+  {
+    storage: {
+      read: (id) => localStorage.getItem(`t3:thread-actions:${id}`),
+      write: (id, value) => localStorage.setItem(`t3:thread-actions:${id}`, value),
+    },
+    onFailure: () =>
+      toastManager.add({ type: "error", title: "Could not sync queued thread action" }),
+  },
 );
 const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(

@@ -41,7 +41,10 @@ import { threadCanArchive } from "./threadArchive";
 import { resolveThreadTitleRename } from "../threads/thread-title-rename";
 
 function environmentConfigLoaded(environmentId: EnvironmentThreadShell["environmentId"]) {
-  return appAtomRegistry.get(environmentServerConfigsAtom).has(environmentId);
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).has(environmentId) ||
+    !appAtomRegistry.get(threadEnvironment.readyAtom(environmentId))
+  );
 }
 
 function environmentSupportsAutoSettleOptOut(
@@ -83,7 +86,13 @@ function actionFailureTitle(action: ThreadListAction): string {
   return "Could not delete thread";
 }
 
-function checkThreadOperationPermission(thread: EnvironmentThreadShell, title: string): boolean {
+function checkThreadOperationPermission(
+  thread: EnvironmentThreadShell,
+  title: string,
+  organize = false,
+): boolean {
+  if (organize && appAtomRegistry.get(threadEnvironment.canOrganizeAtom(thread.environmentId)))
+    return true;
   if (readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)) return true;
   Dialog.alert(title, "This connection cannot change threads.");
   return false;
@@ -118,7 +127,14 @@ function useThreadActionExecutor(
     onStarted?: () => void,
     restoreUnsettledAt?: string | null,
   ) => {
-    if (!checkThreadOperationPermission(thread, actionFailureTitle(action))) return false;
+    if (
+      !checkThreadOperationPermission(
+        thread,
+        actionFailureTitle(action),
+        action === "settle" || action === "unsettle",
+      )
+    )
+      return false;
     const key = scopedThreadKey(thread.environmentId, thread.id);
     // Drop only a repeat of the latest pending action; Settle → Un-settle → Settle must all send.
     if (latestPendingActions.current.get(key)?.action === action) {
@@ -286,7 +302,7 @@ export function useThreadListActions(): {
                 case "snooze": {
                   const failureTitle =
                     action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
-                  if (!checkThreadOperationPermission(thread, failureTitle)) return false;
+                  if (!checkThreadOperationPermission(thread, failureTitle, true)) return false;
                   const result = await snoozeMutation({
                     environmentId: thread.environmentId,
                     input: { threadId: thread.id, snoozedUntil: step.snoozedUntil },
@@ -329,7 +345,7 @@ export function useThreadListActions(): {
     return succeeded;
   };
   const snoozeThread = async (thread: EnvironmentThreadShell, snoozedUntil: string) => {
-    if (!checkThreadOperationPermission(thread, "Could not snooze thread")) return false;
+    if (!checkThreadOperationPermission(thread, "Could not snooze thread", true)) return false;
     const key = scopedThreadKey(thread.environmentId, thread.id);
     if (snoozeInFlightThreadKeys.current.has(key)) {
       return false;
@@ -385,7 +401,7 @@ export function useThreadListActions(): {
     return succeeded;
   };
   const unsnoozeThread = async (thread: EnvironmentThreadShell) => {
-    if (!checkThreadOperationPermission(thread, "Could not wake thread")) return false;
+    if (!checkThreadOperationPermission(thread, "Could not wake thread", true)) return false;
     const key = scopedThreadKey(thread.environmentId, thread.id);
     if (snoozeInFlightThreadKeys.current.has(key)) {
       return false;
@@ -431,7 +447,7 @@ export function useThreadListActions(): {
     restoreUnsettledAt?: string | null,
   ) => (await executeAction("unsettle", thread, undefined, restoreUnsettledAt)) === true;
   const pinThread = async (thread: EnvironmentThreadShell, restoreOrderKey?: string) => {
-    if (!checkThreadOperationPermission(thread, "Could not pin thread")) return false;
+    if (!checkThreadOperationPermission(thread, "Could not pin thread", true)) return false;
     if (!environmentConfigLoaded(thread.environmentId)) {
       Dialog.alert(
         "Could not pin thread",
@@ -473,7 +489,7 @@ export function useThreadListActions(): {
     return true;
   };
   const unpinThread = async (thread: EnvironmentThreadShell) => {
-    if (!checkThreadOperationPermission(thread, "Could not unpin thread")) return false;
+    if (!checkThreadOperationPermission(thread, "Could not unpin thread", true)) return false;
     if (!environmentConfigLoaded(thread.environmentId)) {
       Dialog.alert(
         "Could not unpin thread",

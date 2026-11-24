@@ -1,3 +1,4 @@
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import type {
   AtomCommand,
   AtomCommandOptions,
@@ -22,7 +23,13 @@ export function useOrchestrationCommand<W extends { readonly environmentId: Envi
 ): (value: W) => Promise<AtomCommandResult<A, E | EnvironmentAuthorizationError>> {
   const run = useAtomCommand(command, options);
   return async (value: W): Promise<AtomCommandResult<A, E | EnvironmentAuthorizationError>> => {
-    if (!readEnvironmentScope(value.environmentId, AuthOrchestrationOperateScope)) {
+    if (
+      !readEnvironmentScope(value.environmentId, AuthOrchestrationOperateScope) &&
+      !(
+        command.offlinePermissionAtom !== undefined &&
+        appAtomRegistry.get(command.offlinePermissionAtom(value.environmentId))
+      )
+    ) {
       return AsyncResult.failure(
         Cause.fail(
           new EnvironmentAuthorizationError({

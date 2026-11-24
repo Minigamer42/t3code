@@ -26,44 +26,51 @@ const baseState: ThreadActionMenuState = {
 };
 
 describe("buildThreadActionMenuItems", () => {
-  it.each([false, true])(
-    "disables both lifecycle directions without permission (reversed: %s)",
-    (reversed) => {
-      const items = buildThreadActionMenuItems({
-        ...baseState,
-        canOperate: false,
-        isPinned: reversed,
-        isSettled: reversed,
-        isSnoozed: reversed,
-      });
-      const expected = reversed
-        ? [
-            "unpin",
-            "unsettle",
-            "unsnooze",
-            "rename",
-            "regenerate-title",
-            "auto-settle",
-            "archive",
-            "delete",
-          ]
-        : [
-            "pin",
-            "settle",
-            "snooze",
-            "rename",
-            "regenerate-title",
-            "auto-settle",
-            "archive",
-            "delete",
-          ];
-      expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(expected);
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])("gates lifecycle actions (reversed: %s, queued locally: %s)", (reversed, canOrganize) => {
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      canOperate: false,
+      canOrganize,
+      isPinned: reversed,
+      isSettled: reversed,
+      isSnoozed: reversed,
+    });
+    const expected = reversed
+      ? [
+          "unpin",
+          "unsettle",
+          "unsnooze",
+          "rename",
+          "regenerate-title",
+          "auto-settle",
+          "archive",
+          "delete",
+        ]
+      : [
+          "pin",
+          "settle",
+          "snooze",
+          "rename",
+          "regenerate-title",
+          "auto-settle",
+          "archive",
+          "delete",
+        ];
+    expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(
+      canOrganize ? expected.slice(3) : expected,
+    );
+    if (!reversed)
       expect(
-        items.find((item) => item.id === "snooze")?.children?.every((child) => child.disabled) ??
-          true,
-      ).toBe(true);
-    },
-  );
+        items
+          .find((item) => item.id === "snooze")
+          ?.children?.every((child) => Boolean(child.disabled)),
+      ).toBe(!canOrganize);
+  });
 
   it("disables archive and turning into a project while the thread is running", () => {
     const items = buildThreadActionMenuItems({

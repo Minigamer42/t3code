@@ -69,6 +69,7 @@ export function buildDraftActionMenuItems(options: {
 
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
+  readonly canOrganize?: boolean;
   readonly canFind?: boolean;
   readonly branch: string | null;
   readonly projectFilter: {
@@ -95,6 +96,13 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+}
+
+export function isThreadOrganizationAction(action: string): boolean {
+  return (
+    ["pin", "unpin", "settle", "unsettle", "snooze", "unsnooze"].includes(action) ||
+    action.startsWith("snooze:")
+  );
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -256,7 +264,8 @@ export function buildThreadActionMenuItems(
   return state.canOperate
     ? items
     : items.map((item) =>
-        threadActionRequiresOperate(item.id)
+        threadActionRequiresOperate(item.id) &&
+        !(state.canOrganize && isThreadOrganizationAction(item.id))
           ? {
               ...item,
               disabled: true,

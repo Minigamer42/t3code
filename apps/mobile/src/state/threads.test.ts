@@ -16,6 +16,9 @@ import { startOpeningEnvironmentThread } from "./threads";
 
 const loads = vi.hoisted(() => [] as string[]);
 
+vi.mock("expo-file-system", () => ({ File: vi.fn(), Paths: { document: "test" } }));
+vi.mock("../components/ui/Dialog", () => ({ alert: vi.fn() }));
+
 vi.mock("../connection/runtime", () => ({ connectionAtomRuntime: {} }));
 vi.mock("../connection/catalog", () => ({ environmentCatalog: {} }));
 vi.mock("./shell", () => ({ environmentShell: {} }));

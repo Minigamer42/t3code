@@ -93,6 +93,8 @@ const SNAPSHOT: OrchestrationV2ShellSnapshot = {
 };
 
 const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (options?: {
+  readonly offlineOptions?: Parameters<typeof createThreadEnvironmentAtoms>[2];
+  readonly initiallyOffline?: boolean;
   readonly loadEarlier?: () => Effect.Effect<ThreadHistoryController.ThreadHistoryLoadEarlierResult>;
   readonly reconcilePendingWork?: (threadId: ThreadId) => Effect.Effect<void>;
 }) {
@@ -105,7 +107,7 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
   const connection = yield* SubscriptionRef.make<SupervisorConnectionState>({
     ...AVAILABLE_CONNECTION_STATE,
     desired: true,
-    phase: "connected",
+    phase: options?.initiallyOffline ? "backoff" : "connected",
   });
   const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
     target: new BearerConnectionTarget({
@@ -158,11 +160,21 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
   const snapshotAtom = Atom.family((_environmentId: EnvironmentId) =>
     Atom.make<OrchestrationV2ShellSnapshot | null>(SNAPSHOT),
   );
-  const commands = createThreadEnvironmentAtoms(runtime, snapshotAtom);
+  const commands = createThreadEnvironmentAtoms(runtime, snapshotAtom, options?.offlineOptions);
   const registry = AtomRegistry.make();
   yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
   const visibleAtom = commands.snapshotAtom(ENVIRONMENT_ID);
   registry.mount(visibleAtom);
+  yield* Effect.callback<void>((resume) => {
+    const unsubscribe = registry.subscribe(
+      commands.readyAtom(ENVIRONMENT_ID),
+      (value) => {
+        if (value === !options?.initiallyOffline) resume(Effect.void);
+      },
+      { immediate: true },
+    );
+    return Effect.sync(unsubscribe);
+  });
   return {
     registry,
     commands,
@@ -383,6 +395,118 @@ describe("remote thread lifecycle commands", () => {
     ["reorderPin", { orderKey: "b" }, { pinOrderKey: "b" }],
     ["reorderActive", { orderKey: "b" }, { activeOrderKey: "b" }],
   ] as const;
+
+  it.effect.each(actions.filter(([action]) => action !== "setAutoSettle"))(
+    "queues %s offline and syncs after reconnecting",
+    ([action, input, expected]) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness({ initiallyOffline: true });
+        const result = yield* Effect.promise(() =>
+          h.commands[action].run(h.registry, {
+            environmentId: ENVIRONMENT_ID,
+            input: {
+              threadId: THREAD_ID,
+              reason: "user",
+              enabled: false,
+              orderKey: "a",
+              snoozedUntil: "2099-01-01T00:00:00.000Z",
+              ...input,
+            },
+          }),
+        );
+        expect(result._tag).toBe("Success");
+        expect(h.registry.get(h.visibleAtom)?.threads[0]).toMatchObject(expected);
+        expect(yield* Queue.size(h.requests)).toBe(0);
+        yield* SubscriptionRef.update(h.connection, (state) => ({
+          ...state,
+          phase: "connected" as const,
+        }));
+        const request = yield* Queue.take(h.requests);
+        expect(request.command).toMatchObject({ threadId: THREAD_ID });
+        h.registry.set(h.snapshotAtom(ENVIRONMENT_ID), { ...SNAPSHOT, snapshotSequence: 2 });
+        yield* Deferred.succeed(request.reply, { sequence: 2 });
+      }),
+  );
+
+  it.effect("reverts a rejected queued action after reconnecting", () =>
+    Effect.gen(function* () {
+      const failureAtom = Atom.make(false);
+      const h = yield* makeHarness({
+        initiallyOffline: true,
+        offlineOptions: {
+          onFailure: () => {
+            h.registry.set(failureAtom, true);
+          },
+        },
+      });
+      yield* Effect.promise(() =>
+        h.commands.settle.run(h.registry, {
+          environmentId: ENVIRONMENT_ID,
+          input: { threadId: THREAD_ID },
+        }),
+      );
+      expect(h.registry.get(h.visibleAtom)?.threads[0]?.settledOverride).toBe("settled");
+      yield* SubscriptionRef.update(h.connection, (state) => ({
+        ...state,
+        phase: "connected" as const,
+      }));
+      const request = yield* Queue.take(h.requests);
+      yield* Deferred.fail(request.reply, new Error("Permission revoked"));
+      yield* Effect.callback<void>((resume) => {
+        const unsubscribe = h.registry.subscribe(
+          failureAtom,
+          (failed) => {
+            if (failed) resume(Effect.void);
+          },
+          { immediate: true },
+        );
+        return Effect.sync(unsubscribe);
+      });
+      expect(h.registry.get(h.visibleAtom)).toBe(SNAPSHOT);
+    }),
+  );
+
+  it.effect("persists snooze and Undo in order across a reload", () =>
+    Effect.gen(function* () {
+      let stored: string | null = null;
+      const offlineOptions = {
+        storage: {
+          read: () => stored,
+          write: (_id: EnvironmentId, value: string) => {
+            stored = value;
+          },
+        },
+      };
+      const h = yield* makeHarness({ initiallyOffline: true, offlineOptions });
+      yield* Effect.promise(() =>
+        h.commands.snooze.run(h.registry, {
+          environmentId: ENVIRONMENT_ID,
+          input: { threadId: THREAD_ID, snoozedUntil: "2099-01-01T00:00:00.000Z" },
+        }),
+      );
+      yield* Effect.promise(() =>
+        h.commands.unsnooze.run(h.registry, {
+          environmentId: ENVIRONMENT_ID,
+          input: { threadId: THREAD_ID, reason: "user" },
+        }),
+      );
+      expect(h.registry.get(h.visibleAtom)?.threads[0]?.snoozedUntil).toBeNull();
+      const queued = JSON.parse(stored!);
+      expect(queued).toHaveLength(2);
+      h.registry.dispose();
+      const reloaded = yield* makeHarness({ initiallyOffline: true, offlineOptions });
+      yield* SubscriptionRef.update(reloaded.connection, (state) => ({
+        ...state,
+        phase: "connected" as const,
+      }));
+      const first = yield* Queue.take(reloaded.requests);
+      expect(first.command.commandId).toBe(queued[0].input.commandId);
+      yield* Deferred.succeed(first.reply, { sequence: 2 });
+      const second = yield* Queue.take(reloaded.requests);
+      expect(second.command.commandId).toBe(queued[1].input.commandId);
+      yield* Deferred.succeed(second.reply, { sequence: 3 });
+    }),
+  );
 
   it.effect.each(actions)(
     "shows %s before a delayed remote reply and rolls back a rejection",

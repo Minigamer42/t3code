@@ -7,7 +7,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/reactivity";
+import { Atom, AsyncResult } from "effect/reactivity";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -111,21 +111,24 @@ vi.mock("../state/server", async (importOriginal) => {
   };
 });
 vi.mock("../state/threads", () => ({
-  threadEnvironment: Object.fromEntries(
-    [
-      "archive",
-      "unarchive",
-      "delete",
-      "settle",
-      "unsettle",
-      "pin",
-      "unpin",
-      "reorderPin",
-      "snooze",
-      "unsnooze",
-      "stopSession",
-    ].map((action) => [action, action]),
-  ),
+  threadEnvironment: {
+    canOrganizeAtom: () => Atom.make(false),
+    ...Object.fromEntries(
+      [
+        "archive",
+        "unarchive",
+        "delete",
+        "settle",
+        "unsettle",
+        "pin",
+        "unpin",
+        "reorderPin",
+        "snooze",
+        "unsnooze",
+        "stopSession",
+      ].map((action) => [action, action]),
+    ),
+  },
 }));
 vi.mock("../state/vcs", () => ({
   vcsEnvironment: { removeWorktree: "removeWorktree", refreshStatus: "refreshStatus" },
