@@ -382,9 +382,11 @@ export const runLogicalCommitWorkflow = Effect.fn("LogicalCommitWorkflow.run")(
       if (paths)
         yield* execute(
           [
-            "restore",
-            "--staged",
-            `--source=${tip}`,
+            // Reset accepts staged deletions already absent from both the index and source tree.
+            "reset",
+            "--quiet",
+            "--no-refresh",
+            tip,
             "--pathspec-from-file=-",
             "--pathspec-file-nul",
           ],

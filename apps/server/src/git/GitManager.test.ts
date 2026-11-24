@@ -5471,6 +5471,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect.each([
     "working_tree",
+    "staged-deletion",
+    "unstaged-deletion",
     "branch",
     "detached",
     "concurrent-index",
@@ -5490,7 +5492,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         repoDir,
         mode === "detached" ? ["checkout", "--detach"] : ["checkout", "-b", "feature/test"],
       );
-      NodeFS.writeFileSync(NodePath.join(repoDir, "alpha.txt"), "alpha\nupdated alpha\n");
+      const deletesAlpha = mode === "staged-deletion" || mode === "unstaged-deletion";
+      if (deletesAlpha) {
+        NodeFS.unlinkSync(NodePath.join(repoDir, "alpha.txt"));
+        if (mode === "staged-deletion") yield* runGit(repoDir, ["add", "alpha.txt"]);
+      } else {
+        NodeFS.writeFileSync(NodePath.join(repoDir, "alpha.txt"), "alpha\nupdated alpha\n");
+      }
       NodeFS.writeFileSync(NodePath.join(repoDir, "beta.txt"), "beta\nupdated beta\n");
       if (mode === "branch") {
         yield* runGit(repoDir, ["add", "alpha.txt", "beta.txt"]);
@@ -5501,6 +5509,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       }
       const originalHead = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
       const originalIndex = (yield* runGit(repoDir, ["diff", "--cached", "--binary"])).stdout;
+      const unrelatedIndex = (yield* runGit(repoDir, [
+        "diff",
+        "--cached",
+        "--binary",
+        "--",
+        "README.md",
+      ])).stdout;
       if (mode === "commit-failure") {
         const hook = NodePath.join(repoDir, ".git", "hooks", "pre-commit");
         NodeFS.writeFileSync(
@@ -5517,9 +5532,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               plans++;
               expect(context.cwd).not.toBe(repoDir);
               expect(NodeFS.existsSync(NodePath.join(context.cwd, ".git"))).toBe(false);
-              expect(NodeFS.readFileSync(NodePath.join(repoDir, "alpha.txt"), "utf8")).toBe(
-                "alpha\nupdated alpha\n",
-              );
+              if (deletesAlpha) {
+                expect(NodeFS.existsSync(NodePath.join(repoDir, "alpha.txt"))).toBe(false);
+              } else {
+                expect(NodeFS.readFileSync(NodePath.join(repoDir, "alpha.txt"), "utf8")).toBe(
+                  "alpha\nupdated alpha\n",
+                );
+              }
               if (mode === "concurrent-worktree")
                 NodeFS.appendFileSync(NodePath.join(repoDir, "alpha.txt"), "concurrent edit\n");
               if (mode === "concurrent-index")
@@ -5578,14 +5597,19 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           (yield* runGit(repoDir, ["rev-list", "--count", `${base}..HEAD`])).stdout.trim(),
         ).toBe("2");
         expect((yield* runGit(repoDir, ["diff", "--cached", "--binary"])).stdout).toBe(
-          originalIndex,
+          unrelatedIndex,
         );
         const backup = result.summary.match(/Backup: (\S+)/)?.[1];
         expect(backup).toBeDefined();
         expect((yield* runGit(repoDir, ["rev-parse", backup!])).stdout.trim()).toBe(originalHead);
-        expect(NodeFS.readFileSync(NodePath.join(repoDir, "alpha.txt"), "utf8")).toBe(
-          "alpha\nupdated alpha\n",
-        );
+        if (deletesAlpha) {
+          expect(NodeFS.existsSync(NodePath.join(repoDir, "alpha.txt"))).toBe(false);
+          expect((yield* runGit(repoDir, ["ls-tree", "HEAD", "--", "alpha.txt"])).stdout).toBe("");
+        } else {
+          expect(NodeFS.readFileSync(NodePath.join(repoDir, "alpha.txt"), "utf8")).toBe(
+            "alpha\nupdated alpha\n",
+          );
+        }
         expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe(
           mode === "detached" ? "" : "feature/test",
         );
