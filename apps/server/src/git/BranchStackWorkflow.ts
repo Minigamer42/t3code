@@ -1622,5 +1622,5 @@ export const make = Effect.gen(function* () {
         ),
       ),
   );
-  return { inspect, manage, update, assertIdle, pushCurrent, canAutoTrack };
+  return { inspect, manage, update, assertIdle, pushCurrent, canAutoTrack, refreshParentHead };
 });

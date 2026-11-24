@@ -2874,11 +2874,22 @@ export const make = Effect.gen(function* () {
     });
     const fail = (detail: string) =>
       new GitManagerError({ cwd, operation: "rewriteLayer", detail });
+    const parentRef =
+      layer.parent === stack.base
+        ? yield* resolveBaseRangeRef(cwd, layer.parent)
+        : (yield* gitCore.resolveBranchName(cwd, `refs/heads/${layer.parent}`))
+          ? `refs/heads/${layer.parent}`
+          : yield* resolveBaseRangeRef(cwd, layer.parent);
     let boundary = layer.parentHead;
-    if (!boundary) {
-      const parentRef = (yield* gitCore.resolveBranchName(cwd, `refs/heads/${layer.parent}`))
-        ? `refs/heads/${layer.parent}`
-        : yield* resolveBaseRangeRef(cwd, layer.parent);
+    if (boundary) {
+      boundary = yield* branchStacks.refreshParentHead(
+        cwd,
+        layer.branch,
+        boundary,
+        yield* output(["rev-parse", "--verify", `${parentRef}^{commit}`]),
+        yield* output(["rev-parse", "HEAD"]),
+      );
+    } else {
       if (layer.parent !== stack.base) {
         const ancestor = yield* gitCore.execute({
           cwd,
