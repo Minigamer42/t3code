@@ -61,7 +61,9 @@ export function ThreadWorkspaceControl({
       <Select
         value={thread.projectId}
         disabled={disabled}
-        onValueChange={(value) => {
+        onValueChange={(value, details) => {
+          // Option reconciliation must never reassign a conversation.
+          if (details.reason !== "item-press") return;
           const target = projects.find((candidate) => candidate.id === value);
           if (!target || target.id === thread.projectId) return;
           setPending(true);
