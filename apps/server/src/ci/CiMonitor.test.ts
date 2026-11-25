@@ -43,6 +43,7 @@ const fixture = Effect.gen(function* () {
   let match = 0;
   let posts = 0;
   let reads = 0;
+  let readGate: { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined;
   const commands: string[][] = [];
   let ambiguousPost = false;
   let localPushes = "";
@@ -51,7 +52,15 @@ const fixture = Effect.gen(function* () {
       Effect.sync(() => {
         reads++;
         return { current, pipeline };
-      }),
+      }).pipe(
+        Effect.tap(() =>
+          readGate
+            ? Deferred.succeed(readGate.started, undefined).pipe(
+                Effect.andThen(Deferred.await(readGate.release)),
+              )
+            : Effect.void,
+        ),
+      ),
     trace: () => Effect.succeed("test failed"),
     run: () =>
       Effect.gen(function* () {
@@ -161,6 +170,9 @@ const fixture = Effect.gen(function* () {
     },
     posts: () => posts,
     reads: () => reads,
+    setReadGate: (gate: NonNullable<typeof readGate>) => {
+      readGate = gate;
+    },
     commands,
     setLocalPushes: (value: string) => {
       localPushes = value;
@@ -468,25 +480,101 @@ it.layer(NodeServices.layer)("background CI", (it) => {
         false,
       );
       const afterSuccess = yield* f.make;
-      expect((yield* f.snapshots(afterSuccess)).some((item) => item.sha === nextInput.sha)).toBe(
-        false,
-      );
+      expect(yield* f.snapshots(afterSuccess)).toEqual([]);
     }).pipe(Effect.scoped),
   );
 
-  it.effect("supersedes older pushes and refuses recovery for a remotely changed head", () =>
+  it.effect.each(["waiting", "failed", "cancelled", "skipped"] as const)(
+    "supersedes older %s pushes and refuses recovery for a remotely changed head",
+    (state) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const service = yield* f.make;
+        yield* service.register(f.input);
+        if (state !== "waiting") {
+          f.setMatch(1);
+          f.setPipeline({
+            ...f.pipeline()!,
+            status: state === "cancelled" ? "canceled" : state,
+          });
+          yield* service.sweep;
+          expect((yield* f.snapshots(service))[0]?.state).toBe(state);
+        }
+        yield* service.register({ ...f.input, sha: "b".repeat(40) });
+        expect((yield* f.snapshots(service)).map((item) => item.sha)).toEqual(["b".repeat(40)]);
+        const stored = JSON.parse(
+          yield* f.fs.readFileString(`${f.cwd}/userdata/ci-activities.json`),
+        ) as Array<{ activity: CiActivity }>;
+        expect(stored.find((item) => item.activity.sha === f.input.sha)?.activity.state).toBe(
+          "superseded",
+        );
+        f.setCurrent(false);
+        yield* service.sweep;
+        expect(f.posts()).toBe(0);
+        expect(yield* f.snapshots(service)).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("supersedes restored failures only for the same repository and branch", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
+      f.setMatch(1);
+      const first = yield* f.make;
+      yield* first.register(f.input);
+      yield* first.sweep;
+      const filename = `${f.cwd}/userdata/ci-activities.json`;
+      const older = JSON.parse(yield* f.fs.readFileString(filename)) as Array<{
+        activity: CiActivity;
+      }>;
+      yield* first.register({ ...f.input, sha: "b".repeat(40) });
+      yield* first.sweep;
+      yield* first.register({ ...f.input, branch: "other" });
+      yield* first.register({ ...f.input, repository: "acme/other" });
+      yield* first.register({ ...f.input, host: "other.example" });
+      const current = JSON.parse(yield* f.fs.readFileString(filename)) as Array<{
+        activity: CiActivity;
+      }>;
+      // Restore the pre-supersession record to model history written by older servers.
+      yield* f.fs.writeFileString(
+        filename,
+        JSON.stringify([
+          ...current.filter((record) => record.activity.id !== older[0]!.activity.id),
+          ...older,
+        ]),
+      );
+      const restarted = yield* f.make;
+      const activities = yield* f.snapshots(restarted);
+      expect(activities.find((item) => item.id === older[0]!.activity.id)).toBeUndefined();
+      expect(activities).toHaveLength(4);
+      yield* restarted.sweep;
+      expect(f.posts()).toBe(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("does not notify an old failure when a new push arrives during its CI read", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.fs.writeFileString(
+        `${f.cwd}/.t3code/ci.json`,
+        '{"onUnresolvedFailure":{"action":"resume-originating-thread","instructions":"Diagnose"}}',
+      );
+      const gate = { started: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() };
+      f.setReadGate(gate);
+      const notified: string[] = [];
       const service = yield* f.make;
       yield* service.register(f.input);
-      yield* service.register({ ...f.input, sha: "b".repeat(40) });
-      expect((yield* f.snapshots(service)).find((item) => item.sha === f.input.sha)?.state).toBe(
-        "superseded",
+      yield* service.start((activity) =>
+        Effect.sync(() => {
+          notified.push(activity.sha);
+          return true;
+        }),
       );
-      f.setCurrent(false);
+      yield* Deferred.await(gate.started);
+      yield* service.register({ ...f.input, sha: "b".repeat(40), threadId: null });
+      yield* Deferred.succeed(gate.release, undefined);
       yield* service.sweep;
-      expect(f.posts()).toBe(0);
-      expect((yield* f.snapshots(service)).every((item) => item.state === "superseded")).toBe(true);
+      expect(notified).toEqual([]);
+      expect((yield* f.snapshots(service)).map((item) => item.sha)).toEqual(["b".repeat(40)]);
     }).pipe(Effect.scoped),
   );
 

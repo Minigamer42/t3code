@@ -56,9 +56,34 @@ const encodeMatchContext = Schema.encodeEffect(
 );
 
 type Record = typeof Record.Type;
+function supersedeOlderRecords(items: readonly Record[]) {
+  const latest = new Map<string, number>();
+  return items.map((record): Record => {
+    const { host, repository, branch, startedAt } = record.activity;
+    const key = JSON.stringify([host, repository, branch]);
+    const supersededAt = latest.get(key);
+    if (supersededAt === undefined) {
+      latest.set(key, startedAt);
+      return record;
+    }
+    if (record.activity.state === "superseded") return record;
+    return {
+      ...record,
+      activity: {
+        ...record.activity,
+        state: "superseded",
+        label: "A newer push superseded this revision.",
+        updatedAt: Math.max(record.activity.updatedAt, supersededAt),
+      },
+    };
+  });
+}
 function visibleRecords(items: readonly Record[]) {
   return items
-    .filter((item) => !item.dismissed && item.activity.state !== "passed")
+    .filter(
+      (item) =>
+        !item.dismissed && item.activity.state !== "passed" && item.activity.state !== "superseded",
+    )
     .filter((item, index) => !isCiActivityFinished(item.activity) || index < 10);
 }
 const samePipeline = (a: CiActivity["pipeline"], b: CiActivity["pipeline"]) =>
@@ -136,9 +161,11 @@ export const make = Effect.gen(function* () {
   const git = yield* Git.GitVcsDriver;
   const filename = path.join(stateDir, "ci-activities.json");
   const records = yield* SubscriptionRef.make<readonly Record[]>(
-    (yield* fs.exists(filename))
-      ? yield* fs.readFileString(filename).pipe(Effect.flatMap(decodeRecords))
-      : [],
+    supersedeOlderRecords(
+      (yield* fs.exists(filename))
+        ? yield* fs.readFileString(filename).pipe(Effect.flatMap(decodeRecords))
+        : [],
+    ),
   );
   const lock = yield* Semaphore.make(1);
   const sweeper = yield* Semaphore.make(1);
@@ -160,10 +187,12 @@ export const make = Effect.gen(function* () {
         const old = all.find((item) => item.activity.id === record.activity.id);
         if (old?.dismissed && !record.dismissed) return;
         if (old?.activity.state === "superseded" && record.activity.state !== "superseded") return;
-        const next = [
-          record,
-          ...all.filter((item) => item.activity.id !== record.activity.id),
-        ].sort((a, b) => b.activity.startedAt - a.activity.startedAt);
+        const next = supersedeOlderRecords(
+          (old
+            ? all.map((item) => (item.activity.id === record.activity.id ? record : item))
+            : [record, ...all]
+          ).sort((a, b) => b.activity.startedAt - a.activity.startedAt),
+        );
         const retained = next.filter(
           (item, index) => !isCiActivityFinished(item.activity) || index < 200,
         );
@@ -384,6 +413,11 @@ export const make = Effect.gen(function* () {
                       }),
                     ),
                   );
+                const latest = (yield* SubscriptionRef.get(records)).find(
+                  (item) => item.activity.id === record.activity.id,
+                );
+                if (!latest || latest.dismissed || latest.activity.state === "superseded") return;
+                record = latest;
                 if (
                   record.activity.state !== "failed" ||
                   record.notified ||
@@ -439,17 +473,6 @@ export const make = Effect.gen(function* () {
         .join(":");
       const all = yield* SubscriptionRef.get(records);
       if (all.some((item) => item.activity.id === id)) return;
-      for (const old of all)
-        if (
-          old.activity.host === input.host &&
-          old.activity.repository === input.repository &&
-          old.activity.branch === input.branch &&
-          !isCiActivityFinished(old.activity)
-        )
-          yield* update(old, {
-            state: "superseded",
-            label: "A newer push superseded this revision.",
-          });
       const now = yield* Clock.currentTimeMillis;
       yield* save({
         activity: {

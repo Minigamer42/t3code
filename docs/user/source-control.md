@@ -344,9 +344,10 @@ push actions. Pushes made before the server starts are not discovered retrospect
 Use **Refresh CI** to recheck visible pipelines after retrying jobs in GitLab. Failed or cancelled
 entries resume tracking if the pipeline is running again; recovery allowances are preserved.
 
-Successful activities disappear automatically. Failed, cancelled, and skipped activities remain until
-you dismiss them; dismissal applies across connected clients and persists across restarts. Running
-activities cannot be dismissed. A newer push supersedes unfinished tracking for the previous revision.
+Successful activities disappear automatically. A newer push to the same repository and branch
+replaces the previous revision's entry, including failed or cancelled CI. Older entries stay hidden
+after restarts. Failed, cancelled, and skipped activities can also be dismissed manually; dismissal
+applies across connected clients and persists across restarts. Running activities cannot be dismissed.
 
 An empty `{}` enables tracking only. Add project-owned recovery predicates for known transient
 failures:
